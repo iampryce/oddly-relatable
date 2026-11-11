@@ -1,0 +1,88 @@
+{
+ "task": "AP-76 pose 05 skin-only correction",
+ "method": "v3 method: colour-ratio plateau mask + per-channel gain from sampled values; alpha unchanged",
+ "source": "extracted\\canonical-character-01_05-pleading.png",
+ "output": "ap76-pose05-test\\character-01_pose-05-pleading_skin-only_test.png",
+ "size": [
+  273,
+  569
+ ],
+ "sha256_before": {
+  "src": "625e3faef6988e4108662dce27ec70e2fcb1c085f40d65b91ff43915e5f8d179",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sha256_after": {
+  "src": "625e3faef6988e4108662dce27ec70e2fcb1c085f40d65b91ff43915e5f8d179",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sources_unchanged": true,
+ "output_sha256": "f2dae957eaf4b28d7cbe71ad49bb3d527a2c607d4f8568c7123feb668324da71",
+ "source_seed_rgb": [
+  254,
+  228,
+  198
+ ],
+ "ratios": {
+  "gr0": 0.8976,
+  "br0": 0.2205
+ },
+ "skin_mean_rgb": {
+  "original": [
+   253.1,
+   226.9,
+   196.7
+  ],
+  "corrected": [
+   252.1,
+   221.9,
+   179.9
+  ],
+  "canonical_sampled": [
+   249.6,
+   217.9,
+   171.3
+  ],
+  "canonical_sampled_pixels": 2067,
+  "canonical_recorded": [
+   252,
+   222,
+   180
+  ],
+  "target_used": [
+   252,
+   222,
+   180
+  ],
+  "approved_v3_sampled": [
+   252.7,
+   221.4,
+   179.9
+  ],
+  "v3_pixels": 65097,
+  "interior_pixels_used": 15191
+ },
+ "gain": [
+  0.9958,
+  0.9783,
+  0.915
+ ],
+ "skin_mask_pixel_count": 17795,
+ "changed_pixels_inside_mask": 17762,
+ "changed_pixels_outside_mask": 0,
+ "max_delta_outside_mask": 0,
+ "alpha_pixels_changed": 0,
+ "near_white_pixels_checked": 5461,
+ "near_white_pixels_changed": 0,
+ "grey_pixels_checked": 792,
+ "grey_pixels_changed": 117,
+ "changed_row_range": [
+  16,
+  206
+ ],
+ "black_pixels_below_head": 11831,
+ "black_pixels_below_head_changed": 0,
+ "pink_mouth_pixels_checked": 0,
+ "pink_mouth_pixels_changed": 0
+}

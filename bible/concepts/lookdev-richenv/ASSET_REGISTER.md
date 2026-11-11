@@ -1,6 +1,6 @@
 # Asset register: Canonical Character 01 and canonical room
 
-Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evidence, keep) · **WORKING SOURCE** (conditionally approved, not final) · **ALTERNATIVE** (approved for a purpose, not canon) · **APPROVED WORKING CANDIDATE** (accepted by the owner as the current working version, not final) · **CANDIDATE** (awaiting owner's visual approval) · **EVIDENCE** (tests, drafts, defect history). **No asset is a final production master yet.** Hashes are SHA-256 (first 16 hex characters; full values in the READMEs and `correction-report.json`). Paths are relative to `bible/concepts/lookdev-richenv/`. Last updated 2026-11-11 (AP-75). Pose assessment: `POSE_LIBRARY_ASSESSMENT.md`. Management rules: `ASSET_MANAGEMENT.md` (AP-71).
+Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evidence, keep) · **WORKING SOURCE** (conditionally approved, not final) · **ALTERNATIVE** (approved for a purpose, not canon) · **APPROVED WORKING CANDIDATE** (accepted by the owner as the current working version, not final) · **CANDIDATE** (awaiting owner's visual approval) · **EVIDENCE** (tests, drafts, defect history). **No asset is a final production master yet.** Hashes are SHA-256 (first 16 hex characters; full values in the READMEs and `correction-report.json`). Paths are relative to `bible/concepts/lookdev-richenv/`. Last updated 2026-11-11 (AP-76). Pose assessment: `POSE_LIBRARY_ASSESSMENT.md`. Management rules: `ASSET_MANAGEMENT.md` (AP-71).
 
 | Asset | Path | Size | SHA-256 | Status |
 |---|---|---|---|---|
@@ -28,6 +28,8 @@ Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evi
 | AP-74 comparison evidence | `ap74-pose03-test/*.png`, `README.md` | | | EVIDENCE |
 | Pose 02 skin-only corrected (AP-75) | `ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png` (+ report, mask) | 270×571 | `ee921285d86a356d` | TEST (derived from `extracted/…02-worried-phone.png` `389d597b…`; 0 changed pixels outside the mask; awaiting review) |
 | AP-75 comparison evidence | `ap75-pose02-test/*.png`, `README.md` | | | EVIDENCE |
+| Pose 05 skin-only corrected (AP-76) | `ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png` (+ report, mask) | 273×569 | `f2dae957eaf4b28d` | TEST (derived from `extracted/…05-pleading.png` `625e3fae…`; 0 changed pixels outside the mask; awaiting review) |
+| AP-76 comparison evidence | `ap76-pose05-test/*.png`, `README.md` | | | EVIDENCE |
 | Extraction defect history | `extracted/_v1…_v4-*-defect/` | | | EVIDENCE |
 
 ## Rules

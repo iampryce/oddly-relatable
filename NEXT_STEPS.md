@@ -15,7 +15,9 @@
 ## 1b. Visual identity: LOCKED (nothing to decide)
 **The visual identity is permanently locked** to `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (AP-51 to AP-57). Both authorised technical tests are done and passed (strongly on-model character; near-identical empty room). **No alternatives will be proposed.**
 
-**AP-75 done: your visual review needed.** View `bible/concepts/lookdev-richenv/ap75-pose02-test/compare-sheet-1-full-figures.png` and `compare-sheet-2-closeups.png`. Approve or reject corrected pose 02; then choose the next pose (01, 04, 05 or 06) or move to producing the first real short. Pose 03 is approved as a working test asset.
+**AP-76 done: your visual review needed.** View `bible/concepts/lookdev-richenv/ap76-pose05-test/compare-sheet-1-full-figures.png` and `compare-sheet-2-closeups.png`; approve or reject corrected pose 05 (and pose 02 from AP-75). Draft script for the first short: `bible/episodes/short-001-we-need-to-talk/SCRIPT_DRAFT.md` (awaiting your approval).
+
+**(Earlier) AP-75 done: your visual review needed.** View `bible/concepts/lookdev-richenv/ap75-pose02-test/compare-sheet-1-full-figures.png` and `compare-sheet-2-closeups.png`. Approve or reject corrected pose 02; then choose the next pose (01, 04, 05 or 06) or move to producing the first real short. Pose 03 is approved as a working test asset.
 
 **(Done) AP-74: your visual review needed.** View `bible/concepts/lookdev-richenv/ap74-pose03-test/compare-sheet-1-full-figures.png`, `compare-sheet-2-closeups.png`, `compare-shot2-ap60-ap72-ap74.png`, `closeups-shot2-ap60-ap72-ap74.png` (attach them in your review chat). Decide: approve or reject corrected pose 03; whether to continue with other poses; and how to get sharper close-ups (higher-resolution poses need approval). No other pose will be corrected without your approval.
 

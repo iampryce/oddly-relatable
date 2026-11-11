@@ -96,6 +96,7 @@ Research confidence so far: YouTube Shorts length and disclosure rules were read
 | **AP-73** | **Existing pose library ASSESSED (2026-11-11), assessment only, no approval to create or promote assets:** `POSE_LIBRARY_ASSESSMENT.md`. Findings: sheet poses ~550 px tall; adequate for wide and limited medium shots; close-ups need higher-resolution poses; skin correction fits all six; hand correction per pose only; recommended next test pose 03 (shocked), skin-only first. Awaiting owner approval. |
 | **AP-74** | **Pose 03 skin-only correction and Shot 2 render test DONE as TEST/EVIDENCE (2026-11-11), awaiting owner visual review:** see `ap74-pose03-test/README.md`. 0 changed pixels outside the skin mask; hands, mouth, outline untouched; unmodified renderer. Colour closer to canon; no sharpness gain. No other pose corrected; nothing promoted; no status changes. |
 | **AP-75** | **Owner review of AP-74 (2026-11-11): corrected pose 03 APPROVED as a successful working TEST asset** (skin even and closer to canon/v3; shocked expression, pink mouth, ears and linework preserved); **splayed hands approved and to be kept exactly as they are**; the sweater colour difference vs v3 is noticed and deliberately left unchanged. **Pose 02 approved as the next controlled test** (skin-only; no hand or phone change; no sweater/shoe change; zero changed pixels outside the mask; no render). **Pose 02 DONE as TEST (awaiting review):** `ap75-pose02-test/`, 0 changed pixels outside the mask. Remaining poses await review. Final production master: not approved. |
+| **AP-76** | **Pose 05 (pleading) skin-only correction DONE as TEST (2026-11-11), on the owner's instruction, awaiting visual review:** `ap76-pose05-test/`; 0 changed pixels outside the mask; clasped hands, expression, linework, sweater and shoes unchanged; no render. No other pose touched; nothing promoted; no status changes. |
 
 **Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
 
@@ -237,6 +238,7 @@ Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which
 
 | Date | Change |
 |---|---|
+| 2026-11-11 (AP-76) | Pose 05 skin-only correction produced as TEST; no render; nothing else changed. |
 | 2026-11-11 (AP-75) | Pose 03 approved as a working test asset; pose 02 skin-only correction produced as TEST; no render; nothing else changed. |
 | 2026-11-11 (AP-74) | Pose 03 corrected (skin only) and rendered as a single-shot test; TEST/EVIDENCE only; no promotion. |
 | 2026-11-11 (AP-73) | Six-pose library assessed; recommendation recorded; no extraction or correction performed; no statuses changed. |

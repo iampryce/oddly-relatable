@@ -1,0 +1,4 @@
+36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016 *bible/concepts/lookdev-richenv/lookdev-scene-01.png
+36e8cef3f3149786eb82cf00aa03df9c29d1a5f8ffad9efbbfbacd5928f3c137 *bible/concepts/lookdev-richenv/lookdev-character-test-02.png
+d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51 *bible/concepts/lookdev-richenv/production-candidates/corrected/candidate-04_corrected-v3.png
+625e3faef6988e4108662dce27ec70e2fcb1c085f40d65b91ff43915e5f8d179 *bible/concepts/lookdev-richenv/extracted/canonical-character-01_05-pleading.png

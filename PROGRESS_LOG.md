@@ -257,3 +257,9 @@ Chronological, newest last. Each entry records what was done, by which agent and
 ## 2026-11-11 · AP-75: pose 02 skin-only correction
 - AP-75 DONE as TEST/EVIDENCE (awaiting owner visual review; NOT rendered): skin-only correction of pose 02 (worried, phone): `bible/concepts/lookdev-richenv/ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png` (SHA-256 ee921285d86a356d…; source extract 389d597b… unchanged). Skin mean (253.1,226.8,196.3) to (252.1,221.8,180.1) vs canon (252,222,180); mask 15,073 px; changed inside 15,014, OUTSIDE 0; phone, both hands, mouth, eye whites and alpha unchanged. Comparison sheets in the same folder. Owner approved pose 03 (AP-74) as a successful working test asset and said to keep its splayed hands exactly; sweater/shoe differences stay by decision. No render, no other pose, nothing promoted.
 - **Tools:** Node + sharp; scripts `bible/concepts/src/ap75-pose02-skin.cjs`, `ap75-compare.cjs`.
+
+---
+
+## 2026-11-11 · AP-76: pose 05 skin-only correction
+- AP-76 DONE as TEST/EVIDENCE (awaiting owner visual review; NOT rendered): skin-only correction of pose 05 (pleading): `bible/concepts/lookdev-richenv/ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png` (SHA-256 f2dae957eaf4b28d…; source extract 625e3fae… unchanged). Skin mean (253.1,226.9,196.7) to (252.1,221.9,179.9) vs canon (252,222,180), consistent with AP-74/AP-75; mask 17,795 px; changed inside 17,762, OUTSIDE 0; alpha, clasped hands, all near-black linework (22,451 px), eye whites, sweater and shoes unchanged. Comparison sheets in the same folder. No render, no other pose, nothing promoted. Pose 02 (AP-75) status unchanged: TEST awaiting review.
+- **Tools:** Node + sharp; scripts `bible/concepts/src/ap76-pose05-skin.cjs`, `ap76-compare.cjs`.
