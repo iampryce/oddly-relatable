@@ -1,0 +1,14 @@
+{
+ "renderer": "skills/directing-stickman-videos/scripts/autopilot.mjs preview (unmodified)",
+ "output_sha256": "2c14b7a1f31104aa314738e130d58aaac381dbb610030124f16a9b689eb901eb",
+ "frames": 1620,
+ "duration": 54,
+ "full_decode": "pass",
+ "caption_count": 1,
+ "shot_count": 1,
+ "human_review": "required; technical checks are not acceptance",
+ "resolution": "1080x1920",
+ "fps": 30,
+ "render_wall_seconds": 139,
+ "note": "Technical compatibility test only; not production-approved."
+}

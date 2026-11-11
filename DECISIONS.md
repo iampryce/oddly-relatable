@@ -97,6 +97,8 @@ Research confidence so far: YouTube Shorts length and disclosure rules were read
 | **AP-74** | **Pose 03 skin-only correction and Shot 2 render test DONE as TEST/EVIDENCE (2026-11-11), awaiting owner visual review:** see `ap74-pose03-test/README.md`. 0 changed pixels outside the skin mask; hands, mouth, outline untouched; unmodified renderer. Colour closer to canon; no sharpness gain. No other pose corrected; nothing promoted; no status changes. |
 | **AP-75** | **Owner review of AP-74 (2026-11-11): corrected pose 03 APPROVED as a successful working TEST asset** (skin even and closer to canon/v3; shocked expression, pink mouth, ears and linework preserved); **splayed hands approved and to be kept exactly as they are**; the sweater colour difference vs v3 is noticed and deliberately left unchanged. **Pose 02 approved as the next controlled test** (skin-only; no hand or phone change; no sweater/shoe change; zero changed pixels outside the mask; no render). **Pose 02 DONE as TEST (awaiting review):** `ap75-pose02-test/`, 0 changed pixels outside the mask. Remaining poses await review. Final production master: not approved. |
 | **AP-76** | **Pose 05 (pleading) skin-only correction DONE as TEST (2026-11-11), on the owner's instruction, awaiting visual review:** `ap76-pose05-test/`; 0 changed pixels outside the mask; clasped hands, expression, linework, sweater and shoes unchanged; no render. No other pose touched; nothing promoted; no status changes. |
+| **AP-77** | **Short 001 rewritten as a two-sided text conversation (2026-11-11):** `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (v1 kept). Wife off screen as messages; poses 02/03/05/06. Owner direction: hook expected to change to "Four words. No warning." (script file not yet edited). Script not yet committed or finally approved. |
+| **AP-78** | **Production toolkit built (2026-11-12), awaiting owner review:** `production/` (see README). Renderer untouched; no new dependencies; no artwork changes; Short 001 v2 used as a technical test fixture only. |
 
 **Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
 
@@ -238,6 +240,7 @@ Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which
 
 | Date | Change |
 |---|---|
+| 2026-11-12 (AP-78) | Conversation-short production toolkit added in `production/`; renderer unchanged; Short 001 v2 compatibility test passes; not production-approved. |
 | 2026-11-11 (AP-76) | Pose 05 skin-only correction produced as TEST; no render; nothing else changed. |
 | 2026-11-11 (AP-75) | Pose 03 approved as a working test asset; pose 02 skin-only correction produced as TEST; no render; nothing else changed. |
 | 2026-11-11 (AP-74) | Pose 03 corrected (skin only) and rendered as a single-shot test; TEST/EVIDENCE only; no promotion. |

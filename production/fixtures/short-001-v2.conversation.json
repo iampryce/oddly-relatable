@@ -1,0 +1,48 @@
+{
+  "schema": "oddly-relatable/conversation-episode@1",
+  "id": "short-001-v2-compat-test",
+  "title": "We Need to Talk",
+  "_note": "TEST FIXTURE for AP-78 technical compatibility only, transcribed from bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md (that file is unchanged). The hook uses the expected revision 'Four words. No warning.'; SCRIPT_V2.md still says 'Four words. No emoji.' until the owner updates it. Not production-approved.",
+  "format": {"width": 1080, "height": 1920, "fps": 30},
+  "background": {"path": "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png"},
+  "character": {
+    "registry": "production/characters/character-01.json",
+    "placement": {"feetX": 640, "feetY": 2070, "figureHeight": 880}
+  },
+  "header": {"label": "Wife", "icon": "heart"},
+  "speakers": {
+    "her": {"side": "left", "style": "her"},
+    "him": {"side": "right", "style": "him"}
+  },
+  "hook": {"text": "Four words. No warning.", "start": 0, "duration": 3},
+  "events": [
+    {"type": "message", "speaker": "her", "text": "We need to talk.", "duration": 3.0, "pose": "02", "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Is everything ok?", "duration": 3.0, "sfx": "pop"},
+    {"type": "typing", "speaker": "her", "duration": 3.0, "visible": 2.4},
+    {"type": "message", "speaker": "him", "text": "WHY DID THE DOTS STOP", "duration": 2.5, "pose": "03", "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "Tonight.", "duration": 2.5, "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Is this about the dishwasher? I can explain the dishwasher.", "duration": 3.5, "pose": "05", "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "What about the dishwasher?", "duration": 2.5, "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Nothing. The dishwasher is fine.", "duration": 3.0, "pose": "03", "sfx": "pop"},
+    {"type": "message", "speaker": "him", "text": "Unrelated question. How do you feel about the shelf.", "duration": 3.0, "pose": "05", "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "The one you said you'd fix in March?", "duration": 2.5, "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Define March.", "duration": 2.0, "pose": "03", "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "Focus. It's about my mother.", "duration": 3.0, "pose": "02", "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Is she ok??", "duration": 2.5, "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "She's fine. She's staying with us.", "duration": 3.0, "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "For the weekend?", "duration": 2.0, "sfx": "pop"},
+    {"type": "typing", "speaker": "her", "duration": 2.5},
+    {"type": "message", "speaker": "her", "text": "For a month.", "duration": 2.0, "pose": "03", "sfx": "chime"},
+    {"type": "message", "speaker": "him", "text": "Can we go back to the dishwasher?", "duration": 2.5, "pose": "06", "sfx": "pop"},
+    {"type": "message", "speaker": "her", "text": "What did you do to the dishwasher.", "duration": 3.0, "sfx": "chime"}
+  ],
+  "endCard": {
+    "duration": 3,
+    "lines": [
+      {"text": "We Need to Talk", "size": 92, "weight": 800},
+      {"text": "Oddly Relatable", "size": 54, "weight": 700, "color": "#BC4C15"}
+    ],
+    "background": {"type": "solid", "color": "#2A1D16"},
+    "caption": "Oddly Relatable"
+  }
+}

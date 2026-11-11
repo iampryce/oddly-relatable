@@ -263,3 +263,10 @@ Chronological, newest last. Each entry records what was done, by which agent and
 ## 2026-11-11 · AP-76: pose 05 skin-only correction
 - AP-76 DONE as TEST/EVIDENCE (awaiting owner visual review; NOT rendered): skin-only correction of pose 05 (pleading): `bible/concepts/lookdev-richenv/ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png` (SHA-256 f2dae957eaf4b28d…; source extract 625e3fae… unchanged). Skin mean (253.1,226.9,196.7) to (252.1,221.9,179.9) vs canon (252,222,180), consistent with AP-74/AP-75; mask 17,795 px; changed inside 17,762, OUTSIDE 0; alpha, clasped hands, all near-black linework (22,451 px), eye whites, sweater and shoes unchanged. Comparison sheets in the same folder. No render, no other pose, nothing promoted. Pose 02 (AP-75) status unchanged: TEST awaiting review.
 - **Tools:** Node + sharp; scripts `bible/concepts/src/ap76-pose05-skin.cjs`, `ap76-compare.cjs`.
+
+---
+
+## 2026-11-12 · AP-78: production toolkit
+- AP-78 DONE (awaiting owner review): reusable conversation-short production toolkit in `production/` (conversation data and sequencing, message bubbles, typing indicator, hook and end card, character reaction composition, chat-stack layout with safety checks, renderer-exact storyboard preview, CLI). No renderer change (scripts byte-identical; renderer suite unchanged at 132/135 with the same 2 pre-existing environment failures and 1 skip); no new dependencies; no artwork created or edited; no image generation. 35 new tests pass. Short 001 v2 test fixture (`production/fixtures/short-001-v2.conversation.json`, hook "Four words. No warning."; SCRIPT_V2.md unchanged) compiles, validates in the renderer and renders a 54 s 1080x1920 30 fps preview (decode pass); evidence in `production/evidence/ap78/`. Technical compatibility only, not production approval.
+- **Tools:** Node, the renderer's existing @napi-rs/canvas and fonts, the unmodified renderer (validate, preview, painter), ffmpeg.
+- **Fixes made during the build:** the end card got a light caption band because the renderer draws B1 captions as dark text.

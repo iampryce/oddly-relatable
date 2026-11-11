@@ -1,0 +1,12 @@
+{
+  "character": "character-01",
+  "note": "Pose registry: points at EXISTING files only (never edited by the toolkit). Feet anchors are from bible/concepts/lookdev-richenv/extracted/manifest.json (AP-58); figure heights (opaque height in pixels) were measured in AP-73. Corrected files are pixel-aligned with their extracted originals, so the same anchors apply. Status mirrors ASSET_REGISTER.md; changing a status needs the owner's approval there, not here.",
+  "poses": {
+    "01": {"name": "neutral", "file": "bible/concepts/lookdev-richenv/extracted/canonical-character-01_01-neutral.png", "feet": {"x": 135, "y": 561}, "figureHeight": 551, "status": "APPROVED extract (AP-58), uncorrected skin"},
+    "02": {"name": "worried-phone", "file": "bible/concepts/lookdev-richenv/ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png", "feet": {"x": 102, "y": 560}, "figureHeight": 549, "status": "TEST (AP-75), skin-corrected, awaiting owner review"},
+    "03": {"name": "shocked-frozen", "file": "bible/concepts/lookdev-richenv/ap74-pose03-test/character-01_pose-03-shocked_skin-only_test.png", "feet": {"x": 139, "y": 585}, "figureHeight": 575, "status": "APPROVED TEST ASSET (AP-74/75), skin-corrected"},
+    "04": {"name": "laughing", "file": "bible/concepts/lookdev-richenv/extracted/canonical-character-01_04-laughing.png", "feet": {"x": 175, "y": 569}, "figureHeight": 559, "status": "APPROVED extract (AP-58), uncorrected skin"},
+    "05": {"name": "pleading", "file": "bible/concepts/lookdev-richenv/ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png", "feet": {"x": 130, "y": 558}, "figureHeight": 549, "status": "TEST (AP-76), skin-corrected, awaiting owner review"},
+    "06": {"name": "deadpan-arms-crossed", "file": "bible/concepts/lookdev-richenv/extracted/canonical-character-01_06-deadpan-arms-crossed.png", "feet": {"x": 134, "y": 580}, "figureHeight": 569, "status": "APPROVED extract (AP-58), uncorrected skin (skin-only correction not yet done)"}
+  }
+}

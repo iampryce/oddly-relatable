@@ -33,3 +33,6 @@ studio-work/**/output/cache/
 studio-work/**/output/frames/
 # handoff-AP74/evidence duplicates bible/concepts/lookdev-richenv evidence
 handoff-AP74/evidence/
+
+# AP-78 toolkit build output (reproducible with: node production/cli.mjs build ...); evidence is kept in production/evidence/ap78/
+studio-work/short-001-v2-compat-test/
