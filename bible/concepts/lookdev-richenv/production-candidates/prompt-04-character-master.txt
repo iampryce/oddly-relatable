@@ -1,0 +1,13 @@
+[Attached reference images: ./reference-canonical.png (the protected canonical image, master character shown in the room), ./reference-character-sheet.png (the approved six-pose consistency sheet), ./reference-pose-neutral.png and ./reference-pose-worried.png (extracted transparent poses of the same character).]
+
+You are generating exactly ONE image with your built-in image generation tool, at the highest native resolution it supports (target at least 2048 pixels on the long edge).
+
+Create a clean, production-quality CHARACTER MASTER of Canonical Character 01: ONE full-body figure, standing in a neutral pose, front-on, arms relaxed at the sides, calm neutral expression, FULL BODY VISIBLE including both feet with generous empty margin around the whole figure.
+
+Do NOT redesign anything. Preserve EXACTLY: the cream-coloured bald round head with small ears; the existing face proportions; the large white oval eyes with dark pupils; the thick expressive eyebrows; the small mouth design; the rust-orange ribbed knit turtleneck with the simple tapered torso and ribbed hem; the thin black arms and legs; the small rounded black mitt hands (rounded, not spread fingers); the brown rounded shoes; the bold, clean, consistent black outline (use the outline weight of the canonical image, not thinner); the cream skin tone of the canonical image (not lighter or peachier); flat 2D colour with NO shading, NO gradients and NO shadows.
+
+Background: one perfectly plain, flat, uniform light grey (#D1D1D1) fill, no floor, no shadow, no room, no props, no texture, no gradient, so the figure can be cleanly segmented. Crisp, clean edges.
+
+HARD RULES: only this one character; no text, no labels, no logos, no watermarks; do not add new design elements; do not imitate any other character or artist.
+
+When done: copy the final image to ./production-candidate-04-character-master.png in the current directory and tell me the exact path where the generated file was originally saved and the pixel dimensions. Generate exactly one image; do not retry and do not generate variants.

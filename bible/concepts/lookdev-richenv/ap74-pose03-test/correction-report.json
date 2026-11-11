@@ -1,0 +1,78 @@
+{
+ "task": "AP-74 pose 03 skin-only correction",
+ "method": "v3 method: colour-ratio plateau mask + per-channel gain from sampled values; alpha unchanged",
+ "source": "extracted\\canonical-character-01_03-shocked-frozen.png",
+ "output": "ap74-pose03-test\\character-01_pose-03-shocked_skin-only_test.png",
+ "size": [
+  274,
+  596
+ ],
+ "sha256_before": {
+  "src": "fabe6f7ad495e293f329428518e71fe6947b6d8c0edcad9ad0cb9c18c9f69fd5",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sha256_after": {
+  "src": "fabe6f7ad495e293f329428518e71fe6947b6d8c0edcad9ad0cb9c18c9f69fd5",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sources_unchanged": true,
+ "output_sha256": "477f8e713d6358fdd1bbc40d56ff258f83f96f252126e33d6e7a82da3c3d963f",
+ "source_seed_rgb": [
+  254,
+  228,
+  198
+ ],
+ "ratios": {
+  "gr0": 0.8976,
+  "br0": 0.2205
+ },
+ "skin_mean_rgb": {
+  "original": [
+   252.8,
+   226.7,
+   196.5
+  ],
+  "corrected": [
+   251.8,
+   221.7,
+   180
+  ],
+  "canonical_sampled": [
+   249.6,
+   217.9,
+   171.3
+  ],
+  "canonical_sampled_pixels": 2067,
+  "canonical_recorded": [
+   252,
+   222,
+   180
+  ],
+  "target_used": [
+   252,
+   222,
+   180
+  ],
+  "approved_v3_sampled": [
+   252.7,
+   221.4,
+   179.9
+  ],
+  "v3_pixels": 65097,
+  "interior_pixels_used": 14464
+ },
+ "gain": [
+  0.9969,
+  0.9793,
+  0.9161
+ ],
+ "skin_mask_pixel_count": 17369,
+ "changed_pixels_inside_mask": 17323,
+ "changed_pixels_outside_mask": 0,
+ "max_delta_outside_mask": 0,
+ "alpha_pixels_changed": 0,
+ "pink_mouth_pixels_checked": 768,
+ "pink_mouth_pixels_changed": 0
+}

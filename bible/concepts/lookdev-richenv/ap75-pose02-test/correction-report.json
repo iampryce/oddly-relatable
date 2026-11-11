@@ -1,0 +1,93 @@
+{
+ "task": "AP-75 pose 02 skin-only correction",
+ "method": "v3 method: colour-ratio plateau mask + per-channel gain from sampled values; alpha unchanged",
+ "source": "extracted\\canonical-character-01_02-worried-phone.png",
+ "output": "ap75-pose02-test\\character-01_pose-02-worried-phone_skin-only_test.png",
+ "size": [
+  270,
+  571
+ ],
+ "sha256_before": {
+  "src": "389d597bca7e37afa346a393b2d366ef9c5917ea345295123b90cb2ed20fe10b",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sha256_after": {
+  "src": "389d597bca7e37afa346a393b2d366ef9c5917ea345295123b90cb2ed20fe10b",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sources_unchanged": true,
+ "output_sha256": "ee921285d86a356dfd9e7bb5e316a284384dc54b7f23745738eb046ea5584e26",
+ "source_seed_rgb": [
+  254,
+  227,
+  196
+ ],
+ "ratios": {
+  "gr0": 0.8937,
+  "br0": 0.2283
+ },
+ "skin_mean_rgb": {
+  "original": [
+   253.1,
+   226.8,
+   196.3
+  ],
+  "corrected": [
+   252.1,
+   221.8,
+   180.1
+  ],
+  "canonical_sampled": [
+   249.6,
+   217.9,
+   171.3
+  ],
+  "canonical_sampled_pixels": 2067,
+  "canonical_recorded": [
+   252,
+   222,
+   180
+  ],
+  "target_used": [
+   252,
+   222,
+   180
+  ],
+  "approved_v3_sampled": [
+   252.7,
+   221.4,
+   179.9
+  ],
+  "v3_pixels": 65097,
+  "interior_pixels_used": 12471
+ },
+ "gain": [
+  0.9957,
+  0.9789,
+  0.9169
+ ],
+ "skin_mask_pixel_count": 15073,
+ "changed_pixels_inside_mask": 15014,
+ "changed_pixels_outside_mask": 0,
+ "max_delta_outside_mask": 0,
+ "alpha_pixels_changed": 0,
+ "near_white_pixels_checked": 5084,
+ "near_white_pixels_changed": 0,
+ "grey_pixels_checked": 2892,
+ "grey_pixels_changed": 114,
+ "pink_mouth_pixels_checked": 434,
+ "pink_mouth_pixels_changed": 0,
+ "post_check": {
+  "phone_bluish_grey_pixels": 2161,
+  "phone_pixels_changed": 0,
+  "changed_row_range_in_file": [
+   16,
+   197
+  ],
+  "black_pixels_below_head": 11048,
+  "black_pixels_below_head_changed": 0,
+  "note": "grey-class pixels changed inside the mask are dark skin-to-outline blends, not the phone"
+ }
+}

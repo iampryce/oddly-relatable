@@ -1,0 +1,13 @@
+[Attached reference image: the canonical image, as ./reference-canonical.png, a byte-identical copy of lookdev-scene-01.png]
+
+You are generating exactly ONE image with your built-in image generation tool.
+
+The attached reference image (./reference-canonical.png) is our approved master illustration. This is a technical ENVIRONMENT CONSISTENCY TEST. Do NOT redesign anything.
+
+Recreate the SAME living room, exactly: the same vertical 9:16 portrait composition and camera angle, the same three-quarter perspective, the same layout, the same furniture and objects (green velvet armchair with the throw and patterned cushion, the tall wooden bookshelf packed with books and small objects with the trailing plant, the floor lamp, the rain-streaked window with teal curtains, the framed pictures on the wall, the record player on the wooden credenza with the vase of berries, the patterned rug, the foreground coffee table with books, mug and the cropped plant at the bottom-left), the same colours, the same warm cinematic evening lighting, the same painterly illustrated 2D style and the same level of detail.
+
+THE ONLY CHANGE: remove the character completely. There must be NO person, NO character, NO figure and NO phone anywhere. The floor, rug and the lower part of the bookshelf where he stood must show the empty room naturally (rug pattern and wooden floor continuing, bookshelf books continuing), with no marks or shadows left behind. Also remove the small motion/alert lines that were next to his head.
+
+HARD RULES: keep everything else identical in layout, style and quality; no text, no letters, no logos, no watermarks; do not add anything new; do not imitate any other artist.
+
+When done: copy the final image to ./lookdev-room-empty-03.png in the current directory and tell me the exact path where the generated file was originally saved. Generate exactly one image; do not retry and do not generate variants.

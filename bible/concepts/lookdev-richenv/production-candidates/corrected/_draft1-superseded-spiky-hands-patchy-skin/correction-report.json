@@ -1,0 +1,42 @@
+{
+ "source_sha256_before": "ca0148b03a7aa59d08cabef6e4c8451407b0723829f039a112e66c478dcbf99b",
+ "source_sha256_after": "ca0148b03a7aa59d08cabef6e4c8451407b0723829f039a112e66c478dcbf99b",
+ "source_unchanged": true,
+ "gain": [
+  0.996,
+  0.9569,
+  0.878
+ ],
+ "backgroundFill": [
+  203,
+  202,
+  202
+ ],
+ "skin_interior_mean": {
+  "before": [
+   253,
+   232,
+   205
+  ],
+  "after": [
+   252,
+   222,
+   180
+  ],
+  "canon": [
+   252,
+   222,
+   180
+  ],
+  "skinPixelsUsed": 2591
+ },
+ "changed_pixels_outside_masks": 0,
+ "max_delta_outside": 0,
+ "changed_in_skin_mask": 72825,
+ "changed_in_hand_zone": 13138,
+ "outputs": {
+  "candidate-04_corrected-skin-only.png": "1d4facc37109938a4cf277f26cd59cc193f2be2df3ae49bb70f1aa1aeb73ad9d",
+  "candidate-04_corrected-hands-only.png": "c53f084476e34dc8317dd3f8e11cf892eaf2746d194001bd4ab937dd93bd1eac",
+  "candidate-04_corrected-v1.png": "3c4713ca6da22c17576985d91b6020df4e56dae5b37982391c7161b47fccedc6"
+ }
+}

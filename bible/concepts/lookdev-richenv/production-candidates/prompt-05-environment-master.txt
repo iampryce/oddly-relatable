@@ -1,0 +1,11 @@
+[Attached reference images: ./reference-canonical.png (the protected canonical image) and ./reference-empty-room.png (the approved empty-room test of the same room).]
+
+You are generating exactly ONE image with your built-in image generation tool, at the highest native resolution it supports, vertical 9:16 portrait (target at least 2048 pixels on the long edge, e.g. 1152x2048 or larger).
+
+Produce a clean, high-resolution EMPTY-ROOM PLATE of the SAME living room. Do NOT redesign anything. Follow ./reference-empty-room.png closely: the same vertical 9:16 composition and camera angle, the same three-quarter perspective, the same layout, furniture and objects (green velvet armchair with the throw and patterned cushion, the tall wooden bookshelf packed with books and small objects with the trailing plant, the floor lamp, the rain-streaked window with teal curtains, the framed pictures on the wall, the record player on the wooden credenza with the vase of berries, the patterned rug, the foreground coffee table with books, mug and the cropped plant at the bottom-left), the same colours, the same warm cinematic evening lighting, atmosphere, painterly illustrated 2D style and level of detail, but with crisper, finer detail at the higher resolution.
+
+There must be NO person, NO character, NO figure and NO phone anywhere, and no alert lines. The floor and rug where the character stood must be empty and natural.
+
+HARD RULES: no unnecessary changes to the composition; no alternative room design; no text, no letters, no logos, no watermarks; do not add anything new; do not imitate any other artist.
+
+When done: copy the final image to ./production-candidate-05-environment-master.png in the current directory and tell me the exact path where the generated file was originally saved and the pixel dimensions. Generate exactly one image; do not retry and do not generate variants.

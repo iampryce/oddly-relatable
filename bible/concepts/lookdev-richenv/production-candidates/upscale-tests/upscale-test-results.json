@@ -1,0 +1,121 @@
+{
+ "groundTruth": {
+  "char04": {
+   "nearest": {
+    "MAE": 1.32,
+    "PSNR": 30.38,
+    "edgeMAE": 39,
+    "ms": 90
+   },
+   "linear": {
+    "MAE": 1.52,
+    "PSNR": 29.73,
+    "edgeMAE": 28.24,
+    "ms": 111
+   },
+   "cubic": {
+    "MAE": 1.5,
+    "PSNR": 30.01,
+    "edgeMAE": 26.17,
+    "ms": 112
+   },
+   "nohalo": {
+    "MAE": 1.1,
+    "PSNR": 34.03,
+    "edgeMAE": 25.24,
+    "ms": 620
+   },
+   "lbb": {
+    "MAE": 1.13,
+    "PSNR": 33.73,
+    "edgeMAE": 26.76,
+    "ms": 350
+   },
+   "cubic+unsharp": {
+    "MAE": 1.54,
+    "PSNR": 29.84,
+    "edgeMAE": 28.96,
+    "ms": 320
+   },
+   "cubic+shock1": {
+    "MAE": 1.47,
+    "PSNR": 27.79,
+    "edgeMAE": 43.01,
+    "ms": 225
+   },
+   "cubic+shock2": {
+    "MAE": 1.51,
+    "PSNR": 27.2,
+    "edgeMAE": 46.09,
+    "ms": 429
+   }
+  },
+  "room05": {
+   "nearest": {
+    "MAE": 4.48,
+    "PSNR": 29.03,
+    "edgeMAE": 20.78,
+    "ms": 234
+   },
+   "linear": {
+    "MAE": 4.91,
+    "PSNR": 28.3,
+    "edgeMAE": 16.8,
+    "ms": 106
+   },
+   "cubic": {
+    "MAE": 4.84,
+    "PSNR": 28.5,
+    "edgeMAE": 15.87,
+    "ms": 106
+   },
+   "nohalo": {
+    "MAE": 3.79,
+    "PSNR": 30.76,
+    "edgeMAE": 16.92,
+    "ms": 650
+   },
+   "lbb": {
+    "MAE": 3.82,
+    "PSNR": 30.66,
+    "edgeMAE": 17.24,
+    "ms": 411
+   },
+   "cubic+unsharp": {
+    "MAE": 4.97,
+    "PSNR": 28.3,
+    "edgeMAE": 16.51,
+    "ms": 450
+   },
+   "cubic+shock1": {
+    "MAE": 4.84,
+    "PSNR": 28.5,
+    "edgeMAE": 15.89,
+    "ms": 258
+   },
+   "cubic+shock2": {
+    "MAE": 4.84,
+    "PSNR": 28.49,
+    "edgeMAE": 15.89,
+    "ms": 228
+   }
+  }
+ },
+ "timing2x": {
+  "char04_cubic_ms": 245,
+  "char04_shock1_ms": 157,
+  "room05_nohalo_ms": 2784
+ },
+ "tiling": {
+  "tilesGrid": "2x3",
+  "overlapPx": 64,
+  "meanAbsDiffTiledVsWhole": 0,
+  "maxAbsDiff": 0
+ },
+ "sizes": {
+  "char04_2x_cubic": "2048x3072",
+  "char04_2x_cubic_shock1": "2048x3072",
+  "room05_2x_nohalo": "1882x3344",
+  "room05_2x_cubic": "1882x3344"
+ }
+}

@@ -1,0 +1,19 @@
+[Attached reference image: the canonical image, as ./reference-canonical.png, a byte-identical copy of lookdev-scene-01.png]
+
+You are generating exactly ONE image with your built-in image generation tool.
+
+The attached reference image (./reference-canonical.png) contains our approved master character. This is a technical CHARACTER CONSISTENCY TEST. Do NOT redesign anything.
+
+Draw the SAME character, preserving EXACTLY: the cream-coloured bald round head with small ears; the existing face proportions; the large white oval eyes with dark pupils; the thick eyebrows; the small mouth design; the rust-orange knit turtleneck with the simple tapered torso; the thin black arms and legs; the small rounded black hands; the brown shoes; the bold, clean black outline weight; the flat 2D style with NO shading; and the overall body proportions.
+
+Create ONE character sheet on a plain, flat, light grey background (no room, no props, no shadows, no gradient), arranged as a clean 3 columns by 2 rows grid, with generous spacing so each figure could be cut out. Show the full body of the same character in six different poses and expressions:
+1. Neutral, standing front-on, arms relaxed.
+2. Worried, reading a phone held in one hand (as in the reference).
+3. Shocked and frozen: eyes very wide, eyebrows raised high, mouth open, body stiff and upright.
+4. Laughing hard: eyes squeezed into arcs, mouth wide open, leaning back slightly.
+5. Pleading: hands clasped at the chest, eyebrows tilted up in the middle, anxious wobbly mouth, slightly bent knees.
+6. Deadpan and unimpressed: half-lidded eyes, one eyebrow raised, flat mouth, arms crossed.
+
+HARD RULES: the same character in every cell, with identical outline thickness, colours and proportions; no text, no labels, no numbers, no logos, no watermarks; no extra characters; do not imitate any other character or artist; do not add new design elements.
+
+When done: copy the final image to ./lookdev-character-test-02.png in the current directory and tell me the exact path where the generated file was originally saved. Generate exactly one image; do not retry and do not generate variants.

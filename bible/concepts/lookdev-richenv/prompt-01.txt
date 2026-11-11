@@ -1,0 +1,13 @@
+You are generating exactly ONE image with your built-in image generation tool.
+
+Create ONE vertical 9:16 portrait illustration (target 1080x1920) for a short-form animated comedy series.
+
+ENVIRONMENT (richly illustrated, the main visual appeal): a warm, cozy mid-century-style living room seen in strong three-quarter perspective with clear layered depth (foreground, middle ground, background). Include a deep green velvet armchair, a wooden bookshelf packed with books and small objects, a record player on a low wooden credenza, trailing houseplants, a warm floor lamp, a patterned rug, a rain-streaked window with soft blue evening light, and a few framed pictures. Subtle painterly texture, soft warm lighting, gentle shadows and ambient occlusion, a muted warm palette with teal and rust accents. Part of a coffee table and a plant should be cropped at the frame edges in the foreground to create depth.
+
+CHARACTER (simple, flat 2D, exactly one): a stick-figure man standing near the bookshelf. Round cream-white bald head with small ears, very large expressive eyes (white ovals with dark pupils) under thick expressive eyebrows, a small worried mouth. He wears a rust-orange knit turtleneck with a simple tapered torso. Thin black arms and legs, small rounded black hands, brown shoes. He holds a phone in one hand and reads it with alarm. The character is clean and flat with bold outlines and NO shading, while the environment is detailed and dimensional.
+
+COMPOSITION: leave calm space near the top for a title and near the bottom for captions. The character should be clearly readable and about one third of the frame height.
+
+HARD RULES: no text, no letters, no logos, no watermarks, no real brands, no religious or political symbols, no other people or animals. Do not imitate any specific artist, studio, YouTube, TikTok or Instagram creator, or any existing character. This is an original design.
+
+When done: copy the final image to ./lookdev-scene-01.png in the current directory and tell me the exact path where the generated file was originally saved. Generate exactly one image; do not retry and do not generate variants.

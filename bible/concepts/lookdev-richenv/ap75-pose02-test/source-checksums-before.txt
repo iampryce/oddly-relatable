@@ -1,0 +1,4 @@
+36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016 *bible/concepts/lookdev-richenv/lookdev-scene-01.png
+36e8cef3f3149786eb82cf00aa03df9c29d1a5f8ffad9efbbfbacd5928f3c137 *bible/concepts/lookdev-richenv/lookdev-character-test-02.png
+d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51 *bible/concepts/lookdev-richenv/production-candidates/corrected/candidate-04_corrected-v3.png
+389d597bca7e37afa346a393b2d366ef9c5917ea345295123b90cb2ed20fe10b *bible/concepts/lookdev-richenv/extracted/canonical-character-01_02-worried-phone.png

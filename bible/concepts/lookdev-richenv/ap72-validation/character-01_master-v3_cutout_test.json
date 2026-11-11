@@ -1,0 +1,21 @@
+{
+ "source": "production-candidates\\corrected\\candidate-04_corrected-v3.png",
+ "source_sha256_before": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+ "source_sha256_after": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+ "source_unchanged": true,
+ "output": "ap72-validation\\character-01_master-v3_cutout_test.png",
+ "output_sha256": "dd0f393972ff7610adfdc1e5625697724bca53caa4f0b3275654fed91940154a",
+ "crop": {
+  "x0": 244,
+  "y0": 116,
+  "w": 535,
+  "h": 1293
+ },
+ "feet_anchor": {
+  "x": 268,
+  "y": 1282
+ },
+ "bg_lum": 202.99999999999997,
+ "enclosed_pockets_removed": 0,
+ "method": "border flood fill + enclosed pocket removal + black-over-grey edge unmix; no redrawing"
+}
