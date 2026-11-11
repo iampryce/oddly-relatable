@@ -1,0 +1,42 @@
+{
+  "fingerprint": "7501e35317baea04401f712027079c11d345ae55e06ebae5f9cfe86b90e946a6",
+  "preview_seconds": 8,
+  "output": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-v3-ap72\\output\\preview.mp4",
+  "output_sha256": "758392a7a35f5c0c0fbd3af34238724c758053b9dfc9e2cd369062746d31d327",
+  "original_voice_sha256": "ff6f3ca38f4c6d78430916b3023d649ce7d91cd1ef6034e2fdaa3658ced27f45",
+  "original_voice_duration": 8,
+  "voice_rate": "unchanged; leading/trailing padding only",
+  "frames": 240,
+  "duration": 8,
+  "cache_hits": 0,
+  "shot_count": 4,
+  "full_decode": "pass",
+  "caption_count": 4,
+  "human_review": "required; technical checks are not acceptance",
+  "inputs": [
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-v3-ap72\\assets\\character-01_master-v3_cutout_test.png",
+      "sha256": "dd0f393972ff7610adfdc1e5625697724bca53caa4f0b3275654fed91940154a"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-v3-ap72\\assets\\plate.png",
+      "sha256": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-v3-ap72\\assets\\shadow.png",
+      "sha256": "7f1e13b751b2af97ba25237e39326bcfcd2f6bafea7cdd09e22429db2ad75e2d"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-v3-ap72\\silent.wav",
+      "sha256": "ff6f3ca38f4c6d78430916b3023d649ce7d91cd1ef6034e2fdaa3658ced27f45"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\Caveat.ttf",
+      "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    }
+  ]
+}

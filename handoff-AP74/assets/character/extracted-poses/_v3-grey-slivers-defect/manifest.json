@@ -1,0 +1,147 @@
+{
+  "schema": "canonical-character-01-poses-v1",
+  "source": "lookdev-character-test-02.png",
+  "source_sha256": "36e8cef3f3149786eb82cf00aa03df9c29d1a5f8ffad9efbbfbacd5928f3c137",
+  "method": "local flat-background removal (distance threshold + edge fringe); no generation, no redrawing",
+  "background_rgb": [
+    209,
+    209,
+    209
+  ],
+  "threshold": 12,
+  "components_dropped_as_specks": 0,
+  "poses": [
+    {
+      "index": 1,
+      "name": "01-neutral",
+      "file": "canonical-character-01_01-neutral.png",
+      "sha256": "4278ac03d229ea5511258deae76faa84bdced66500cb3455bc73704aee6f1abd",
+      "width": 272,
+      "height": 572,
+      "crop_in_sheet": {
+        "x": 72,
+        "y": 43
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 252,
+        "h": 552
+      },
+      "feet_anchor_in_file": {
+        "x": 135,
+        "y": 561
+      }
+    },
+    {
+      "index": 2,
+      "name": "02-worried-phone",
+      "file": "canonical-character-01_02-worried-phone.png",
+      "sha256": "94b5a3eb9c685f27e54850e10ff85af0c236929a8ab4802d2704f518dab8dfc2",
+      "width": 270,
+      "height": 571,
+      "crop_in_sheet": {
+        "x": 456,
+        "y": 44
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 250,
+        "h": 551
+      },
+      "feet_anchor_in_file": {
+        "x": 102,
+        "y": 560
+      }
+    },
+    {
+      "index": 3,
+      "name": "03-shocked-frozen",
+      "file": "canonical-character-01_03-shocked-frozen.png",
+      "sha256": "23d85855b85bd487a2cb9869f5c5d236afbf49f67b7f7c54097b892e19076b07",
+      "width": 274,
+      "height": 596,
+      "crop_in_sheet": {
+        "x": 843,
+        "y": 18
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 254,
+        "h": 576
+      },
+      "feet_anchor_in_file": {
+        "x": 139,
+        "y": 585
+      }
+    },
+    {
+      "index": 4,
+      "name": "04-laughing",
+      "file": "canonical-character-01_04-laughing.png",
+      "sha256": "84b54ddc648b0c08a96c693de0135f8db6574fc406d1ae115286e03aad6c74d0",
+      "width": 299,
+      "height": 580,
+      "crop_in_sheet": {
+        "x": 40,
+        "y": 694
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 279,
+        "h": 560
+      },
+      "feet_anchor_in_file": {
+        "x": 175,
+        "y": 569
+      }
+    },
+    {
+      "index": 5,
+      "name": "05-pleading",
+      "file": "canonical-character-01_05-pleading.png",
+      "sha256": "641918fe08e834b12f6d8fb7070c798984d311bbcc40ca5af0c6152a37bc05ca",
+      "width": 273,
+      "height": 569,
+      "crop_in_sheet": {
+        "x": 457,
+        "y": 702
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 253,
+        "h": 549
+      },
+      "feet_anchor_in_file": {
+        "x": 130,
+        "y": 558
+      }
+    },
+    {
+      "index": 6,
+      "name": "06-deadpan-arms-crossed",
+      "file": "canonical-character-01_06-deadpan-arms-crossed.png",
+      "sha256": "a025102581e64f28fd1d124d4a51b766f014d9d0f59fc298ae7bf30c82028993",
+      "width": 271,
+      "height": 591,
+      "crop_in_sheet": {
+        "x": 849,
+        "y": 683
+      },
+      "figure_bbox_in_file": {
+        "x": 10,
+        "y": 10,
+        "w": 251,
+        "h": 571
+      },
+      "feet_anchor_in_file": {
+        "x": 134,
+        "y": 580
+      }
+    }
+  ]
+}

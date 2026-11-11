@@ -1,0 +1,54 @@
+{
+  "fingerprint": "e823f3de8d49019383c69ebc14800ab3b9171b5b68d68cf0c09857f942bb8b2d",
+  "preview_seconds": 8,
+  "output": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\output\\preview.mp4",
+  "output_sha256": "21a2bf50487219f4d8d86df50c9f9e60d39737e8a89ebec6bb36f5b7df564711",
+  "original_voice_sha256": "ff6f3ca38f4c6d78430916b3023d649ce7d91cd1ef6034e2fdaa3658ced27f45",
+  "original_voice_duration": 8,
+  "voice_rate": "unchanged; leading/trailing padding only",
+  "frames": 240,
+  "duration": 8,
+  "cache_hits": 4,
+  "shot_count": 4,
+  "full_decode": "pass",
+  "caption_count": 4,
+  "human_review": "required; technical checks are not acceptance",
+  "inputs": [
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\plate.png",
+      "sha256": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\pose-02-worried-phone.png",
+      "sha256": "389d597bca7e37afa346a393b2d366ef9c5917ea345295123b90cb2ed20fe10b"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\pose-03-shocked-frozen.png",
+      "sha256": "fabe6f7ad495e293f329428518e71fe6947b6d8c0edcad9ad0cb9c18c9f69fd5"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\pose-05-pleading.png",
+      "sha256": "625e3faef6988e4108662dce27ec70e2fcb1c085f40d65b91ff43915e5f8d179"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\pose-06-deadpan-arms-crossed.png",
+      "sha256": "aeb639342c436fd7c92d997595dd9941dad4ec5497bc15b4fe38e725f6b7b699"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\assets\\shadow.png",
+      "sha256": "7f1e13b751b2af97ba25237e39326bcfcd2f6bafea7cdd09e22429db2ad75e2d"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-canonical\\silent.wav",
+      "sha256": "ff6f3ca38f4c6d78430916b3023d649ce7d91cd1ef6034e2fdaa3658ced27f45"
+    },
+    {
+      "path": "c:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\Caveat.ttf",
+      "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988"
+    },
+    {
+      "path": "c:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    }
+  ]
+}

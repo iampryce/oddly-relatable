@@ -1,0 +1,42 @@
+{
+  "fingerprint": "e1c8ed5eac3a3d33bb37fc7cb99c6b30d9a868a20c2ffe8d0534d7ab2150fe2e",
+  "preview_seconds": 2,
+  "output": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-pose03-ap74\\output\\preview.mp4",
+  "output_sha256": "4610e8d75f02b9dbad3043d6183cf64a7f0b8c0d3257c39544d78527ecc2e4f4",
+  "original_voice_sha256": "1235e1a84a9b4cc7aabc7dc6ca56867ad40ca3398e1059a1fa38f00b1d88a068",
+  "original_voice_duration": 2,
+  "voice_rate": "unchanged; leading/trailing padding only",
+  "frames": 60,
+  "duration": 2,
+  "cache_hits": 0,
+  "shot_count": 1,
+  "full_decode": "pass",
+  "caption_count": 1,
+  "human_review": "required; technical checks are not acceptance",
+  "inputs": [
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-pose03-ap74\\assets\\character-01_pose-03-shocked_skin-only_test.png",
+      "sha256": "477f8e713d6358fdd1bbc40d56ff258f83f96f252126e33d6e7a82da3c3d963f"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-pose03-ap74\\assets\\plate.png",
+      "sha256": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-pose03-ap74\\assets\\shadow.png",
+      "sha256": "7f1e13b751b2af97ba25237e39326bcfcd2f6bafea7cdd09e22429db2ad75e2d"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\poc-vertical-pose03-ap74\\silent.wav",
+      "sha256": "1235e1a84a9b4cc7aabc7dc6ca56867ad40ca3398e1059a1fa38f00b1d88a068"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\Caveat.ttf",
+      "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    }
+  ]
+}

@@ -9,8 +9,6 @@ autopilot-work/
 
 # --- Added when the private oddly-relatable repository was created ---
 # Work/render output and cached frames (rebuildable) and the duplicate handoff copy
-studio-work/
-handoff-AP74/
 # Copyrighted third-party reference screenshots must not be committed
 **/references/
 # Keys, certificates, credentials, state, dumps and local assistant state
@@ -29,3 +27,9 @@ desktop.ini
 
 # Project LICENSE removed from this repository at the owner's request (file kept locally, not committed)
 /LICENSE
+
+# studio-work: keep projects, assets and rendered videos; drop rebuildable cache/frames (references/ is already ignored above)
+studio-work/**/output/cache/
+studio-work/**/output/frames/
+# handoff-AP74/evidence duplicates bible/concepts/lookdev-richenv evidence
+handoff-AP74/evidence/

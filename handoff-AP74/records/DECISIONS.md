@@ -1,0 +1,259 @@
+| **AP-44** | **Owner-confirmed (2026-11-11): the Kids Animation Claude session is the SOLE shared-infrastructure coordinator for BOTH projects**, authorised across both repositories. The coordinator owns planning and execution coordination for: Garage deployment and administration; reverse proxy and TLS; shared monitoring and alerting; independent backup and recovery infrastructure; host-wide rendering coordination; shared server security and operational runbooks. **Stickman keeps:** its repository and renderer, its production environment, its bucket and credentials, its storage integration, its animation and multi-platform export workflow, and its testing and documentation. Stickman coordinates with the Kids session and **does not independently deploy or modify shared services.** |
+| **AP-45** | **Mandatory safeguard 1:** Caddy must pass **real large multipart upload testing** before production use. |
+| **AP-46** | **Mandatory safeguard 2:** **no irreplaceable production assets in Garage** until an **independent off-server backup** exists and a **restore test has succeeded**. |
+| **AP-47** | **Mandatory safeguard 3:** **only one heavy rendering job may run across both projects initially.** |
+| **AP-48** | **Mandatory safeguard 4:** **SSH hardening requires verified key-based access and a rollback procedure.** |
+| **AP-49** | **Mandatory safeguard 5:** public web services use **ports 80 and 443**; **SSH is separately restricted.** |
+| **AP-50** | **This confirmation establishes ownership and architectural direction. It is NOT blanket approval to execute every infrastructure change.** Each separate implementation gate still needs the owner's approval. Acknowledging it required no install, deployment, SSH change, firewall change or code change. |
+# Decisions Register — Stickman Comedy Studio
+
+**Last updated:** 2026-11-11 · Statuses: **APPROVED** (owner has decided) · **PROPOSED** (recommendation awaiting approval) · **OPEN** (needs owner input).
+Rule: nothing PROPOSED is treated as decided. The owner has final approval; ChatGPT is the creative and architectural decision partner.
+
+## A. Approved decisions
+
+| # | Decision | Source / date |
+|---|---|---|
+| AP-1 | Build a second YouTube channel, separate from Kids Animation Studio. Never reuse or modify that project. | Brief, 2026-11-10 |
+| AP-2 | Content pillars: workplace, marriage/relationships, friendship, money/adult life, facts and psychology, funny hypotheticals | Brief |
+| AP-3 | Humour: original and relatable internationally. ~~with occasional Nigerian/African situations presented accessibly~~ **That clause is superseded by AP-16.** | Brief; amended 2026-11-11 |
+| AP-4 | Recurring stickman characters with distinct personalities and flaws | Brief |
+| AP-5 | Relationship humour stays balanced; neither partner is always the villain or fool | Phase 1 |
+| AP-6 | Original visual identity: do not copy existing channels or the repository's reference styles | Phase 0 / 1 |
+| AP-7 | Hybrid animation: pose-based and keyframed by default; full-motion AI video only where it clearly improves comedy or story | Phase 1 |
+| AP-8 | Production stays lightweight, affordable and locally rendered | Phase 0 |
+| AP-9 | First pilot is "When Your Wife Says We Need to Talk" (2–3 min) | Brief |
+| AP-10 | Keep the existing repository; do not reclone, move or duplicate it | Phase 0.1, 2026-11-11 |
+| AP-11 | Normalise CRLF to LF in applicable text files; leave `package.json` and `package-lock.json` unchanged | Phase 0.1 |
+| AP-12 | Renderer stays unchanged unless explicitly approved | Operating agreement |
+| AP-13 | Work is phase-gated: stop at approval gates; no pilot production, no commits or pushes, no dependency installs, no paid services without approval | Operating agreement |
+| AP-14 | Maintain the five progress files at the repo root and update them at every milestone | Operating agreement |
+| AP-15 | **Codex policy:** use the existing Codex CLI and ChatGPT login as a complementary agent (image generation, editing, technical execution); scratch-directory generation; inspect before copying in; preserve originals; record agent and tools per task; if Codex is unavailable, report the blocker instead of switching to an unapproved paid API; Codex never bypasses an approval gate | Owner message, 2026-11-11 |
+
+### Direction changes from the owner, 2026-11-11 (these override earlier approvals and proposals)
+
+| # | Decision | Effect |
+|---|---|---|
+| **AP-16** | **The channel is for the world at large.** No Nigerian/African-specific stories, settings, names, language or jokes. | Reverses the "occasional Nigerian/African situations" part of AP-3. Supersedes proposed D6 (setting), D7 (language mix) and D20 (cultural rules), and the West African world in `WORLD_BIBLE.md`. Everyday settings must read anywhere; real places are not named. |
+| **AP-17** | **Femi is retired; a different lead character is wanted.** The owner is giving a character change. | The whole proposed cast (Femi, Amara, Tunde, Dez, Madam F, Zee, Mummy Eze, Pepper) was written for a West African setting and is **paused**. Roles and comedic structure may carry over; names, backstories and the pilot's Mummy-visit twist (D13) need a rewrite. Superseded/needing revision: D4, D5, D13, plus language-related parts of D8. |
+| **AP-18** | **Exploration direction:** simple 2D stickman characters (thin limbs, expressive eyes and brows) in richly illustrated, layered environments. The owner is providing a reference picture and wants an **original** identity inspired only by general traits. | Recorded as the *preferred direction for exploration*, **not a final approval of the visual identity** (V1 stays open). Reference to be dropped in `C:\Users\PC\Desktop\Works\stickman-video-director\studio-work\references\` (folder created; empty at the time of writing). |
+
+Bible documents affected carry a "PARTLY SUPERSEDED" banner at the top; **none has been rewritten yet**, because the new lead character and the rewrite scope are not yet known (V8, V9).
+
+### Multi-platform direction, owner, 2026-11-11
+
+| # | Decision | Notes |
+|---|---|---|
+| **AP-19** | **Stickman Comedy Studio is a multi-platform animation brand: YouTube, TikTok and Facebook** (M1). | Not YouTube-only. Supersedes YouTube-only assumptions in the Bible (e.g. D17, parts of `CONTENT_STRATEGY.md`). |
+| **AP-20** | **Primary format 9:16 vertical** (Shorts, TikTok, Reels); **secondary 16:9** (longer YouTube episodes, suitable Facebook) (M2, M3). | Resolves **V10** (format priority). Supersedes **D14**. |
+| **AP-21** | **Do not double production work unnecessarily**; reusable scenes and character assets must adapt to different aspect ratios (M4). | Drives the "author once, render many" proposal (M10). |
+| **AP-22** | **Content is original, international and universal**; African or Nigerian storytelling must not define the identity (M5). | Reinforces AP-16. |
+| **AP-23** | **Per episode:** complete original episode, short-form edits, platform-appropriate captions and hooks, titles, descriptions, thumbnails, safe framing (M6). Do **not** assume identical uploads, durations or captions are optimal on every platform (M7). | Planning requirement. |
+| **AP-24** | **Do not build publishing automation or connect platform APIs yet** (M9). Research current platform specifications and policies **before** finalising any publishing automation (M7). | Standing restriction. |
+
+Proposed (awaiting approval): **M10–M16** in the table below.
+
+| ID | Decision | Recommendation | Status |
+|---|---|---|---|
+| **M10** | Adopt "author once, render many": square superframe plates, platform-neutral scene graph, framing profiles | Approve | **OPEN** |
+| **M11** | Master rule: T1 shorts vertical-first; T2 episodes 16:9 with vertical cut-downs | Approve | **OPEN** |
+| **M12** | Burn captions in externally, per platform, instead of the renderer's fixed bottom captions | Approve in principle | **OPEN** |
+| **M13** | Support a 1:1 or 4:5 profile | Not now | **OPEN** |
+| **M14** | Facebook scope: Reels only first, or Reels plus 16:9 videos | Reels first | **OPEN** |
+| **M15** | Per-platform account names and branding consistency | Owner decides | **OPEN** |
+| **M16** | Approve the research TODO (official TikTok and Meta specs and policies, monetization, music licensing, safe zones) as the next research step | Approve | **OPEN** |
+
+Research confidence so far: YouTube Shorts length and disclosure rules were read on official pages; **TikTok and Meta details come only from secondary sources** (official pages could not be read) and are unverified. See `bible/MULTI_PLATFORM_ARCHITECTURE.md` §6.
+
+### Visual identity: PERMANENTLY LOCKED, owner decision, 2026-11-11 🔒
+
+> The owner said: *"This visual direction is FINAL. Do not change it."* Do not redesign, replace, reinterpret or propose alternative visual styles. Do not silently alter this decision in documentation or creative proposals. Specification: `bible/VISUAL_IDENTITY.md`; canonical reference and integrity rules: `bible/concepts/lookdev-richenv/CANONICAL_REFERENCE.md`.
+
+| # | Decision |
+|---|---|
+| **AP-51** | **The complete visual identity shown in `bible/concepts/lookdev-richenv/lookdev-scene-01.png` is permanently locked:** simple, flat 2D cartoon characters (clean bold consistent black outlines, round expressive faces, large expressive eyes and eyebrows, simple thin limbs, clear readable body language, natural exaggerated comedic expressions, carefully controlled proportions, clothing with simple distinctive colours) **plus** richly illustrated 2D environments (detailed furniture and decoration, strong three-quarter perspective, warm cinematic lighting, layered foreground/middle-ground/background with natural overlap, detailed textures, believable interiors). **The defining combination: simple expressive 2D characters + richly illustrated cinematic 2D environments.** |
+| **AP-52** | **The character in the approved image is the master character (Canonical Character 01).** Preserve his cream-coloured bald round head, facial proportions, large expressive eyes, eyebrow and mouth design, thin black arms and legs, rust-coloured turtleneck, body proportions and outline style. **His appearance must not change in future generation.** **The approved original image stays untouched and preserved as the authoritative visual reference** (SHA-256 `36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016`; read-only repo copy; Codex original untouched; read-only backup outside the repo). |
+| **AP-53** | **Every future character belongs to the SAME visual universe** (same 2D technique, outline quality, construction principles, expression language, polish and character-to-environment relationship) **but must NOT look identical**: distinct head shape or silhouette, hairstyle or head features, facial characteristics, clothing and colour identity, body proportions where appropriate, and personality through posture and expressions. They should look like characters from one animated television series. |
+| **AP-54** | **All future environments follow the same illustrated 2D quality** (living rooms, offices, restaurants, apartments, shops, streets, schools, public spaces). **No photorealistic environments alongside flat cartoon ones.** The setting follows the story; the visual treatment never changes. |
+| **AP-55** | **Governance:** do not silently alter this decision in future documentation or creative proposals; do not propose alternative visual styles; any change needs an explicit owner decision recorded here. The approved look-development image is marked as the canonical visual reference. |
+| **AP-56** | **Two technical tests authorised and completed (2026-11-11), one Codex call per image:** (1) character consistency with multiple expressions and poses; (2) the same living room without the character. They preserve the approved identity. **Results:** character strongly on-model with minor drift; room near-identical outside the character area (measured). See `bible/concepts/lookdev-richenv/README.md`. |
+| **AP-57** | **No additional concepts, alternative character designs or alternative environments are generated without the owner's approval.** Images used so far: **3** (look-development, character test, empty-room test). |
+| **AP-58** | **Six-pose extraction approved and DONE (2026-11-11):** the six poses of Canonical Character 01 were extracted from `lookdev-character-test-02.png` as transparent PNGs by local image processing (no generation, no redrawing, source unchanged, hash `36e8cef3…`). Verified visually on three backgrounds after four fixes. `bible/concepts/lookdev-richenv/extracted/` (README, manifest, contact sheet). |
+| **AP-59** | **Character/environment compositing approved and DONE:** pose 02 composited onto the approved empty-room plate (A canonical placement, B colour-matched with soft shadow, C behind the foreground table with a hand-traced occlusion mask). Scale 0.95 fits the canon. Findings: good scale/placement match; sprite slightly lighter and thinner-lined than the canon; foreground overlap works but needs a better mask for plants; depth placement needs per-shot judgement. `…/composite/`. |
+| **AP-60** | **Short vertical render approved and DONE with the UNMODIFIED renderer:** 1080×1920, 30 fps, 8 s, 4 shots, 4 pose swaps, snap zoom and shake. Cold render 34.8 s (≈0.145 s/frame); warm 5 s. Technically viable. Limits: softness at zoom (low-resolution sprite and plate), no depth/parallax, no pose in-betweens, per-pose colour drift. `…/poc-vertical/`. **Stopped after these three steps; awaiting creative direction.** Character referred to as **Canonical Character 01**. No images generated (3 used). |
+| **AP-61** | **AP-58 to AP-60 reviewed and APPROVED by the owner (2026-11-11).** Next phase: production-resolution quality. The identity stays locked. |
+| **AP-62** | **Exactly two additional Codex image generations authorised and USED:** Image 4 (character master, 1024×1536) and Image 5 (environment master, 941×1672), one call each, ChatGPT login, no API. Saved as **production candidates** in `bible/concepts/lookdev-richenv/production-candidates/` (hashes in its README). **Resolution target of 2048 px NOT achieved** (tool cap). Character: strongly on-model; flags: hands curled rather than rounded mitts, skin lighter/peachier, eyes slightly smaller. Environment: near-identical to the earlier empty room; no resolution gain. **Images used in total: 5. No further generation without approval. Stopped; awaiting owner approval.** |
+| **AP-63** | **Owner decisions on the production candidates (2026-11-11):** Image 4 (character) **conditionally approved as a working high-resolution source, NOT the final master**; Image 5 (room) **approved as an alternative empty plate, not a resolution upgrade**; the canon stays authoritative; do not regenerate the room just to reproduce it. Both candidates preserved. |
+| **AP-64** | **Required corrections to Image 4 (all as NEW files, never overwriting the candidate):** match skin tone to the canon; restore the original rounded-mitt hands (remove the curled-hook/notched design); preserve head, face, proportions, rust turtleneck, shoes and the clean heavier outline; do not redesign the eyes or face. A non-destructive plan is written (`production-candidates/upscale-tests/README.md` §4); **not yet executed**. Finding: the approved sheet pose 01 already had the hook hands; the canon mitt has rounded finger bumps. |
+| **AP-65** | **Resolution strategy (two stages, no spend):** (1) local AI upscaling; (2) if insufficient, research genuinely higher native-resolution generation; for the room, investigate tiled/regional upscaling and seams. **Result:** no AI upscaler or model is available locally (Intel HD 520, 1 GB shared, Vulkan 1.3; no torch/opencv/onnx; FFmpeg has no DNN filters). Classical resampling tested on copies: nohalo best but adds no real detail; unsharp and my shock filter rejected; tiling seam error 0 for deterministic filters (AI tiles untested). Higher-native generation researched from secondary sources only (paid, unverified). Recommendation in the README §5. |
+| **AP-66** | **Restrictions for this phase honoured:** no new generation, no paid calls, no installs, no overwrites, no renderer changes, no deletions, no commits. **Stopped; awaiting approval of the recommended next step.** |
+| **AP-67** | **Controlled Candidate 04 corrections approved by the owner and DONE as a candidate (2026-11-11):** (1) skin tone corrected with a skin-only mask and per-channel gain (mean (252,230,203) to (251,220,178); canon (252,222,180)); (2) both hands redrawn as native-resolution vector mitts (round palm, three rounded finger bumps) replacing the curled hooks. New files only in `production-candidates/corrected/`; Candidate 04, the canon, the sheet and all tests unchanged (hashes re-verified); pixel diff outside the masks = 0. Sweater, shoes, face, eyes, proportions and outline untouched. **Candidate `candidate-04_corrected-v2.png` is NOT promoted to final production master; awaiting the owner's visual approval.** Asset register created: `bible/concepts/lookdev-richenv/ASSET_REGISTER.md`. No generation, downloads, installs, paid calls, renderer changes, deletions or commits. |
+| **AP-68** | **Owner review of the AP-67 corrections (2026-11-11):** skin correction **approved in principle** (mean (251,220,178) vs canon (252,222,180); keep unchanged unless inspection finds an issue); hands **not approved as final, revision required**: rounded palm slightly smaller and better proportioned to the arm, two or three rounded fingers that curve and sweep to one side, simple black silhouette, no sharp points or complicated anatomy, a refinement of the vector work (not a full redraw), saved as a new version with v2 and earlier attempts preserved. **Sweater and shoes stay unchanged for now.** Candidate 04 remains a working candidate, not the final production master. |
+| **AP-69** | **Hands refinement v3 DONE as a candidate:** `production-candidates/corrected/candidate-04_corrected-v3.png` (smaller palm 50×56, curved sweeping rounded fingers, no points); skin bit-identical to the approved correction; 0 changed pixels outside the masks; v2 and earlier drafts preserved in labelled subfolders; asset register updated; review sheet `review-sheet-v3.png`. **Awaiting the owner's visual approval.** The owner asked to see `compare-full-body.png` and `compare-hands-closeup.png`; Claude Code cannot upload to the owner's other chat, so the files (and a combined `review-sheet-v3.png`) are on disk for the owner to attach. |
+| **AP-70** | **Owner accepts hands v3 as the CURRENT APPROVED WORKING CANDIDATE (2026-11-11), on measurements and assessment; final visual sign-off to follow once the owner has seen `review-sheet-v3.png`.** No further hand revisions for now. v2 and earlier attempts are kept as historical evidence. Sweater and shoe colours stay unchanged. **Candidate 04 is NOT promoted to the final production master.** No further character image is to be generated. Direction: move from correcting details toward establishing the production-ready character and environment asset workflow (to be proposed; not started). |
+| **AP-71** | **Asset-management rules written (documentation only, 2026-11-11):** `bible/concepts/lookdev-richenv/ASSET_MANAGEMENT.md`; classification, naming for new files only, SHA-256 provenance, approval workflow; no existing file renamed, no status changed. |
+| **AP-72** | **Diagnostic 9:16 render with corrected v3 DONE (2026-11-11), awaiting owner review:** unmodified renderer; output `C:\Users\PC\Desktop\Works\stickman-video-director\studio-work\poc-vertical-v3-ap72\output\preview.mp4`; evidence in `ap72-validation/`. Finding: sharper and canon-coloured, but v3 is a single pose so pose swaps are not reproduced. Nothing promoted. |
+| **AP-73** | **Existing pose library ASSESSED (2026-11-11), assessment only, no approval to create or promote assets:** `POSE_LIBRARY_ASSESSMENT.md`. Findings: sheet poses ~550 px tall; adequate for wide and limited medium shots; close-ups need higher-resolution poses; skin correction fits all six; hand correction per pose only; recommended next test pose 03 (shocked), skin-only first. Awaiting owner approval. |
+| **AP-74** | **Pose 03 skin-only correction and Shot 2 render test DONE as TEST/EVIDENCE (2026-11-11), awaiting owner visual review:** see `ap74-pose03-test/README.md`. 0 changed pixels outside the skin mask; hands, mouth, outline untouched; unmodified renderer. Colour closer to canon; no sharpness gain. No other pose corrected; nothing promoted; no status changes. |
+
+**Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
+
+### Central VPS production environment, owner direction, 2026-11-11
+
+> **Architecture approval is not deployment approval.** Read-only inspection and planning were authorised; installs, Garage deployment, firewall/DNS/Terraform/code changes, moving or deleting assets, changing fixed paths, heavy jobs and commits were **not**. Design and evidence: `docs/VPS_PRODUCTION_READINESS.md`.
+
+| # | Decision |
+|---|---|
+| **AP-40** | **The Contabo VPS is the central production environment for BOTH animation projects**, with one shared Garage S3-compatible service, shared monitoring, backup and security infrastructure. |
+| **AP-41** | **The owner's Windows machine is for remote administration and interacting with Claude only**; it must not be required for rendering, asset processing or any production workload. |
+| **AP-42** | **Each project stays isolated.** Shared infrastructure is built once, in one coordinated plan; **neither Claude session deploys it independently.** Execution order: (1) server security, directories, storage; (2) independent backup and monitoring; (3) Garage; (4) separate project buckets and credentials; (5) both production environments; (6) integrate each project separately; (7) test rendering and recovery. |
+ **Read-only inspection and preparing the plan are authorised.** Everything else listed above is not. |
+
+*Effect on earlier decisions:* "local" in local-first rendering (AP-25) now means the VPS's local disk; the fixed absolute working path (AP-38) becomes a Linux path (proposed `/srv/stickman/work/<episode-id>/`, to confirm).
+
+**Open decisions raised by the VPS inspection (all proposals; none approved):**
+
+| ID | Decision / blocker | Recommendation | Status |
+|---|---|---|---|
+| **P1** | How the repository reaches the server and gets version control (it has no `.git`) | `git init`, then a private remote or bare repo; or a one-time copy | **OPEN** |
+| **P2** | Node.js ≥ 20 install source (Ubuntu's own package is 18.19) | A pinned, verified installer or tarball | **OPEN** |
+| **P3** | DNS name and DNS control for the storage endpoint and TLS | Decide before TLS | **OPEN:** DNS/TLS is owned by the coordinator (AP-44); public services use 80/443 (AP-49) |
+| **P4** | **Off-box backup target** (blocks the backup step; none exists) | Required | **OPEN: blocker.** Hard gate AP-46: no irreplaceable asset in Garage until the off-box backup exists and a restore test has succeeded |
+| **P5** | Swap, per-project memory/CPU caps | Small swap plus caps, tuned by testing | **OPEN** |
+| **P6** | SSH hardening: root login and password authentication are currently enabled | Admin account, key-only, restrict root | **GATED** by AP-48 (verified key-based access and a rollback procedure first). Not executed |
+| **P7** | Single-node Garage (replica 1) on one disk | Only with the off-box backup in place | **OPEN** |
+| **P8** | One shared monitoring stack | Lightweight, shared | **OPEN:** owned by the coordinator (AP-44) |
+| **P9** | Codex on the VPS: `--device-auth` login; whether server use of the personal ChatGPT subscription is permitted | Check terms first | **OPEN** |
+| **P10** | Run Claude Code sessions on the VPS over SSH instead of on Windows | Consider | **OPEN** |
+| **P11** | Disk growth plan (one 96 GB disk, 93 GB free) | Alert early; plan more storage | **OPEN** |
+| **P12** | Shared heavy-render lock or queue | Simple lock first | **PARTLY RESOLVED:** one heavy render across both projects initially (AP-47); lock design with the coordinator |
+| **P13** | Reconcile naming with the Kids session | Via the owner | **OPEN** |
+| **P14** | Account agents run as (never root for rendering) | The project user | **OPEN** |
+| **P15** | How finished exports reach the Windows machine for manual uploads | SSH copy; no public links | **OPEN** |
+| **P16** | Who owns and stands up the shared infrastructure (Garage, proxy, monitoring, backup target) | The Kids session **reports** its owner made it sole coordinator (coordination, not deployment approval). **Not confirmed by this project's owner.** Please confirm or change | **RESOLVED** by AP-44: the Kids session is the sole shared-infrastructure coordinator (owner-confirmed) |
+
+### Storage: Garage architecture principles, **approved** by the owner, 2026-11-11
+
+> **Architecture approval is not deployment approval.** These are decisions about *how storage should work*. Installing or configuring Garage, creating buckets or credentials, installing any client, writing sync code, changing Terraform, uploading assets and starting backups each need **separate approval**. Full design: `docs/GARAGE_STORAGE_FINAL_ARCHITECTURE.md`.
+
+| # | Approved principle |
+|---|---|
+| **AP-25** | **Local-first rendering.** Assets are downloaded to local working storage before rendering. |
+| **AP-26** | **Garage is the shared self-hosted S3-compatible object-storage service.** |
+| **AP-27** | **This project has its own dedicated Garage bucket and access credentials.** |
+| **AP-28** | **The Kids Animation project has a completely separate bucket and credentials.** |
+| **AP-29** | **Active rendering, cache, lock and temporary files stay local.** |
+| **AP-30** | **Upload approved assets and completed production outputs** to Garage. |
+| **AP-31** | **Private by default.** No public links (including shareable/presigned links) without explicit approval. |
+| **AP-32** | **Independent backups outside the Garage server.** |
+| **AP-33** | **TLS and secure credential handling.** |
+| **AP-34** | **Selective synchronisation**, not the whole working directory. |
+| **AP-35** | **No direct streaming from, and no mounting of, Garage as a filesystem.** |
+| **AP-36** | **No publishing automation** at this stage (reinforces AP-24). |
+| **AP-37** | **Write-once production versions:** use new version prefixes (`v001/`, `v002/`, …) and checksum manifests, because Garage provides no object versioning. *(Second owner review, 2026-11-11.)* |
+| **AP-38** | **Fixed working directory:** an approved project is rendered at one fixed absolute local path and is not relocated (the renderer fingerprint and cache keys include absolute paths; verified). *(Second owner review.)* The exact root path value still needs confirming. |
+| **AP-39** | **Deployment and production cutover are NOT approved.** The owner approved the architecture direction only; the Garage deployment topology and several details are to be settled first. *(Second owner review.)* |
+
+### Storage: open and proposed decisions (the earlier assessment, now narrowed by the approvals above)
+
+Nothing below is approved. The owner asked for an architecture assessment; **no Garage server, bucket or key exists and nothing is implemented.** Full reasoning: `docs/GARAGE_STORAGE_ARCHITECTURE.md`.
+
+| ID | Decision | Recommendation | Status |
+|---|---|---|---|
+| **G1** | Adopt a **local-first** workflow: pull assets, render locally with the unchanged renderer, push outputs, retrieve exports for manual upload. **No streaming from, and no mounting of, Garage.** | Approve (the renderer accepts only local paths) | **APPROVED** (AP-25, AP-35) |
+| **G2** | Garage host plan: where it runs, node count, replication, who administers it | Owner to specify; 3 replicas if hardware allows, else a strong second backup | **PARTLY INFORMED**: server specifications observed read-only on 2026-11-11 (single Contabo VPS: 4 vCPU, 7.8 GiB RAM, no swap, one 100 GB disk); topology still open (see P7) |
+| **G3** | Bucket and credential policy: bucket `stickman-studio` (placeholder), one read+write key, a separate admin key, no cross-project access, quotas | Approve in principle | **PARTLY APPROVED**: principle approved (AP-27); names, keys and quotas proposed in the final proposal §4 (see G14) |
+| **G4** | Secret management on the Windows workstation | OS credential store or password-manager injection; not a plain `.env` | **OPEN** |
+| **G5** | Transfer client: AWS CLI, rclone or none yet (each is a new install, needs approval) | Decide when Garage exists | **OPEN** |
+| **G6** | Backup strategy: second location, metadata snapshots, restore test | Approve before storing anything irreplaceable | **PARTLY APPROVED**: principle approved (AP-32); target, schedule and retention open |
+| **G7** | Retention and archive rules; write-once versioned prefixes (Garage has no versioning) | Approve the layout and rules | **PARTLY APPROVED**: write-once version prefixes and checksum manifests approved (AP-37); retention details open |
+| **G8** | Encryption at rest: SSE-C only, disk encryption, or none | Disk encryption if the host is shared or exposed | **OPEN** |
+| **G9** | Independence safeguards with the Kids project (quotas, maintenance notice, no cross-access) | Approve | **PARTLY APPROVED**: principle approved (AP-28); safeguards proposed (final proposal §9) |
+| **G10** | Terraform scope for provisioning the host (org standard) | Approve; verify whether a Garage provider exists | **OPEN** |
+| **G11** | What gets synced (everything except cache, locks, approvals?) | As stated | **PARTLY APPROVED**: selective sync approved (AP-34); exact list is G15 |
+| **G12** | Whether presigned (shareable) links are allowed | Off by default | **RESOLVED** by AP-31: private by default; no links without explicit approval |
+| **G13** | One bucket, or an additional write-once **archive bucket** (the only native isolation boundary in Garage is the bucket) | Start with one bucket plus an independent backup; add the archive bucket if published masters become hard to replace | **OPEN** |
+| **G14** | Final bucket name and key set: `stickman-studio` (placeholder); roles `stickman-rw`, `stickman-ro`, `stickman-backup-ro`, `stickman-admin` (placeholders; none created) | Approve in principle | **OPEN** |
+| **G15** | The exact selective-sync include/exclude list (final proposal §6.3) | Approve | **OPEN** |
+| **G16** | Export file-naming convention `<episode>_<platform>_<ratio>_<release>.<ext>` | Approve | **OPEN** |
+| **G17** | A **fixed absolute local working root** (verified: identical content in different folders gives different fingerprints, invalidating approvals and cache) | Approve; never relocate an approved project | **APPROVED in principle** (AP-38); the exact root path value is to be confirmed |
+| **G18** | How the repository itself is backed up (it has no `.git`) | Decide separately from Garage | **OPEN** |
+
+Key facts behind these: the renderer **rejects URLs** and needs a real local `output/`; nothing in the repository uses S3 or Garage; Garage (official docs, v2.5.0 examples) has **no object versioning, no object lock, no bucket policies**, partial lifecycle, SSE-C only; bucket quotas, a no-create-bucket key flag and a separate delete permission are **unconfirmed**.
+
+## B. Open and proposed: visual identity (blocking the Bible)## B. Open and proposed: visual identity (blocking the Bible)## B. Open and proposed: visual identity (blocking the Bible)
+
+| ID | Decision | Options | Recommendation | Status |
+|---|---|---|---|---|
+| **V1** | Visual direction | A · Inkblock · B · 2.5D Modern Pop · C · hybrid · **D · "Stickstage": thin-limb characters in rich layered environments (owner's preferred direction for exploration, AP-18)** | **Explore D through the proof of concept** (see `bible/VISUAL_DIRECTION_RICH_ENVIRONMENTS.md`) before locking | **RESOLVED / LOCKED** by AP-51: the visual identity is the canonical image; no alternatives |
+| **V2** | Should characters stay completely flat? | Level 1 fully flat · Level 2 flat + scene tint + shadow · Level 3 cel-shaded | **Level 2** | **RESOLVED** by AP-51: flat 2D characters with bold outlines and no shading |
+| **V3** | Production route for 3D-looking environments | Procedural vectors · Blender (needs install approval) · AI plates via Codex · paid APIs (not approved) | Linked to V2. One Codex plate was tested: far richer, but clashes with flat characters, 1672×941, single baked layer, multi-angle consistency unproven. For flat characters, procedural vectors or a flattened Blender render fit best. | **PARTLY RESOLVED:** environments are richly illustrated 2D in the canonical style (AP-51); generating with the canon as reference is verified (empty-room test); depth-layer separation still open |
+| **V4** | ~~Is Femi's concept design acceptable?~~ **Withdrawn: Femi is retired (AP-17).** Replaced by V8. | n/a | n/a | **WITHDRAWN** |
+| **V5** | Test a literal Modern Pop-style character (white head, thin black sticks)? | Yes / no | No, because of the originality risk | **CLOSED:** not pursued; the look is locked (AP-51) |
+| **V6** | Approve the proof-of-concept scope: one new character, one living room, 12–15 s, unmodified renderer, **up to 4 Codex image generations** | Approve / change | Approve | **EXERCISED:** 3 images used; **no further images without the owner's approval** (AP-56, AP-57) |
+| **V7** | Provide the reference picture so originality can be checked | Received as a chat image on 2026-11-11; private copy at `…\studio-work\references\tiktok-reference-1.jpg` (outside the repo) | Originality comparison done for this one frame; see report §0 and §7 | **RESOLVED** |
+| **V10** | **Format priority** | Resolved by the owner: **9:16 primary, 16:9 secondary** (AP-20) | See `bible/MULTI_PLATFORM_ARCHITECTURE.md` for how assets are reused across ratios | **RESOLVED** |
+| **V8** | **The new lead character**: owner supplies a description or reference, or chooses from options I propose | n/a | I will not invent one unprompted | **RESOLVED** by AP-52: the canonical character is the character in the approved image (unnamed; naming and personality open) |
+| **V9** | Scope of the Bible rewrite for the world at large (cast, world, comedy guide, audio, pilot) | Rewrite now / after the character and visual direction are chosen | After V1 and V8, to avoid rewriting twice | **OPEN** |
+| **V11** | **Is the look-development candidate the direction?** A simple flat thin-limbed character (bald cream head, rust turtleneck) in a richly illustrated, layered room, made with Codex (`bible/concepts/lookdev-richenv/`). It replaces the vector boards, which are now technical evidence only | Owner judges whether it is the look and different enough from the reference | **RESOLVED** by AP-51: approved and locked |
+
+Note: V1 supersedes **D2 (adopt Inkblock)** and refines **D3, D15, D19, D22** below.
+
+## C. Proposed: Channel Bible decisions (from `bible/CHANNEL_BIBLE.md`)
+
+All **PROPOSED**; none is approved yet. Recommendations are in the Bible.
+
+| ID | Decision |
+|---|---|
+| D1 | Channel name and tagline (working name "Stickman Comedy Studio") |
+| D2 | ~~Adopt the Inkblock visual identity~~ **SUPERSEDED: visual identity locked (AP-51)** |
+| D3 | ~~Characters as local vector puppet kits~~ **SUPERSEDED by the locked look; the asset pipeline must match the canon and is decided later with the owner** |
+| D4 | Core cast: Femi, Amara, Tunde, Dez, Madam F, Zee, Mummy Eze, Pepper |
+| D5 | Couple married three years, no children yet |
+| D6 | Setting: unnamed modern West African city |
+| D7 | Language mix: clear English with light Nigerian English and occasional Pidgin; captions always on |
+| D8 | Voices: human actors, AI TTS or hybrid; audition first; no subscription yet |
+| D9 | No narrator in comedy episodes; optional in facts and hypotheticals |
+| D10 | Premium-motion budget: at most 10% of runtime and 3 clips per episode |
+| D11 | Starting content balance across the six pillars |
+| D12 | Pilot format: standard episode (~2:45) plus two Shorts |
+| D13 | Pilot twist: "Mummy is coming for three months"; ending: the boss texts "we need to talk" |
+| D14 | 16:9 for episodes; 9:16 recomposed natively for Shorts |
+| D15 | Free open-licence fonts (shortlist in `VISUAL_IDENTITY.md`) |
+| D16 | Music direction and sonic logo |
+| D17 | Upload cadence (start with an episode every two weeks plus Shorts) |
+| D18 | Master 1920×1080 at 30 fps |
+| D19 | Brand colours Tangerine and Teal **(not part of the locked identity; open)** |
+| D20 | Cultural-humour rules, including in-law jokes |
+| D21 | Documentation lives in `bible/`; mirror to Confluence later (needs the connector authorised) |
+| D22 | Keep the renderer unchanged; build tooling around it |
+| D23 | Do not publish the documents elsewhere yet |
+
+## D. Pilot-treatment questions still open
+Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which premium-motion clips (if any) · title card style. See `bible/PILOT_TREATMENT.md` §11.
+
+## E. Decision log (changes)
+
+| Date | Change |
+|---|---|
+| 2026-11-11 (AP-74) | Pose 03 corrected (skin only) and rendered as a single-shot test; TEST/EVIDENCE only; no promotion. |
+| 2026-11-11 (AP-73) | Six-pose library assessed; recommendation recorded; no extraction or correction performed; no statuses changed. |
+| 2026-11-11 (AP-71, AP-72) | Asset-management spec added; v3 diagnostic render completed with the unmodified renderer; no status changes; no promotion. |
+| 2026-11-11 (AP-70) | Hands v3 accepted as the approved working candidate (not final). No more hand tweaks; no more character images; sweater/shoes unchanged. Next: production-ready asset workflow (proposal pending). |
+| 2026-11-11 (AP-68, AP-69) | Owner: skin approved in principle; hands need refinement; sweater and shoes unchanged. Hands v3 (curved, sweeping rounded fingers, smaller palm) produced as new files; v2 and earlier preserved. Not promoted; awaiting visual approval. |
+| 2026-11-11 (AP-67) | Owner approved controlled corrections of Candidate 04. Skin-only colour correction and vector rounded-mitt hands produced as new files (v2), with masks, pixel-diff proof, comparison sheets and an asset register. Not promoted; awaiting visual approval. |
+| 2026-11-11 (AP-63 to AP-66) | Owner conditionally approved Image 4 and approved Image 5 as an alternative plate; required skin and hand corrections; authorised a resolution investigation. Local tools inspected, upscaling tested on copies, correction plan written. Nothing executed beyond tests. Awaiting approval. |
+| 2026-11-11 (AP-61, AP-62) | AP-58 to AP-60 approved. Two further Codex images generated (character master, environment master) as production candidates; both below the 2048 px target. Assessed; awaiting approval. |
+| 2026-11-11 (AP-58 to AP-60) | Owner approved and the work completed: six-pose extraction, character/environment compositing, 8 s vertical render with the unmodified renderer. No generation, installs, deletions or commits. Stopped for creative direction. |
+| 2026-11-11 (VISUAL IDENTITY LOCKED) | **Owner permanently locked the visual identity** to the approved look-development image: simple expressive 2D characters plus richly illustrated cinematic 2D environments; the character in the image is the master character; all future characters and environments must belong to the same universe; no alternatives, redesigns or silent changes (AP-51 to AP-57). The two authorised technical tests were run (one Codex call each) and passed: strongly on-model characters; near-identical empty room. The canonical image was hashed, set read-only and backed up. V1, V2, V5, V8, V11 resolved; V3 partly; D2/D3 superseded. Old looks archived or marked historical. |
+| 2026-11-11 (owner confirmation) | **Owner explicitly confirmed the Kids session as sole shared-infrastructure coordinator for both projects** (AP-44) and confirmed five mandatory safeguards (AP-45 to AP-49): real large-upload testing of Caddy; no irreplaceable assets in Garage before an off-server backup and a successful restore test; one heavy render across both projects initially; SSH hardening only with verified key access and a rollback; public services on 80/443 with SSH restricted separately. **Not blanket approval** (AP-50): each implementation gate still needs the owner. P16 resolved; P4, P6, P12 updated. No install, deployment, SSH, firewall or code change was made. |
+| 2026-11-11 (look-dev) || 2026-11-11 (look-dev) | The owner said they still saw "the Femi sketch" (the grey placeholder kept Femi's body shape) and asked for the idea switched to something like their reference image. **Action:** vector boards moved (not deleted) to `bible/concepts/technical-tests/` as technical evidence only; **one Codex image generated** (no reference attached; prompt forbids imitating any creator) showing a flat thin-limbed character in a richly illustrated, layered room: `bible/concepts/lookdev-richenv/`. V6 partly exercised (1 of 4); V11 added (is this the direction?). The Kids session replied with matching, non-colliding names (VPS section); P16 added (who owns shared infrastructure). |
+| 2026-11-11 (VPS) || 2026-11-11 (VPS) | Owner moved the architecture: **the Contabo VPS is the central production environment for both projects; the Windows machine is administration only** (AP-40 to AP-43). Read-only inspection done (2 SSH sessions, nothing changed); `docs/VPS_PRODUCTION_READINESS.md` written; P1–P15 raised; Kids session coordinated by message (names exchanged; nothing agreed on its side yet). G2 partly informed. Deployment and all shared-infrastructure changes remain unapproved. |
+| 2026-11-11 (images) | Owner pointed out Femi was still visible across the concept images. **Action taken:** all Femi boards **moved (not deleted)** to `bible/concepts/_archive-retired-femi/`; every concept board, the thin-limb variant, the Codex-plate composite and the layered-depth spike were regenerated with a **neutral placeholder figure** (stand-in, not a character; no name, glasses or identity); the visual documents were corrected. The new character remains an open decision (V8). |
+| 2026-11-11 (storage, second review) || 2026-11-11 (storage, second review) | Owner reviewed the final Garage proposal: **approved the architecture direction**; confirmed local-first rendering (AP-25), separate project buckets (AP-27, AP-28), **write-once production versions with checksum manifests (new AP-37)** and a **fixed working directory (new AP-38)**; **deployment and production cutover not approved (AP-39)**. G7 partly approved; G17 approved in principle. **The owner's message was cut off after these four items; the "few important details to settle first" were not received and are awaited.** |
+| 2026-11-11 (storage, final) | Owner **approved Garage architecture principles** (AP-25 to AP-36): local-first, shared Garage service, dedicated bucket and credentials per project, Kids project fully separate, active files local, upload approved assets/outputs, private by default, independent off-server backups, TLS and secure credentials, selective sync, no streaming or mounting, no publishing automation. G1 approved; G12 resolved; G3, G6, G9, G11 partly approved; **G2 (topology) and others stay open until server specifications are confirmed**. G13–G18 added. **Architecture approval is not deployment approval.** Final proposal written; nothing deployed. |
+| 2026-11-11 (storage) | Owner is considering self-hosted Garage instead of AWS S3 (one shared service, a bucket and key per project). Assessment written; G1–G12 proposed, all open. Nothing installed, created or changed. |
+| 2026-11-11 (multi-platform) || 2026-11-11 (multi-platform) | Owner approved a multi-platform brand: YouTube, TikTok, Facebook; 9:16 primary, 16:9 secondary; no double production; no automation or APIs yet (AP-19 to AP-24). V10 resolved. D14 superseded; D17 and parts of the content strategy need re-planning. M10–M16 proposed. Platform research done: YouTube official pages read; TikTok and Meta only via secondary sources. |
+| 2026-11-11 (reference received) || 2026-11-11 (reference received) | V7 resolved (reference screenshot received and inspected). V10 added (vertical-first?). Reference kept outside the repo. |
+| 2026-11-11 (later) | Owner direction changes recorded as AP-16 to AP-18: world at large (no African-specific content), Femi retired, thin-limb/rich-environment exploration direction. V4 withdrawn; V6–V9 added. Banners added to ten Bible documents; no Bible content rewritten. |
+| 2026-11-11 | Created this register. Added V1–V5 after the owner reopened visual identity (preferred emerging direction: 2.5D Modern Pop; Inkblock remains an alternative). Recorded AP-15 (Codex policy). |

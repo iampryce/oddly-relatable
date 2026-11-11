@@ -1,0 +1,70 @@
+{
+  "fingerprint": "f9b1289444266c958740ce78e7bb3ffed453b9fa515500f8a28c83dc372e0145",
+  "preview_seconds": 6,
+  "output": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\output\\preview.mp4",
+  "output_sha256": "fdbdc5f5eb993794d707ffbd8499554771db77bacac4e583bedc3fa62a286af1",
+  "original_voice_sha256": "99d79690f0403852dd30bb85dfe3949d3e4cd3ddc989397aa51b43d5b775fd65",
+  "original_voice_duration": 6,
+  "voice_rate": "unchanged; leading/trailing padding only",
+  "frames": 180,
+  "duration": 6,
+  "cache_hits": 0,
+  "shot_count": 3,
+  "full_decode": "pass",
+  "caption_count": 3,
+  "human_review": "required; technical checks are not acceptance",
+  "inputs": [
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\doom-tint.png",
+      "sha256": "7436e9b144db5328d872cd2f3c15f9a136824c36f0d35bf4131bed7e99a5e7e1"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-frozen-shadow.png",
+      "sha256": "9676580b507911e54c523e92311cbf0834a28e4053c1358f32cb5d9041fc1087"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-frozen.png",
+      "sha256": "363b4d2d7e6bd2e1954f68c187b5aa4e2e5d6201859c7e066e516548610c82c1"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-plead-shadow.png",
+      "sha256": "934916c254f470bbea841c54b2af6d4d7a4e674edafdf8444920a6470a5081b4"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-plead.png",
+      "sha256": "d378a9284bc2352ca45e13b7bc906097a9656f1d8f983170202f4ddc9c3d705a"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-text-shadow.png",
+      "sha256": "ed7e7a9733e5ea842dc1a2851b626bc5ea6d0969ed155bfc5f49a51c09524616"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\figure-text.png",
+      "sha256": "1c699fcc96e8423a79db8a9b6b0073f533ef2743db70dea5db7bde5f915484c8"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\room-back.png",
+      "sha256": "cae8e8b1557e2b98449a128ac9ddfb3739eda0d3d846878d0992c57484f9a365"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\room-front.png",
+      "sha256": "40928f6e1bf38b680783a6d3d29dc3f052fb909897ba68b14f0e13c92729cfc8"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\assets\\room-mid.png",
+      "sha256": "ea57139ea102bcf65ebfbc7863ffe7da7ad5c3faa21b9000095ecac7aa504291"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-studio-work\\spike-layered-depth-placeholder\\silent.wav",
+      "sha256": "99d79690f0403852dd30bb85dfe3949d3e4cd3ddc989397aa51b43d5b775fd65"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\Caveat.ttf",
+      "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988"
+    },
+    {
+      "path": "C:\\Users\\PC\\Desktop\\Works\\stickman-video-director\\skills\\directing-stickman-videos\\assets\\fonts\\NotoSans.ttf",
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+    }
+  ]
+}
