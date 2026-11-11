@@ -1,0 +1,31 @@
+.worktrees/
+node_modules/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+autopilot-work/
+
+# --- Added when the private oddly-relatable repository was created ---
+# Work/render output and cached frames (rebuildable) and the duplicate handoff copy
+studio-work/
+handoff-AP74/
+# Copyrighted third-party reference screenshots must not be committed
+**/references/
+# Keys, certificates, credentials, state, dumps and local assistant state
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+credentials*
+*.tfstate*
+*.dump
+.claude/
+# Windows noise
+Thumbs.db
+desktop.ini
+
+# Project LICENSE removed from this repository at the owner's request (file kept locally, not committed)
+/LICENSE
