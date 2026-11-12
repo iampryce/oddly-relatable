@@ -1,6 +1,6 @@
 # Project Status — Stickman Comedy Studio
 
-**Last updated:** 2026-11-12 (after AP-83, local studio) · **Updated by:** Claude Code
+**Last updated:** 2026-11-12 (after AP-84B1, generation foundation) · **Updated by:** Claude Code
 **Repository:** private GitHub repository `iampryce/oddly-relatable`, default branch `main` (local working copy `C:\Users\PC\Desktop\Works\stickman-video-director`). Commits are signed and pushed with normal pushes. Latest verified milestone commit: `db1bfd3746322c6db46502935ce1add822035611` (AP-79). Earlier: AP-80 `a0245d6bbbc76a511ad4b2c5a56de57f46b67890`, AP-78 `a0c044f2bbc1ca3eb2f9eb7b3fb4cdc6bea7b1e5`.
 **Roles:** Claude Code = technical and creative production agent. ChatGPT = creative and architectural decision partner. Project owner = final approval.
 
@@ -13,6 +13,7 @@
 | **TEST assets awaiting owner review** | None at present |
 | **Production toolkit** | `production/` (AP-78, AP-79, AP-82): story, formats (text-chat implemented), cast by character ID, camera, transitions, and the one-command `produce` run (compile, audio bed, storyboard, MP4, audio export, QA, manifest); 68/68 tests; renderer unchanged |
 | **Studio (local web app)** | `studio/` (AP-83): `node studio/server.mjs`, http://127.0.0.1:4317/; episodes, background production runs, live progress, MP4/QA/storyboard viewing, human review records; 8/8 tests |
+| **Asset generation (AP-84)** | Architecture approved in principle ($0 GPU budget). AP-84B1 foundation built: generation jobs, `none`/`fake` adapters, quarantine, human review, versioned registry proposals (no registry writes); no GPU, models or real generation |
 | **Script** | Short 001 `SCRIPT_V2.md` approved as the current working script (hook "Four words. No warning.") |
 | **Final production approval** | **Not given.** No final production master. Short 001 has been produced end to end as a technical run (AP-82, QA pass with softness warnings); it is not approved for publication. Open quality issue: soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold |
 

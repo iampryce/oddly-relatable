@@ -14,7 +14,7 @@ node studio/server.mjs
 - `npm --prefix studio start` runs the same server without Node's "SQLite is experimental" notice.
 - **Options:**
   - `STUDIO_PORT` (default `4317`).
-  - `STUDIO_WORKSPACE` (default `studio-work/studio`, git-ignored). It holds `studio.db`, `runs/<run-id>/` and `logs/<run-id>.log`.
+  - `STUDIO_GEN_ADAPTER` (`none` by default, or `fake`), and `STUDIO_WORKSPACE` (default `studio-work/studio`, git-ignored). The workspace holds `studio.db`, `runs/<run-id>/` and `logs/<run-id>.log`.
 - **Tests:** `node --disable-warning=ExperimentalWarning --test studio/tests/*.test.mjs`.
 
 **No dependencies.** It uses Node's built-in `node:http` and `node:sqlite` (Node ≥ 22.5; tested on Node 24) and a no-build ES-module dashboard. No React, Express, Redis or Docker: one local user, one machine, no build step to maintain.
@@ -72,6 +72,26 @@ node studio/server.mjs
 - **Separate from QA:** a QA pass never approves anything. A finished run shows "awaiting review" until a person records a decision with a note.
 - **Audit history:** decisions are kept as an append-only history per run and per episode.
 - **Nothing downstream:** recording a decision does **not** call the renderer's `approve`, does not render anything further, and does not publish. Episodes over 60 s still need the owner's own approval note through `produce --approval-note` (AP-82).
+
+## Generation foundation (AP-84B1)
+
+A local, zero-cost foundation for future GPU-generated assets. It has no GPU, no external service and no models. Nothing is generated except labelled test fixtures.
+
+- **Jobs:** `gen_jobs` goes `queued` → `running` → `candidate_ready` | `failed` | `cancelled`. A person then moves a ready job to `approved` or `rejected`. Generation jobs are separate from production runs. Each job records the asset type and key, description, episode, adapter, who started it, the attempt number and parent job, progress, the error, and whether it can be retried.
+- **Adapters** are set by server configuration only (`STUDIO_GEN_ADAPTER`, never by API clients):
+  - `none` (the default) always fails a job with "No generation worker is configured" and never produces anything.
+  - `fake` produces a deterministic, striped **SYNTHETIC TEST FIXTURE / NOT ARTWORK** card. Identical requests give byte-identical files.
+  - RunPod and ComfyUI adapters are future milestones.
+- **Quarantine:** `<workspace>/quarantine/<job-id>/` only, never inside `production/`, `bible/` or `skills/`.
+  - File names are whitelisted (`[a-z0-9-].png|json`).
+  - Files are write-once (never overwritten) and capped at 20 MB.
+  - Every file is hashed with SHA-256, and its provenance (job, adapter, request, seed, hash) is recorded in `gen_candidates`, which cannot be modified.
+- **Review:** approve (a candidate must be named), reject, or request regeneration (a new job with attempt + 1). A note is always required. Decisions go to `gen_reviews`, which the database makes append-only.
+- **Approval never changes registries or artwork.** It creates a **registry proposal** (`gen_registry_proposals`) with the next version for that entry; an existing registry entry counts as version 1, so a new pose 02 is proposed as `02@v2`. Approval refuses a candidate whose file changed since it was recorded. Synthetic fixtures are recorded as **not promotable**.
+- **Not built yet:** promoting an approved proposal into `production/characters/*.json` or `environments.json` (a new version entry with feet anchor, figure height and approval class) is a later milestone.
+- **Restart:** queued jobs resume. Jobs left running are marked `failed` (interrupted, retryable), because in-process work cannot survive a restart.
+- **API:** `GET /api/generation`, `GET|POST /api/generation/jobs`, `GET /api/generation/jobs/:id`, `POST /api/generation/jobs/:id/cancel`, `POST /api/generation/jobs/:id/reviews`, and `GET /media/generation/:id/<name>` (whitelisted, served as data).
+- **Dashboard:** `#/generation` (jobs and a new-job form) and `#/generation/<job-id>` (candidates with previews, hash and provenance, review, history, proposals).
 
 ## Security
 

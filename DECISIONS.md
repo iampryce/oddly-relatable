@@ -105,6 +105,8 @@ Research confidence so far: YouTube Shorts length and disclosure rules were read
 | **AP-81** | **Documentation reconciliation (2026-11-12):** PROJECT_STATUS, HANDOFF, DECISIONS, NEXT_STEPS and PROGRESS_LOG brought in line with AP-79 (commit `db1bfd3746322c6db46502935ce1add822035611`); historical entries kept and annotated, not rewritten. Recorded the open production-quality issue: soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold. No code, artwork, renderer or approval changes. |
 | **AP-82** | **End-to-end production engine (2026-11-12),** from the owner's brief titled "AP-80: End-to-End Production Engine" (renumbered: AP-80 was already used). Implemented in `production/` (`produce` command, audio assembly, QA). Short 001 produced and QA-passed as a technical run. No renderer, artwork or approval changes; no generated or downloaded audio. Open: soft close-ups (QA warnings), audio sourcing, final production approval and publication remain the owner's decisions. |
 | **AP-83** | **Local web studio MVP (2026-11-12):** `studio/` around the existing production engine (see `studio/README.md`). Local only (127.0.0.1), no new dependencies, no cloud, no publishing. Human review decisions are recorded separately from QA and never trigger the renderer's approval or any publication. |
+| **AP-84A** | **GPU visual generation architecture approved in principle by the owner (2026-11-12).** Initial GPU experiment budget: **$0**. No GPU provisioning, RunPod account, external generation APIs, model downloads or artwork changes until separately approved. |
+| **AP-84B1** | **Generation foundation implemented (2026-11-12, zero cost):** generation jobs, `none`/`fake` adapters, quarantine, human review, append-only history, versioned registry proposals (no registry writes). See `studio/README.md`. AP-84B2 not started; needs review and approval. |
 
 **Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
 
@@ -246,6 +248,7 @@ Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which
 
 | Date | Change |
 |---|---|
+| 2026-11-12 (AP-84B1) | GPU architecture approved in principle ($0 budget); zero-cost generation foundation added to the studio; no GPU, models or generation of artwork. |
 | 2026-11-12 (AP-83) | Local web studio added (episodes, background production runs, live progress, MP4/QA/storyboard viewing, review records); Short 001 produced through it; no publication approval. |
 | 2026-11-12 (AP-82) | One-command production engine (`produce`), audio assembly and automated QA added; Short 001 produced end to end (technical run, QA pass with softness warnings); no publication approval. |
 | 2026-11-12 (AP-81) | Records reconciled with AP-79; superseded statements annotated; soft close-up issue recorded as open before final production. |

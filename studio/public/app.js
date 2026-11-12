@@ -30,7 +30,7 @@ function toast(msg, bad = false) {
   const t = h(`div.toast${bad ? '.notice.error' : ''}`, {role: 'status'}, msg);
   document.body.append(t); setTimeout(() => t.remove(), 4000);
 }
-function render(...nodes) { view.replaceChildren(...nodes); }
+function render(...nodes) { view.replaceChildren(...nodes.filter(n => n !== null && n !== undefined && n !== false)); }
 function card(title, ...kids) { return h('section.card', {}, title ? h('h2', {}, title) : null, ...kids); }
 
 // ---------- pages
@@ -213,6 +213,83 @@ function reviewCard(r) {
   return card('Human review', h('div.row', {}, 'Current: ', pill(r.review.state)), form, h('h3', {}, 'History'), history);
 }
 
+// ---------- generation (AP-84B1): jobs, quarantined candidates, human review, registry proposals
+const genUrl = (jobId, name) => `/media/generation/${encodeURIComponent(jobId)}/${encodeURIComponent(name)}`;
+
+async function generationPage() {
+  const [cfg, jobs, eps] = await Promise.all([api('/api/generation'), api('/api/generation/jobs'), api('/api/episodes')]);
+  const type = h('select', {id: 'gtype'}, cfg.assetTypes.map(t => h('option', {value: t}, t)));
+  const key = h('input', {id: 'gkey', placeholder: 'character-01/pose-07  or  living-room-night', maxlength: 129, required: true});
+  const desc = h('textarea', {id: 'gdesc', maxlength: 1000, placeholder: 'What should the asset show? (pose, expression, framing)', required: true});
+  const ep = h('select', {id: 'gep'}, h('option', {value: ''}, '(no episode)'), eps.map(e => h('option', {value: e.id}, `${e.title} (${e.id})`)));
+  const submit = h('button.primary', {type: 'submit'}, 'Queue generation job');
+  const form = h('form', {onsubmit: async ev => {
+    ev.preventDefault(); submit.disabled = true;
+    try {
+      const j = await api('/api/generation/jobs', {method: 'POST', body: JSON.stringify({assetType: type.value, assetKey: key.value.trim(), description: desc.value, episodeId: ep.value || null})});
+      location.hash = `#/generation/${j.id}`;
+    } catch (e) { toast(e.message, true); submit.disabled = false; }
+  }}, h('label', {for: 'gtype'}, 'Asset type'), type, h('label', {for: 'gkey'}, 'Asset key'), key, h('label', {for: 'gdesc'}, 'Description'), desc,
+    h('label', {for: 'gep'}, 'Episode (optional)'), ep, h('div.row', {}, submit));
+  render(
+    h('div.head', {}, h('div', {}, h('h1', {}, 'Generation'), h('div.muted', {}, 'Candidate assets are quarantined and only enter a registry proposal after a human approves them')),
+      h('div.row', {}, pill(cfg.available ? 'pass' : 'warn', `adapter: ${cfg.adapter}`))),
+    h('div.notice', {}, cfg.reason), h('div.notice', {}, cfg.note),
+    h('div.grid.two', {},
+      card('Generation jobs', jobs.length ? h('div.table-wrap', {}, h('table', {},
+        h('thead', {}, h('tr', {}, h('th', {}, 'Job'), h('th', {}, 'Asset'), h('th', {}, 'Status'), h('th', {}, 'Adapter'), h('th', {}, 'Attempt'), h('th', {}, 'Created'))),
+        h('tbody', {}, jobs.map(j => h('tr', {}, h('td.mono', {}, h('a', {href: `#/generation/${j.id}`}, j.id)), h('td', {}, `${j.assetType} · `, h('span.mono', {}, j.assetKey)),
+          h('td', {}, pill(j.status.replace('_', '-'), j.status.replace('_', ' '))), h('td.mono', {}, j.adapter), h('td', {}, String(j.attempt)), h('td', {}, fmtDate(j.createdAt))))))) : h('div.empty', {}, 'No generation jobs yet')),
+      card('New generation job', form)));
+  if (jobs.some(j => ['queued', 'running'].includes(j.status))) poll(generationPage, 2000);
+}
+
+async function genJobPage(id) {
+  const j = await api(`/api/generation/jobs/${encodeURIComponent(id)}`);
+  const active = ['queued', 'running'].includes(j.status);
+  const cancel = active ? h('button.danger', {type: 'button', onclick: async () => { try { await api(`/api/generation/jobs/${id}/cancel`, {method: 'POST', body: '{}'}); genJobPage(id); } catch (e) { toast(e.message, true); } }}, 'Cancel job') : null;
+  const candCards = j.candidates.map(c => card(null,
+    h('div.row', {}, h('b.mono', {}, c.name), c.synthetic ? pill('warn', 'synthetic test fixture') : null),
+    c.mediaType === 'image/png' ? h('a', {href: genUrl(id, c.name), target: '_blank', rel: 'noopener'}, h('img.storyboard', {src: genUrl(id, c.name), alt: c.name})) : null,
+    h('dl.kv', {}, h('dt', {}, 'Candidate ID'), h('dd', {}, String(c.id)), h('dt', {}, 'SHA-256'), h('dd.mono', {}, c.sha256), h('dt', {}, 'Size'), h('dd', {}, `${fmtBytes(c.bytes)}${c.width ? ` · ${c.width}×${c.height}` : ''}`),
+      h('dt', {}, 'Provenance'), h('dd.mono', {}, JSON.stringify(c.provenance)))));
+  render(
+    h('div.head', {}, h('div', {}, h('h1', {}, 'Generation job ', h('span.mono', {}, j.id)), h('div.muted', {}, `${j.assetType} · `, h('span.mono', {}, j.assetKey), j.episodeId ? ` · episode ${j.episodeId}` : '')),
+      h('div.row', {}, pill(j.status.replace('_', '-'), j.status.replace('_', ' ')), cancel)),
+    j.error ? h('div.notice.error', {}, j.error, j.retryable ? ' (retryable)' : '') : null,
+    h('div.grid.run-grid', {},
+      h('div.grid', {},
+        card('Job', h('dl.kv', {}, h('dt', {}, 'Description'), h('dd', {}, j.description), h('dt', {}, 'Adapter'), h('dd.mono', {}, j.adapter), h('dt', {}, 'Initiated by'), h('dd', {}, j.initiatedBy),
+          h('dt', {}, 'Attempt'), h('dd', {}, String(j.attempt)), h('dt', {}, 'Parent job'), h('dd', {}, j.parentJobId ? h('a.mono', {href: `#/generation/${j.parentJobId}`}, j.parentJobId) : '—'),
+          h('dt', {}, 'Created'), h('dd', {}, fmtDate(j.createdAt)), h('dt', {}, 'Finished'), h('dd', {}, fmtDate(j.finishedAt)))),
+        genReviewCard(j),
+        card('Registry proposals', j.proposals.length ? h('ul.feed', {}, j.proposals.map(p => h('li', {}, h('span.mono', {}, `${p.registry} · ${p.entryKey}@v${p.version}`), ' ',
+          pill(p.promotable ? 'pass' : 'warn', p.promotable ? 'promotable later' : 'not promotable'), h('div.muted', {}, p.reason), h('div.muted.mono', {}, `candidate ${p.candidateId} · ${p.candidateSha256.slice(0, 16)}…`)))) : h('div.muted', {}, 'None. Approval creates a versioned proposal; registries are never changed here.'))),
+      h('div.grid', {}, candCards.length ? candCards : card('Candidates', h('div.empty', {}, active ? 'Waiting for the worker…' : 'No candidates.'))))
+  );
+  if (active) poll(() => genJobPage(id), 1500);
+}
+
+function genReviewCard(j) {
+  const history = j.reviews.length ? h('ul.feed', {}, [...j.reviews].reverse().map(r => h('li', {}, pill(r.decision === 'approve' ? 'pass' : r.decision === 'reject' ? 'fail' : 'warn', r.decision),
+    r.candidateId ? ` candidate ${r.candidateId}` : '', r.regeneratedJobId ? h('span', {}, ' → ', h('a.mono', {href: `#/generation/${r.regeneratedJobId}`}, r.regeneratedJobId)) : null,
+    h('div', {}, r.note), h('div.muted', {}, `${r.reviewer} · ${fmtDate(r.createdAt)}`)))) : h('div.muted', {}, 'No decisions yet.');
+  if (j.status !== 'candidate_ready') return card('Human review', h('div.muted', {}, 'Review is available when candidates are ready.'), history);
+  const decision = h('div.decisions', {}, [['approve', 'Approve candidate'], ['reject', 'Reject'], ['regenerate', 'Request regeneration']].map(([v, t], i) => h('label', {}, h('input', {type: 'radio', name: 'gdecision', value: v, checked: i === 1 ? true : undefined}), t)));
+  const cand = h('select', {id: 'gcand'}, j.candidates.map(c => h('option', {value: String(c.id)}, `${c.id}: ${c.name}`)));
+  const note = h('textarea', {id: 'gnote', maxlength: 2000, required: true, placeholder: 'Reason (required)'});
+  const submit = h('button.primary', {type: 'submit'}, 'Record decision');
+  const form = h('form', {onsubmit: async ev => {
+    ev.preventDefault(); submit.disabled = true;
+    try {
+      const r = await api(`/api/generation/jobs/${j.id}/reviews`, {method: 'POST', body: JSON.stringify({decision: decision.querySelector('input:checked').value, candidateId: Number(cand.value), note: note.value})});
+      toast('Decision recorded'); location.hash = r.regeneratedJobId ? `#/generation/${r.regeneratedJobId}` : `#/generation/${j.id}`; genJobPage(r.regeneratedJobId || j.id);
+    } catch (e) { toast(e.message, true); submit.disabled = false; }
+  }}, h('div.notice', {}, 'Approval is an explicit human decision. It creates a versioned registry proposal only; it never edits approved artwork or registries.'),
+    decision, h('label', {for: 'gcand'}, 'Candidate'), cand, h('label', {for: 'gnote'}, 'Note'), note, h('div.row', {}, submit));
+  return card('Human review', form, h('h3', {}, 'History'), history);
+}
+
 // ---------- router, polling, theme, engine status
 function poll(fn, ms) { clearTimeout(timer); timer = setTimeout(() => { if (document.visibilityState === 'visible') fn().catch(() => {}); else poll(fn, ms); }, ms); }
 async function route() {
@@ -227,6 +304,8 @@ async function route() {
     else if (parts[0] === 'episodes') await episodes();
     else if (parts[0] === 'runs' && parts[1]) await runDetail(decodeURIComponent(parts[1]));
     else if (parts[0] === 'runs') await runsPage();
+    else if (parts[0] === 'generation' && parts[1]) await genJobPage(decodeURIComponent(parts[1]));
+    else if (parts[0] === 'generation') await generationPage();
     else render(h('div.empty', {}, 'Page not found'));
   } catch (e) { render(h('div.notice.error', {}, e.message)); }
 }

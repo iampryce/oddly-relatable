@@ -9,6 +9,7 @@ import {openDb, now, logEvent, runRow} from './db.mjs';
 import {LocalStorage, RUN_ID} from './storage.mjs';
 import {JobRunner, TERMINAL} from './jobs.mjs';
 import {listStories, storyInfo} from './stories.mjs';
+import {createGeneration} from './generation.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const STATIC = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css'};
@@ -26,10 +27,12 @@ const cleanText = (v, name, min, max) => {
   return t;
 };
 
-export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true} = {}) {
+export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true, genAdapter = 'none', genTimeoutMs} = {}) {
   const storage = new LocalStorage(workspace);
   const db = openDb(path.join(storage.root, 'studio.db'));
   const jobs = new JobRunner({db, storage, command, pollMs});
+  // Generation (AP-84B1): separate jobs, quarantine and reviews; the adapter is server configuration, never chosen by clients.
+  const gen = createGeneration({db, workspace: storage.root, adapter: genAdapter, ...(genTimeoutMs ? {timeoutMs: genTimeoutMs} : {})});
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
 
   // ---------- data helpers
@@ -111,6 +114,16 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
       return storage.readLog(m[1], offset);
     }],
     ['POST', /^\/api\/runs\/(r-[0-9a-f-]+)\/cancel$/, m => { if (!RUN_ID.test(m[1])) throw fail(400, 'invalid run id'); return jobs.cancel(m[1]); }],
+    // ---------- generation (AP-84B1)
+    ['GET', /^\/api\/generation$/, () => {
+      const count = st => db.prepare('SELECT COUNT(*) AS n FROM gen_jobs WHERE status = ?').get(st).n;
+      return {...gen.config(), counts: Object.fromEntries(['queued', 'running', 'candidate_ready', 'failed', 'cancelled', 'approved', 'rejected'].map(st => [st, count(st)]))};
+    }],
+    ['GET', /^\/api\/generation\/jobs$/, () => gen.list()],
+    ['POST', /^\/api\/generation\/jobs$/, (m, body) => ({status: 202, body: gen.create({episodeId: body.episodeId ?? null, assetType: body.assetType, assetKey: body.assetKey, description: body.description, initiatedBy: body.initiatedBy ?? 'owner'})})],
+    ['GET', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); const d = gen.detail(m[1]); if (!d) throw fail(404, 'generation job not found'); return d; }],
+    ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/cancel$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return gen.cancel(m[1]); }],
+    ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/reviews$/, (m, body) => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return {status: 201, body: gen.review(m[1], {decision: body.decision, candidateId: body.candidateId, note: body.note, reviewer: body.reviewer ?? 'owner'})}; }],
     ['POST', /^\/api\/runs\/(r-[0-9a-f-]+)\/reviews$/, (m, body) => {
       if (!RUN_ID.test(m[1])) throw fail(400, 'invalid run id');
       const run = jobs.get(m[1]);
@@ -145,6 +158,15 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
     storage.open(runId, key).pipe(res);
   }
 
+  // Quarantined candidates: whitelisted names only, served as data (never executed), never cached.
+  function serveCandidate(res, jobId, name) {
+    if (!gen.isJobId(jobId)) return send(res, 400, {error: 'invalid generation job id'});
+    const st = gen.quarantine.stat(jobId, name);
+    if (!st) return send(res, 404, {error: 'not found'});
+    res.writeHead(200, {'Content-Type': st.type, 'Content-Length': st.size, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Disposition': 'inline'});
+    gen.quarantine.open(jobId, name).pipe(res);
+  }
+
   function send(res, status, body) {
     const data = JSON.stringify(body);
     res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': Buffer.byteLength(data)});
@@ -172,6 +194,8 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
       }
       const media = /^\/media\/runs\/([^/]+)\/(.+)$/.exec(url.pathname);
       if (req.method === 'GET' && media) return serveMedia(req, res, media[1], media[2]);
+      const genMedia = /^\/media\/generation\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+      if (req.method === 'GET' && genMedia) return serveCandidate(res, genMedia[1], genMedia[2]);
       if (!url.pathname.startsWith('/api/')) return send(res, 404, {error: 'not found'});
       let body = {};
       if (req.method === 'POST') {
@@ -195,13 +219,14 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
   });
 
   return {
-    server, db, jobs, storage,
+    server, db, jobs, storage, gen,
     async listen(host = '127.0.0.1') {
       if (!['127.0.0.1', '::1', 'localhost'].includes(host)) throw new Error('The studio only binds to a loopback address');
       const recovered = jobs.recover();
+      recovered.generation = gen.recover();
       await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
       return recovered;
     },
-    async close() { jobs.stop(); await new Promise(r => server.close(() => r())); server.closeAllConnections?.(); db.close(); },
+    async close() { jobs.stop(); gen.stop(); await new Promise(r => server.close(() => r())); server.closeAllConnections?.(); db.close(); },
   };
 }
