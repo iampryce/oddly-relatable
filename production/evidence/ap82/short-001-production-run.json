@@ -1,0 +1,74 @@
+{
+ "tool": "oddly-relatable produce",
+ "version": "1.1.0",
+ "story": "production/stories/short-001-v2.story.json",
+ "id": "short-001-v2",
+ "status": "produced",
+ "startedAt": "2026-11-12T07:41:32.598Z",
+ "stages": [
+  {
+   "stage": "environment",
+   "status": "done",
+   "seconds": 0
+  },
+  {
+   "stage": "compile",
+   "status": "done",
+   "seconds": 0.9
+  },
+  {
+   "stage": "audio",
+   "status": "done",
+   "seconds": 0
+  },
+  {
+   "stage": "storyboard",
+   "status": "done",
+   "seconds": 39
+  },
+  {
+   "stage": "render",
+   "status": "done",
+   "seconds": 141.9
+  },
+  {
+   "stage": "audio-export",
+   "status": "done",
+   "seconds": 0.3
+  },
+  {
+   "stage": "qa",
+   "status": "done",
+   "seconds": 17.2
+  }
+ ],
+ "layout": {
+  "ok": true,
+  "issues": [],
+  "warnings": [
+   "pose 02 (him) is enlarged 2.03x at the scene's largest zoom (above the 1.7x softness limit)",
+   "pose 03 (him) is enlarged 1.94x at the scene's largest zoom (above the 1.7x softness limit)",
+   "pose 05 (him) is enlarged 2.03x at the scene's largest zoom (above the 1.7x softness limit)",
+   "pose 06 (him) is enlarged 1.96x at the scene's largest zoom (above the 1.7x softness limit)"
+  ]
+ },
+ "render": {
+  "mode": "renderer preview covering the full 54 s",
+  "frames": 1620,
+  "rendererDecode": "pass"
+ },
+ "qa": {
+  "status": "pass",
+  "failed": 0,
+  "warnings": 4
+ },
+ "audio": {
+  "bed": "silent",
+  "voiceClips": 0,
+  "music": false,
+  "sfxCues": 17
+ },
+ "finishedAt": "2026-11-12T07:44:51.919Z",
+ "seconds": 199.3,
+ "humanApproval": "required before any publication; not granted by this run"
+}

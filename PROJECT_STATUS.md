@@ -1,6 +1,6 @@
 # Project Status — Stickman Comedy Studio
 
-**Last updated:** 2026-11-12 (after AP-81, documentation reconciliation) · **Updated by:** Claude Code
+**Last updated:** 2026-11-12 (after AP-82, production engine) · **Updated by:** Claude Code
 **Repository:** private GitHub repository `iampryce/oddly-relatable`, default branch `main` (local working copy `C:\Users\PC\Desktop\Works\stickman-video-director`). Commits are signed and pushed with normal pushes. Latest verified milestone commit: `db1bfd3746322c6db46502935ce1add822035611` (AP-79). Earlier: AP-80 `a0245d6bbbc76a511ad4b2c5a56de57f46b67890`, AP-78 `a0c044f2bbc1ca3eb2f9eb7b3fb4cdc6bea7b1e5`.
 **Roles:** Claude Code = technical and creative production agent. ChatGPT = creative and architectural decision partner. Project owner = final approval.
 
@@ -11,9 +11,9 @@
 | **Canonical master artwork** | `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (PROTECTED, visual identity permanently locked) |
 | **Approved working assets** | Character v3 (`candidate-04_corrected-v3.png`, approved working candidate); poses 02 worried phone, 05 pleading and 06 deadpan (skin-corrected, approved for working production use); pose 03 shocked (approved working TEST asset, splayed hands kept exactly) |
 | **TEST assets awaiting owner review** | None at present |
-| **Production toolkit** | `production/` 1.1 (AP-79): story, scene formats (text-chat implemented), cast by character ID, camera, pose transitions; 60/60 tests; renderer unchanged |
+| **Production toolkit** | `production/` (AP-78, AP-79, AP-82): story, formats (text-chat implemented), cast by character ID, camera, transitions, and the one-command `produce` run (compile, audio bed, storyboard, MP4, audio export, QA, manifest); 68/68 tests; renderer unchanged |
 | **Script** | Short 001 `SCRIPT_V2.md` approved as the current working script (hook "Four words. No warning.") |
-| **Final production approval** | **Not given.** No final production master; no final Short 001 video. AP-79 Short 001 preview is technical evidence only. Open quality issue: soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold |
+| **Final production approval** | **Not given.** No final production master. Short 001 has been produced end to end as a technical run (AP-82, QA pass with softness warnings); it is not approved for publication. Open quality issue: soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold |
 
 ## 1. Where we are
 
@@ -68,7 +68,7 @@
 | Python | 3.14.3; `PYTHONUTF8=1`; no `python3`; Whisper not installed |
 | GPU / Docker | None needed / installed, unused |
 | `doctor` | 6/6 |
-| Tests | Renderer suite (`node --test tests/*.test.mjs` in the skill folder): 132/135 pass, 1 skipped, 2 pre-existing environment failures (a test calls bare `ffprobe`, which is not on PATH; the Jensen baseline file list does not match the folder). Production toolkit: 60/60 (AP-79, 2026-11-12). Earlier: Python 11/14; shell 0/2 (Windows, macOS-only) |
+| Tests | Renderer suite (`node --test tests/*.test.mjs` in the skill folder): 132/135 pass, 1 skipped, 2 pre-existing environment failures (a test calls bare `ffprobe`, which is not on PATH; the Jensen baseline file list does not match the folder). Production toolkit: 68/68 (AP-82, 2026-11-12). Earlier: Python 11/14; shell 0/2 (Windows, macOS-only) |
 | Backups | `C:\Users\PC\Desktop\Works\_backups\stickman-pre-lf-20261111` |
 
 ## 5. Technical findings so far

@@ -1,0 +1,112 @@
+{
+ "status": "pass",
+ "failed": 0,
+ "warnings": 4,
+ "checks": [
+  {
+   "id": "assets-present",
+   "status": "pass",
+   "detail": "29 referenced files present"
+  },
+  {
+   "id": "assets-match-manifest",
+   "status": "pass",
+   "detail": "all hashed inputs unchanged since build"
+  },
+  {
+   "id": "file-exists",
+   "status": "pass",
+   "detail": "9038361 bytes"
+  },
+  {
+   "id": "video-codec",
+   "status": "pass",
+   "detail": "h264"
+  },
+  {
+   "id": "resolution",
+   "status": "pass",
+   "detail": "1080x1920 (expected 1080x1920)"
+  },
+  {
+   "id": "frame-rate",
+   "status": "pass",
+   "detail": "30 fps (expected 30)"
+  },
+  {
+   "id": "audio-stream",
+   "status": "pass",
+   "detail": "aac, 48000 Hz, 1 ch"
+  },
+  {
+   "id": "duration",
+   "status": "pass",
+   "detail": "54.000 s (expected 54 s)",
+   "fix": "check the voice/bed track length and shot coverage"
+  },
+  {
+   "id": "frame-count",
+   "status": "pass",
+   "detail": "1620 frames (expected 1620)",
+   "fix": "missing or extra frames; re-render"
+  },
+  {
+   "id": "full-decode",
+   "status": "pass",
+   "detail": "every frame and audio packet decoded without errors"
+  },
+  {
+   "id": "black-frames",
+   "status": "pass",
+   "detail": "no black run ≥ 0.5 s"
+  },
+  {
+   "id": "audio-clipping",
+   "status": "pass",
+   "detail": "peak -15.90 dBFS",
+   "fix": "lower music/voice gain"
+  },
+  {
+   "id": "audio-activity",
+   "status": "pass",
+   "detail": "peak -15.9 dBFS",
+   "fix": "SFX or bed expected but the track is silent"
+  },
+  {
+   "id": "audio-file",
+   "status": "pass",
+   "detail": "pcm_s16le, 48000 Hz, 1 ch"
+  },
+  {
+   "id": "audio-duration",
+   "status": "pass",
+   "detail": "54.000 s (expected 54 s)"
+  },
+  {
+   "id": "layout",
+   "status": "pass",
+   "detail": "no layout issues"
+  },
+  {
+   "id": "quality-warning-1",
+   "status": "warn",
+   "detail": "pose 02 (him) is enlarged 2.03x at the scene's largest zoom (above the 1.7x softness limit)"
+  },
+  {
+   "id": "quality-warning-2",
+   "status": "warn",
+   "detail": "pose 03 (him) is enlarged 1.94x at the scene's largest zoom (above the 1.7x softness limit)"
+  },
+  {
+   "id": "quality-warning-3",
+   "status": "warn",
+   "detail": "pose 05 (him) is enlarged 2.03x at the scene's largest zoom (above the 1.7x softness limit)"
+  },
+  {
+   "id": "quality-warning-4",
+   "status": "warn",
+   "detail": "pose 06 (him) is enlarged 1.96x at the scene's largest zoom (above the 1.7x softness limit)"
+  }
+ ],
+ "note": "Technical QA only. Publication requires the owner's review and approval."
+}

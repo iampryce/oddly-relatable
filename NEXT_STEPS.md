@@ -1,9 +1,10 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-12 (after AP-81, documentation reconciliation). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-12 (after AP-82, production engine). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
+0. **Produce command available (AP-82):** `node production/cli.mjs produce production/stories/short-001-v2.story.json studio-work/short-001-production` (needs FFMPEG/FFPROBE). Short 001 technical run: QA pass with 4 softness warnings; evidence `production/evidence/ap82/`.
 1. **Owner: review the AP-79 technical evidence** in `production/evidence/ap79/`: `short-001-ap79-technical-preview.mp4`, `short-001-ap79-storyboard.png`, `short-001-ap78-vs-ap79.png`, and the synthetic cast test `synthetic-two-member-technical-preview.mp4` / `synthetic-two-member-transitions-camera.png`.
 2. **Resolve soft character close-ups before final production:** soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold. First assess whether Short 001's camera framing can be adjusted (for example, lower medium zooms) without changing the story; only then decide whether higher-resolution character assets are needed (any new artwork or generation needs separate approval).
 3. **Owner decisions before production:** audio (silent, or licensed notification/typing sounds and music); whether any Short 001 pose change should use pop or crossfade (the script specifies none, so all are hard cuts); naming of Character 01.

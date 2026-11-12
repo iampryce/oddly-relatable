@@ -291,3 +291,9 @@ Chronological, newest last. Each entry records what was done, by which agent and
 - **Numbering note:** AP-80 (pose approvals, pose 06 correction) was carried out before AP-79 (camera and transitions), so the log lists AP-80 above AP-79. Earlier entries are historical and describe the state at the time.
 - **Open issue recorded:** soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold.
 - **No changes** to code, artwork, the renderer or any approval status.
+
+---
+
+## 2026-11-12 · AP-82: end-to-end production engine
+- AP-82 DONE (2026-11-12; owner brief titled "AP-80: End-to-End Production Engine", renumbered because AP-80 was already used): one-command production run `node production/cli.mjs produce <story> <out>` (validate and compile, then audio bed, storyboard, render with the unmodified renderer, audio export, QA, reports, hashed manifest). Short 001 produced end to end in 3 min 21 s: `render/short-001-v2.mp4` 1080x1920, 30 fps, 54.000 s, 1,620 frames, 9,038,361 bytes, byte-identical to the AP-79 preview (reproducible); audio 54.000 s, SFX only, peak -15.9 dBFS; QA 16/16 pass, 4 softness warnings. Audio pipeline accepts optional approved voice and music sources (hash and licence required; limiter; exact length); none exist yet, so Short 001 is SFX only. Episodes over 60 s need the owner's approval note before the renderer's full render (tool never writes approval). Toolkit tests 68/68; renderer suite unchanged. Technical acceptance only; publication needs the owner's review.
+- **New modules:** `production/lib/produce.mjs` (orchestration), `audio.mjs` (audio plan, bed, measurement), `qa.mjs` (video, audio and input checks); CLI `produce`. Tests: `audio.test.mjs`, `produce.test.mjs`.

@@ -1,8 +1,38 @@
-# Oddly Relatable production toolkit (AP-78, AP-79)
+# Oddly Relatable production toolkit (AP-78, AP-79, AP-82)
 
 Turns a story, written as structured data, into a project for the existing renderer (`skills/directing-stickman-videos/`), which is **not modified**. The toolkit only produces the renderer's normal `project.json` input and uses its public functions read-only.
 
 **No new dependencies.** It reuses the renderer's installed `@napi-rs/canvas` and bundled fonts (Noto Sans, Caveat). Requires Node ≥ 20 and, for preview and render, the `FFMPEG` and `FFPROBE` environment variables (as the renderer does).
+
+## Produce an episode (AP-82): one command
+
+```bash
+export FFMPEG=/path/to/ffmpeg FFPROBE=/path/to/ffprobe
+node production/cli.mjs produce production/stories/short-001-v2.story.json studio-work/short-001-production
+```
+
+Stages: validate and compile (characters and environments resolved by ID, hashes verified), then audio bed, storyboard, render with the **unmodified** renderer, audio export, QA, reports and manifest. Exit code 0 means `produced`; 2 means QA failed or the run is awaiting approval. Output folder:
+
+| Path | Content |
+|---|---|
+| `project/` | compiled renderer project (`project.json`, copied artwork, generated graphics, audio bed, renderer `output/`) |
+| `storyboard/storyboard-sheet.png`, `storyboard/frames/` | renderer-exact stills at every beat and camera move |
+| `render/<id>.mp4` | the episode (1080×1920, 30 fps) |
+| `audio/<id>.wav` | the final mixed audio, exported from the MP4 |
+| `reports/layout-report.json`, `reports/qa-report.json` | layout checks and machine-readable QA (pass / fail / warn per check, with fixes) |
+| `production-manifest.json` | inputs (story, registries, environment registry, artwork, audio sources) and outputs with SHA-256, renderer script hashes, git HEAD, Node and FFmpeg versions |
+| `production-run.json` | stage timings, status, errors |
+
+- **Overwrite protection:** a new or empty folder, or an earlier `produce` folder with `--replace`. Any other folder is refused, and nothing is deleted.
+- **Full-length render:** episodes up to 60 s are rendered in full through the renderer's `preview`. Longer episodes stop as `awaiting-approval` after a 60 s preview. Once the owner has reviewed it, re-run with `--approval-note "<owner's words>"`, and the renderer's own `approve` and `render` run. The tool never writes approval itself.
+- **Audio:** optional. A story may add `"audio": {"voice": [{source, sha256, licence, start, gain}], "music": {source, sha256, licence, gain, fadeIn, fadeOut}}`. Sources must be existing local files whose recorded hash matches, with a licence note. They are mixed with a limiter (no clipping) into a bed of the exact episode length, and the renderer adds its built-in SFX on top. Without sources the bed is silent, so the audio is SFX only. Nothing is downloaded or generated.
+- **QA checks:**
+  - Referenced assets are present and unchanged since the build.
+  - H.264 codec, resolution, frame rate, duration, and exact frame count (packet count).
+  - Full decode, black-frame runs (0.5 s or longer), audio present, no clipping, audio activity when SFX or a bed are expected.
+  - Audio file duration, and layout issues.
+  - Softness warnings are reported as `warn`.
+- **QA is technical only:** a pass is not publication approval.
 
 ## Commands
 
@@ -16,7 +46,7 @@ node production/cli.mjs storyboard studio-work/short-001-v2-ap79/project.json
 # Optional MP4 preview through the unmodified renderer CLI (max 60 s)
 node production/cli.mjs video studio-work/short-001-v2-ap79/project.json --seconds 60 --replace
 
-# Tests
+# Tests (renderer-backed and production tests need FFMPEG/FFPROBE)
 node --test production/tests/*.test.mjs
 ```
 
