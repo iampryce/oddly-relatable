@@ -1,13 +1,14 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-12 (after AP-79). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-12 (after AP-81, documentation reconciliation). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
 1. **Owner: review the AP-79 technical evidence** in `production/evidence/ap79/`: `short-001-ap79-technical-preview.mp4`, `short-001-ap79-storyboard.png`, `short-001-ap78-vs-ap79.png`, and the synthetic cast test `synthetic-two-member-technical-preview.mp4` / `synthetic-two-member-transitions-camera.png`.
-2. **Owner decisions before production:** audio (silent, or licensed notification/typing sounds and music); whether any Short 001 pose change should use pop or crossfade (the script specifies none, so all are hard cuts); naming of Character 01.
-3. **Final Short 001 production** (next milestone, needs explicit approval): final render, QA, platform-safe captions. No publishing.
-4. **Future formats** (phone call, split screen, face to face, solo) and **Character 02**: designed for in AP-79, each needs its own approval and artwork decision.
+2. **Resolve soft character close-ups before final production:** soft character close-ups: at the approved 1.5× zoom the four Short 001 poses are enlarged about 2× on screen (02: 2.03×, 03: 1.94×, 05: 2.03×, 06: 1.96×), above the 1.7× softness threshold. First assess whether Short 001's camera framing can be adjusted (for example, lower medium zooms) without changing the story; only then decide whether higher-resolution character assets are needed (any new artwork or generation needs separate approval).
+3. **Owner decisions before production:** audio (silent, or licensed notification/typing sounds and music); whether any Short 001 pose change should use pop or crossfade (the script specifies none, so all are hard cuts); naming of Character 01.
+4. **Final Short 001 production** (needs explicit approval, after item 2): final render, QA, platform-safe captions. No publishing.
+5. **Future formats** (phone call, split screen, face to face, solo) and **Character 02**: designed for in AP-79, each needs its own approval and artwork decision.
 
 **Approved now:** poses 02, 05 and 06 (working use); pose 03 (working TEST, splayed hands kept); character v3 (working candidate); SCRIPT_V2 (working script, hook "Four words. No warning."); AP-79 architecture and scope. **Not approved:** any final production master, final production, publishing.
 
