@@ -45,10 +45,12 @@ function prepareOut(outDir, replace) {
 
 export async function produceEpisode(storyFile, {outDir, replace = false, allowIssues = false, skipRender = false, skipStoryboard = false, approvalNote = null} = {}) {
   const t0 = Date.now(), stages = [];
+  // Each stage is recorded as "running" when it starts and saved, so a watcher (the studio) can show live progress.
   const stage = async (name, fn) => {
-    const s = Date.now();
-    try { const r = await fn(); stages.push({stage: name, status: 'done', seconds: +((Date.now() - s) / 1000).toFixed(1)}); return r; }
-    catch (e) { stages.push({stage: name, status: 'failed', error: e.message}); e.stage = name; throw e; }
+    const s = Date.now(), entry = {stage: name, status: 'running'};
+    stages.push(entry); save();
+    try { const r = await fn(); entry.status = 'done'; entry.seconds = +((Date.now() - s) / 1000).toFixed(1); save(); return r; }
+    catch (e) { entry.status = 'failed'; entry.error = e.message; e.stage = name; throw e; }
   };
   const storyPath = path.resolve(storyFile);
   if (!fs.existsSync(storyPath)) throw new Error(`Story file not found: ${storyFile}`);

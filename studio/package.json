@@ -1,0 +1,11 @@
+{
+  "name": "oddly-relatable-studio",
+  "private": true,
+  "type": "module",
+  "description": "Local web studio for the Oddly Relatable production engine (no dependencies).",
+  "engines": {"node": ">=22.5"},
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/*.test.mjs"
+  }
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oddly Relatable Studio</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Oddly Relatable <b>Studio</b></span></div>
+    <nav class="nav" aria-label="Main">
+      <a href="#/" data-nav="overview">Overview</a>
+      <a href="#/episodes" data-nav="episodes">Episodes</a>
+      <a href="#/runs" data-nav="runs">Production runs</a>
+    </nav>
+    <div class="topbar-right">
+      <span id="engine" class="pill muted">engine</span>
+      <button id="theme" class="ghost" type="button" aria-label="Switch light or dark theme">Light</button>
+    </div>
+  </header>
+  <main id="view" tabindex="-1"><p class="muted">Loading…</p></main>
+  <footer class="footer muted">Local studio · 127.0.0.1 only · QA is technical; publication always needs the owner's approval.</footer>
+</body>
+</html>

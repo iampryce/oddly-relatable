@@ -1,0 +1,92 @@
+# Oddly Relatable Studio (AP-83, local MVP)
+
+A local web dashboard around the existing production engine (`production/`). It manages episodes, starts production runs in the background, shows live progress and logs, plays the rendered MP4, and shows the storyboard, QA report, layout report and manifest. It records human review decisions separately from QA.
+
+## Start
+
+```bash
+# from the repository root; FFMPEG/FFPROBE are needed by the production engine
+export FFMPEG=/path/to/ffmpeg FFPROBE=/path/to/ffprobe
+node studio/server.mjs
+# then open http://127.0.0.1:4317/
+```
+
+- `npm --prefix studio start` runs the same server without Node's "SQLite is experimental" notice.
+- **Options:**
+  - `STUDIO_PORT` (default `4317`).
+  - `STUDIO_WORKSPACE` (default `studio-work/studio`, git-ignored). It holds `studio.db`, `runs/<run-id>/` and `logs/<run-id>.log`.
+- **Tests:** `node --disable-warning=ExperimentalWarning --test studio/tests/*.test.mjs`.
+
+**No dependencies.** It uses Node's built-in `node:http` and `node:sqlite` (Node ≥ 22.5; tested on Node 24) and a no-build ES-module dashboard. No React, Express, Redis or Docker: one local user, one machine, no build step to maintain.
+
+## Architecture
+
+| Part | File | Role |
+|---|---|---|
+| Server | `server.mjs`, `lib/app.mjs` | HTTP API, media serving, static dashboard; loopback only |
+| Database | `lib/db.mjs` | SQLite: `episodes`, `runs`, `reviews` (append-only audit), `events` (activity) |
+| Job runner | `lib/jobs.mjs` | Runs `node production/cli.mjs produce <story> <out>` as a background child process (argument array, no shell); one run at a time; one active run per episode |
+| Stories | `lib/stories.mjs` | Lists and validates `production/stories/*.story.json` with the engine's own story and format code |
+| Storage | `lib/storage.mjs` | Local implementation of a storage interface; the API exposes run IDs and artifact keys only, never paths |
+| Dashboard | `public/` | Overview, episode library, new episode, episode detail, production runs, run detail with review |
+
+**Production output** is exactly what `produce` writes (AP-82), one folder per run: `runs/<run-id>/{project, render, audio, storyboard, reports}`, `production-manifest.json` and `production-run.json`. The studio never overwrites a run; every run gets a new ID and folder.
+
+## Routes
+
+**Dashboard:**
+- `#/` overview
+- `#/episodes` library
+- `#/episodes/new` new episode
+- `#/episodes/<id>` episode detail and history
+- `#/runs` production runs
+- `#/runs/<run-id>` run detail: stages, log, video, QA, storyboard and frames, outputs, manifest, layout report, review
+
+**API (JSON):**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | ok, storage kind, whether FFMPEG/FFPROBE are set (no values) |
+| GET | `/api/overview` | counts, recent runs, activity |
+| GET | `/api/stories` | approved stories with validity, duration, formats, cast |
+| GET / POST | `/api/episodes` | list / create (`{storyFile, id?, title?, note?}`) |
+| GET | `/api/episodes/:id` | detail, run history, reviews |
+| POST | `/api/episodes/:id/runs` | start a production run: **202** with the queued run immediately; **409** if one is already active |
+| GET | `/api/runs`, `/api/runs/:id` | runs; detail with stages, summary, artifacts, QA, review state |
+| GET | `/api/runs/:id/log?offset=N` | log tail |
+| POST | `/api/runs/:id/cancel` | cancel a queued or running run (stops the renderer and ffmpeg too) |
+| POST | `/api/runs/:id/reviews` | `{decision: approved-next-step \| changes-requested \| rejected, note, reviewer?}` |
+| GET | `/media/runs/:id/<key>` | whitelisted artifacts only (MP4 with HTTP Range, PNG, WAV, JSON) |
+
+## Run states and recovery
+
+- **States:** `queued` → `running` → `produced` | `qa-failed` | `failed` | `awaiting-approval` | `interrupted` | `cancelled`. Stage progress comes from the run's `production-run.json`, which `produce` now saves as each stage starts and ends.
+- **Logs:** written by the child process straight into a log file, so production continues and logs survive if the studio stops.
+- **On restart:**
+  - A run whose process is still alive is watched until it ends.
+  - A run whose process ended is decided by its own run file. A run that never finished is marked **`interrupted`**, never successful.
+  - Queued runs resume.
+
+## Review and approval
+
+- **Separate from QA:** a QA pass never approves anything. A finished run shows "awaiting review" until a person records a decision with a note.
+- **Audit history:** decisions are kept as an append-only history per run and per episode.
+- **Nothing downstream:** recording a decision does **not** call the renderer's `approve`, does not render anything further, and does not publish. Episodes over 60 s still need the owner's own approval note through `produce --approval-note` (AP-82).
+
+## Security
+
+- **Network:** binds to `127.0.0.1` only; a `Host` header check blocks DNS rebinding.
+- **Writes:** must be same-origin, `application/json`, and at most 16 kB.
+- **Input validation:** IDs, story names (only `production/stories/*.story.json`), decisions and text lengths are validated.
+- **Process:** child processes are started with an argument array (no shell).
+- **Media:** keys are whitelisted by pattern and resolved inside the run folder (no traversal, no symlinks).
+- **Nothing leaked:** no filesystem paths or environment values in responses.
+- **Browser:** a strict Content-Security-Policy; all user text is rendered as text, never HTML.
+
+## Limitations
+
+- Single user, no login (loopback only by design).
+- One production at a time. A 54 s episode takes about 4 minutes on this machine.
+- Local storage only; the storage interface is ready for S3/Garage later, but nothing is deployed.
+- Playback was verified at the HTTP level (range requests, valid MP4); the owner should confirm it plays in their browser.
+- `node:sqlite` prints an "experimental" notice under plain `node`. The npm script suppresses it.
