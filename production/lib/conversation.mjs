@@ -6,6 +6,8 @@
 //   {type:'typing',  speaker, start?, duration, pose?, sfx?}   (dots shown for `duration`, then removed)
 //   {type:'pause',   duration, pose?}                           (empty beat, nothing new appears)
 //   {type:'pose',    pose, start?}                              (change reaction pose without a message)
+// Optional on any event (AP-79): poses:{castId: poseId} for multi-character scenes (`pose` targets the default cast member),
+// transition:'cut'|'pop'|'crossfade' (how the new pose appears), camera:'<script camera note>' (applies to this beat).
 // `start` is optional: events run back to back from a cursor. An explicit start may jump forward but never back.
 // A message's `duration` is its beat length (time until the next event); messages stay in the chat afterwards.
 import {assertRenderable} from './text.mjs';
@@ -42,11 +44,13 @@ export function validateSpeakers(speakers) {
 }
 
 // Turn a conversation into an absolute timeline.
-export function sequenceConversation(conv) {
+export const TRANSITIONS = Object.freeze(['cut', 'pop', 'crossfade']);
+
+export function sequenceConversation(conv, {defaultCast = 'primary'} = {}) {
   if (!conv || !Array.isArray(conv.events) || !conv.events.length) throw new Error('conversation: events[] is required');
   const speakers = validateSpeakers(conv.speakers);
   const timing = {...TIMING_DEFAULTS, ...(conv.timing || {})};
-  const messages = [], typing = [], poseMarks = [], sfx = [];
+  const messages = [], typing = [], poseMarks = [], sfx = [], cameraMarks = [];
   let cursor = 0, lastStart = 0;
 
   conv.events.forEach((ev, i) => {
@@ -56,7 +60,13 @@ export function sequenceConversation(conv) {
     if (start < lastStart - EPS) throw new Error(`${where}: start ${start} is earlier than the previous event (${lastStart})`);
     if (start < cursor - EPS && ev.start !== undefined) throw new Error(`${where}: start ${start} overlaps the previous beat (ends ${cursor.toFixed(3)})`);
     lastStart = start;
-    if (ev.pose !== undefined) poseMarks.push({pose: String(ev.pose), start});
+    if (ev.transition !== undefined && !TRANSITIONS.includes(ev.transition)) throw new Error(`${where}: unknown transition "${ev.transition}" (allowed: ${TRANSITIONS.join(', ')})`);
+    if (ev.pose !== undefined) poseMarks.push({cast: defaultCast, pose: String(ev.pose), start, transition: ev.transition || 'cut'});
+    if (ev.poses !== undefined) {
+      if (typeof ev.poses !== 'object') throw new Error(`${where}: poses must be {castId: poseId}`);
+      for (const [cast, pose] of Object.entries(ev.poses)) poseMarks.push({cast, pose: String(pose), start, transition: ev.transition || 'cut'});
+    }
+    const beatStart = start;
 
     if (ev.type === 'message') {
       if (!speakers[ev.speaker]) throw new Error(`${where}: unknown speaker "${ev.speaker}"`);
@@ -79,27 +89,35 @@ export function sequenceConversation(conv) {
       if (ev.pose === undefined) throw new Error(`${where}: pose is required`);
       cursor = start;
     } else throw new Error(`${where}: unknown event type`);
+    if (ev.camera !== undefined) {
+      if (typeof ev.camera !== 'string' || !ev.camera.trim()) throw new Error(`${where}: camera note must be text`);
+      cameraMarks.push({index: i, note: ev.camera, start: beatStart, end: cursor});   // the note applies to this beat
+    }
   });
 
   const conversationEnd = cursor;
-  // Pose timeline: each mark holds until the next one. The first pose must be set at time 0.
-  const poses = [];
+  // Pose timeline per cast member: each mark holds until that member's next mark. Each member's first pose must start at 0.
+  const castPoses = {};
   for (const mark of poseMarks) {
-    const last = poses.at(-1);
-    if (last && Math.abs(last.start - mark.start) < EPS) { last.pose = mark.pose; continue; }
+    const list = castPoses[mark.cast] ??= [];
+    const last = list.at(-1);
+    if (last && Math.abs(last.start - mark.start) < EPS) { last.pose = mark.pose; last.transition = mark.transition; continue; }
     if (last && last.pose === mark.pose) continue;
-    poses.push({...mark});
+    list.push({pose: mark.pose, start: mark.start, transition: list.length ? mark.transition : 'cut'});
   }
-  if (poses.length && poses[0].start > EPS) throw new Error('pose: the first reaction pose must start at 0 (set "pose" on the first event)');
-  poses.forEach((p, i) => { p.end = i + 1 < poses.length ? poses[i + 1].start : Infinity; });
+  for (const [cast, list] of Object.entries(castPoses)) {
+    if (list[0].start > EPS) throw new Error(`pose: the first reaction pose of "${cast}" must start at 0 (set "pose" on the first event)`);
+    list.forEach((p, i) => { p.end = i + 1 < list.length ? list[i + 1].start : Infinity; });
+  }
+  const poses = castPoses[defaultCast] || [];   // single-character view (AP-78 compatible)
 
-  return {messages, typing, poses, sfx: sfx.sort((a, b) => a.time - b.time), conversationEnd, timing};
+  return {messages, typing, poses, castPoses, camera: cameraMarks, sfx: sfx.sort((a, b) => a.time - b.time), conversationEnd, timing};
 }
 
 // Full episode timing: hook overlay, conversation, then end card. Duration is rounded up to whole frames.
-export function sequenceEpisode(ep) {
+export function sequenceEpisode(ep, opts = {}) {
   const fps = ep.format?.fps ?? 30;
-  const seq = sequenceConversation(ep);
+  const seq = sequenceConversation(ep, opts);
   const hook = ep.hook ? {
     text: assertRenderable(ep.hook.text, 'hook'),
     start: num(ep.hook.start ?? 0, 'hook start'),
@@ -113,7 +131,7 @@ export function sequenceEpisode(ep) {
   } : null;
   const rawEnd = endCard ? endCard.start + endCard.duration : seq.conversationEnd;
   const duration = Math.ceil(rawEnd * fps - EPS) / fps;
-  for (const p of seq.poses) if (!Number.isFinite(p.end)) p.end = duration;
+  for (const list of [seq.poses, ...Object.values(seq.castPoses)]) for (const p of list) if (!Number.isFinite(p.end)) p.end = duration;
   if (hook && hook.start + hook.duration > duration + EPS) throw new Error('hook runs past the end of the episode');
   return {...seq, hook, endCard, duration, fps};
 }

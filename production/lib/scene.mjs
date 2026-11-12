@@ -1,36 +1,57 @@
-// Scene compiler: conversation episode (structured data) -> renderer project folder.
-// Output is a normal renderer project (project.json + assets + silent track) that the UNMODIFIED renderer
-// validates, previews and renders. Source artwork is copied, never modified; every file is hashed.
+// Story compiler: story (or AP-78 conversation episode) -> renderer project folder.
+// One renderer shot per scene; each scene is compiled by its format strategy (see formats/). The hook overlays the
+// first shot and the end card extends the last one. Output is a normal renderer project (project.json + assets +
+// silent track) that the UNMODIFIED renderer validates, previews and renders. Source artwork is copied, never
+// modified; every file is hashed in production-manifest.json.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {canvas, REPO_ROOT, designPlane, assertWritableOutput} from './runtime.mjs';
-import {sequenceEpisode} from './conversation.mjs';
-import {renderBubble, renderTypingShell, renderDot, renderHeader, renderTitleCard, renderShadow, BUBBLE_DEFAULTS} from './graphics.mjs';
-import {stackLayout, bubbleX, dotKeys, checkLayout, LAYOUT_DEFAULTS} from './layout.mjs';
-import {loadRegistry, poseInfo, reactionLayers, PLACEMENT_DEFAULTS} from './character.mjs';
+import {REPO_ROOT, designPlane, assertWritableOutput} from './runtime.mjs';
+import {renderTitleCard} from './graphics.mjs';
 import {PALETTE} from './palette.mjs';
 import {silentWav} from './wav.mjs';
+import {STORY_SCHEMA, EPISODE_SCHEMA, validateStory, episodeToStory, resolveEnvironment} from './story.mjs';
+import {formatFor} from './formats/index.mjs';
+import {assertRenderable} from './text.mjs';
 
-export const EPISODE_SCHEMA = 'oddly-relatable/conversation-episode@1';
-export const TOOLKIT_VERSION = '1.0.0';
+export {EPISODE_SCHEMA, STORY_SCHEMA};
+export const TOOLKIT_VERSION = '1.1.0';
 const MARKER = 'production-manifest.json';
 const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const r2 = v => +v.toFixed(2);
+const num = (v, name, min = 0, max = 600) => { if (!Number.isFinite(v) || v < min || v > max) throw new Error(`Invalid ${name}: ${v}`); return v; };
 
-export async function compileEpisode(episodeOrFile, {outDir, repoRoot = REPO_ROOT, allowIssues = false} = {}) {
-  const episodeFile = typeof episodeOrFile === 'string' ? path.resolve(episodeOrFile) : null;
-  const ep = episodeFile ? JSON.parse(fs.readFileSync(episodeFile, 'utf8')) : episodeOrFile;
-  if (ep.schema !== EPISODE_SCHEMA) throw new Error(`Episode schema must be "${EPISODE_SCHEMA}"`);
+// Accepts a story file/object or an AP-78 conversation-episode file/object.
+export async function compileProject(input, opts = {}) {
+  const file = typeof input === 'string' ? path.resolve(input) : null;
+  const data = file ? JSON.parse(fs.readFileSync(file, 'utf8')) : input;
+  if (data.schema === EPISODE_SCHEMA) return compileStory(episodeToStory(data), {...opts, sourceFile: file, sourceData: data});
+  return compileStory(data, {...opts, sourceFile: file, sourceData: data});
+}
+export const compileEpisode = compileProject;   // AP-78 name, kept for compatibility
+
+export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIssues = false, sourceFile = null, sourceData = story} = {}) {
+  validateStory(story);
   if (!outDir) throw new Error('outDir is required');
   const dir = assertWritableOutput(outDir);
   if (fs.existsSync(path.join(dir, 'project.json')) && !fs.existsSync(path.join(dir, MARKER))) throw new Error(`${dir} holds a project not created by this toolkit; refusing to overwrite`);
 
-  const fmt = {width: 1080, height: 1920, fps: 30, ...(ep.format || {})};
-  const plane = designPlane(fmt.width, fmt.height), ppu = fmt.width / plane.width;
-  const seq = sequenceEpisode({...ep, format: fmt});
-  const layout = {...LAYOUT_DEFAULTS, ...(ep.layout || {}), safe: {...LAYOUT_DEFAULTS.safe, ...(ep.layout?.safe || {})}};
-  const bubbleOpts = {...BUBBLE_DEFAULTS, ...(ep.bubbles || {})};
+  const fmt = {width: 1080, height: 1920, fps: 30, ...(story.format || {})};
+  const fps = fmt.fps, plane = designPlane(fmt.width, fmt.height), ppu = fmt.width / plane.width;
+  const frame = t => Math.ceil(t * fps - 1e-6) / fps;   // round a time up to the frame grid
+
+  // 1. Sequence every scene first (timing only), then lay scenes end to end as shots.
+  const scenes = story.scenes.map(s => ({scene: s, strategy: formatFor(s.format)}));
+  for (const x of scenes) { x.seq = x.strategy.sequence(x.scene); x.duration = frame(x.seq.duration); }
+  const endCard = story.endCard ? {...story.endCard, hold: num(story.endCard.hold ?? 0, 'end card hold', 0, 10), duration: num(story.endCard.duration ?? 3, 'end card duration', 0.5, 15)} : null;
+  let t0 = 0;
+  scenes.forEach((x, i) => {
+    x.start = t0;
+    x.shotDuration = i === scenes.length - 1 && endCard ? frame(x.seq.duration + endCard.hold + endCard.duration) : x.duration;
+    t0 += x.shotDuration;
+  });
+  const duration = t0, last = scenes.at(-1);
+  if (endCard) endCard.start = +(last.start + last.seq.duration + endCard.hold).toFixed(3);
 
   fs.mkdirSync(path.join(dir, 'assets', 'gen'), {recursive: true});
   fs.mkdirSync(path.join(dir, 'assets', 'src'), {recursive: true});
@@ -44,127 +65,89 @@ export async function compileEpisode(episodeOrFile, {outDir, repoRoot = REPO_ROO
   const copySource = (absFile, label) => {
     const buf = fs.readFileSync(absFile), rel = `assets/src/${label}-${path.basename(absFile)}`;
     fs.writeFileSync(path.join(dir, rel), buf);
-    sources.push({path: rel, source: path.relative(repoRoot, absFile).split(path.sep).join('/'), sha256: sha(buf)});
+    if (!sources.some(s => s.path === rel)) sources.push({path: rel, source: path.relative(repoRoot, absFile).split(path.sep).join('/'), sha256: sha(buf)});
     return rel;
   };
 
-  const layers = [];
-  // 1. Background plate, scaled to cover the frame.
-  if (ep.background?.path) {
-    const abs = path.resolve(repoRoot, ep.background.path), img = await canvas.loadImage(abs);
-    const s = Math.max(plane.width / img.width, plane.height / img.height), w = img.width * s, h = img.height * s;
-    layers.push({type: 'image', path: copySource(abs, 'background'), x: r2((plane.width - w) * (ep.background.focusX ?? 0.5)), y: r2((plane.height - h) * (ep.background.focusY ?? 0.5)), w: r2(w)});
+  // 2. Hook (story level, overlays the first shot).
+  let hook = null, hookLayer = null;
+  if (story.hook) {
+    hook = {text: assertRenderable(story.hook.text, 'hook'), start: num(story.hook.start ?? 0, 'hook start'), duration: num(story.hook.duration ?? 2.5, 'hook duration', 0.5, 10)};
+    if (hook.start + hook.duration > scenes[0].shotDuration + 1e-6) throw new Error('hook runs past the end of the first scene');
+    const hs = story.hook.style || {};
+    const img = renderTitleCard({lines: [{text: hook.text, size: hs.size || 64, weight: 800, color: hs.color || PALETTE.cardInk}], width: hs.width || 1000, padding: hs.padding ?? 30, background: hs.background || {type: 'panel', color: PALETTE.card, outline: 5}, ppu});
+    hook.rect = {x: r2((plane.width - img.width) / 2), y: story.hook.y ?? 150, w: img.width, h: img.height, from: hook.start, to: hook.start + hook.duration};
+    const fade = Math.min(0.25, hook.duration / 4);
+    hookLayer = {type: 'image', path: writeGen('hook', img), x: hook.rect.x, y: hook.rect.y, w: r2(img.width), from: hook.start, to: +hook.rect.to.toFixed(3),
+      keys: [{t: hook.start, alpha: 0}, {t: +(hook.start + fade).toFixed(3), alpha: 1}, {t: +(hook.rect.to - fade).toFixed(3), alpha: 1}, {t: +(hook.rect.to - 0.001).toFixed(3), alpha: 0}]};
   }
 
-  // 2. Character reactions beneath the conversation.
-  let faceBoxes = [], characterDiagnostics = [];
-  if (seq.poses.length) {
-    if (!ep.character?.registry) throw new Error('Events reference poses but no character.registry is set');
-    const registry = loadRegistry(path.resolve(repoRoot, ep.character.registry));
-    const infos = new Map(), copied = new Map();
-    for (const seg of seq.poses) if (!infos.has(seg.pose)) infos.set(seg.pose, await poseInfo(registry, seg.pose, repoRoot));
-    const placement = {...PLACEMENT_DEFAULTS, ...(ep.character.placement || {})};
-    if (placement.shadow) {
-      const sw = placement.figureHeight * 0.36, sh = sw * 0.2;
-      layers.push({type: 'image', path: writeGen('shadow', renderShadow({width: sw, height: sh, ppu})), x: r2(placement.feetX - sw / 2), y: r2(placement.feetY - sh * 0.55), w: r2(sw)});
+  // 3. Compile each scene with its strategy; layers are shot-relative, SFX absolute.
+  const shots = [], sfx = [], sceneReports = [];
+  for (const [i, x] of scenes.entries()) {
+    const env = await resolveEnvironment(x.scene.environment, plane, repoRoot);
+    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot});
+    const layers = [...out.world, ...out.screen];
+    if (i === 0 && hookLayer) layers.push(hookLayer);
+    if (i === scenes.length - 1 && endCard) {
+      // When the end card carries the caption, give it a light footer band: the renderer draws B1 captions as dark text.
+      const footer = endCard.caption && !story.captions?.length ? {height: 150, color: PALETTE.cream} : null;
+      const img = renderTitleCard({lines: endCard.lines || [{text: story.title || 'The End', size: 84}], width: plane.width, height: plane.height, padding: 90, gap: 26, background: endCard.background || {type: 'solid', color: PALETTE.card}, footer, ppu});
+      const local = +(endCard.start - x.start).toFixed(3);
+      layers.push({type: 'image', path: writeGen('endcard', img), x: 0, y: 0, w: plane.width, from: local, keys: [{t: local, alpha: 0}, {t: +(local + 0.35).toFixed(3), alpha: 1}]});
     }
-    const assetFor = info => { if (!copied.has(info.id)) copied.set(info.id, copySource(info.file, `pose-${info.id}`)); return copied.get(info.id); };
-    const comp = reactionLayers(seq.poses, infos, placement, assetFor, ppu);
-    layers.push(...comp.layers); faceBoxes = comp.faceBoxes; characterDiagnostics = comp.diagnostics;
-    // Keep the chat zone clear of the highest face on screen.
-    const faceTop = Math.min(...faceBoxes.map(f => f.y));
-    layout.zoneBottom = Math.min(layout.zoneBottom, faceTop - 40);
+    shots.push({start: +x.start.toFixed(4), end: +(x.start + x.shotDuration).toFixed(4), layers});
+    sfx.push(...out.sfx.map(c => ({...c, time: +(c.time + x.start).toFixed(3)})));
+    sceneReports.push({id: x.scene.id, format: x.scene.format, start: x.start, duration: x.shotDuration, seq: x.seq, out});
   }
 
-  // 3. Conversation header.
-  let headerRect = null;
-  if (ep.header) {
-    const img = renderHeader({...ep.header, ppu});
-    headerRect = {x: r2((plane.width - img.width) / 2), y: ep.header.y ?? 330, w: img.width, h: img.height};
-    layers.push({type: 'image', path: writeGen('header', img), x: headerRect.x, y: headerRect.y, w: r2(img.width)});
-  }
-
-  // 4. Message bubbles and typing indicators, laid out as one stack.
-  const items = [], art = new Map();
-  for (const m of seq.messages) {
-    const img = renderBubble({text: m.text, side: m.side, style: m.style || (m.side === 'left' ? 'her' : 'him'), ppu, ...bubbleOpts});
-    art.set(m.id, {path: writeGen(`msg-${m.id}`, img), img});
-    items.push({id: m.id, order: m.index, start: m.start, end: Infinity, width: img.width, height: img.height, x: bubbleX(m.side, img.width, plane, layout)});
-  }
-  const dot = renderDot({diameter: 20, ppu});
-  const dotPath = writeGen('typing-dot', dot);
-  for (const t of seq.typing) {
-    const img = renderTypingShell({side: t.side, style: t.style || (t.side === 'left' ? 'her' : 'him'), ppu});
-    art.set(t.id, {path: writeGen(`typing-${t.side}`, img), img});
-    items.push({id: t.id, order: t.index, start: t.start, end: t.end, width: img.width, height: img.height, x: bubbleX(t.side, img.width, plane, layout)});
-  }
-  const stack = stackLayout(items, layout);
-  for (const l of stack.layers) {
-    const a = art.get(l.id);
-    layers.push({type: 'image', path: a.path, x: r2(l.x), w: r2(a.img.width), from: l.from, ...(l.to !== undefined ? {to: +l.to.toFixed(3)} : {}), keys: l.keys});
-    if (l.id.startsWith('t')) {
-      const t = seq.typing.find(x => x.id === l.id);
-      a.img.dots.forEach((d, i) => layers.push({type: 'image', path: dotPath, x: r2(l.x + d.x), w: r2(dot.width), from: l.from, to: +l.to.toFixed(3), keys: dotKeys(l.keys, d.y, t.start, t.end, i * 0.18)}));
-    }
-  }
-
-  // 5. Hook text.
-  let hookRect = null;
-  if (seq.hook) {
-    const hs = ep.hook.style || {};
-    const img = renderTitleCard({lines: [{text: seq.hook.text, size: hs.size || 64, weight: 800, color: hs.color || PALETTE.cardInk}], width: hs.width || 1000, padding: hs.padding ?? 30, background: hs.background || {type: 'panel', color: PALETTE.card, outline: 5}, ppu});
-    hookRect = {x: r2((plane.width - img.width) / 2), y: ep.hook.y ?? 150, w: img.width, h: img.height, from: seq.hook.start, to: seq.hook.start + seq.hook.duration};
-    const fade = Math.min(0.25, seq.hook.duration / 4);
-    layers.push({type: 'image', path: writeGen('hook', img), x: hookRect.x, y: hookRect.y, w: r2(img.width), from: seq.hook.start, to: +hookRect.to.toFixed(3),
-      keys: [{t: seq.hook.start, alpha: 0}, {t: +(seq.hook.start + fade).toFixed(3), alpha: 1}, {t: +(hookRect.to - fade).toFixed(3), alpha: 1}, {t: +(hookRect.to - 0.001).toFixed(3), alpha: 0}]});
-  }
-
-  // 6. End card (full frame).
-  if (seq.endCard) {
-    const ec = seq.endCard;
-    // When the end card carries the caption, give it a light footer band: the renderer draws B1 captions as dark text.
-    const footer = ec.caption && !ep.captions?.length ? {height: 150, color: PALETTE.cream} : null;
-    const img = renderTitleCard({lines: ec.lines || [{text: ep.title || 'The End', size: 84}], width: plane.width, height: plane.height, padding: 90, gap: 26, background: ec.background || {type: 'solid', color: PALETTE.card}, footer, ppu});
-    layers.push({type: 'image', path: writeGen('endcard', img), x: 0, y: 0, w: plane.width, from: ec.start, keys: [{t: ec.start, alpha: 0}, {t: +(ec.start + 0.35).toFixed(3), alpha: 1}]});
-  }
-
-  // 7. Captions (the renderer requires at least one; single line each).
-  const captions = ep.captions?.length ? ep.captions : (seq.endCard?.caption ? [{start: +(seq.endCard.start + 0.3).toFixed(3), end: +(seq.duration - 0.05).toFixed(3), text: seq.endCard.caption}] : null);
+  // 4. Captions (the renderer requires at least one; single line each).
+  const captions = story.captions?.length ? story.captions : (endCard?.caption ? [{start: +(endCard.start + 0.3).toFixed(3), end: +(duration - 0.05).toFixed(3), text: endCard.caption}] : null);
   if (!captions) throw new Error('The renderer requires at least one caption: set "captions" or "endCard.caption"');
 
-  // 8. Silent track of the exact duration, then the renderer project.
-  silentWav(path.join(dir, 'silent.wav'), seq.duration);
-  const project = {version: 1, style: 'B1', grid: false, width: fmt.width, height: fmt.height, fps: fmt.fps,
-    voice: {path: 'silent.wav', lead: 0, tail: 0}, captions, shots: [{start: 0, end: seq.duration, layers}], sfx: seq.sfx};
+  // 5. Silent track of the exact duration, then the renderer project.
+  silentWav(path.join(dir, 'silent.wav'), duration);
+  const project = {version: 1, style: 'B1', grid: false, width: fmt.width, height: fmt.height, fps, voice: {path: 'silent.wav', lead: 0, tail: 0}, captions, shots, sfx: sfx.sort((a, b) => a.time - b.time)};
   fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(project, null, 1) + '\n');
 
-  // 9. Composition checks and provenance.
-  const checks = checkLayout({snapshots: stack.snapshots, plane, faceBoxes, hook: hookRect, header: headerRect, safe: layout.safe});
-  const soft = characterDiagnostics.filter(d => d.soft);
+  // 6. Reports and provenance. Top-level fields describe the first scene (AP-78 compatible); all scenes are listed too.
+  const first = sceneReports[0];
+  const issues = sceneReports.flatMap(r => r.out.checks.issues.map(i => ({...i, scene: r.id})));
+  const diagnostics = sceneReports.flatMap(r => r.out.diagnostics.map(d => ({...d, scene: r.id})));
+  const warnings = [...new Set(diagnostics.filter(d => d.soft).map(d => `pose ${d.pose} (${d.cast}) is enlarged ${d.upscaleAtMaxZoom}x at the scene's largest zoom (above the 1.7x softness limit)`))];
   const report = {
-    episode: ep.id, title: ep.title, duration: seq.duration, fps: fmt.fps, plane, layout: {zoneTop: layout.zoneTop, zoneBottom: r2(layout.zoneBottom)},
-    messages: seq.messages.map(m => ({id: m.id, speaker: m.speaker, start: m.start, text: m.text, lines: art.get(m.id).img.lines.length})),
-    typing: seq.typing.map(t => ({id: t.id, speaker: t.speaker, start: t.start, end: t.end})),
-    poses: seq.poses, sfx: seq.sfx, hook: seq.hook, endCard: seq.endCard && {start: seq.endCard.start, duration: seq.endCard.duration},
-    character: characterDiagnostics,
-    checks: {...checks, warnings: soft.map(d => `pose ${d.pose} is enlarged ${d.upscale}x (above the 1.7x softness limit)`)},
-    storyboardTimes: storyboardTimes(seq),
+    story: story.id, episode: story.id, title: story.title, duration, fps, plane,
+    layout: {zoneTop: first.out.layout.zoneTop, zoneBottom: r2(first.out.layout.zoneBottom)},
+    messages: first.seq.messages.map(m => ({id: m.id, speaker: m.speaker, start: m.start, text: m.text, lines: first.out.art.get(m.id).img.lines.length})),
+    typing: first.seq.typing.map(t => ({id: t.id, speaker: t.speaker, start: t.start, end: t.end})),
+    poses: first.seq.poses, sfx: project.sfx, hook: hook && {text: hook.text, start: hook.start, duration: hook.duration},
+    endCard: endCard && {start: endCard.start, duration: endCard.duration},
+    character: diagnostics,
+    camera: sceneReports.map(r => ({scene: r.id, ...r.out.camera})),
+    scenes: sceneReports.map(r => ({id: r.id, format: r.format, start: r.start, duration: r.duration, messages: r.seq.messages.length, typing: r.seq.typing.length, cast: Object.keys(r.seq.castPoses)})),
+    checks: {ok: issues.length === 0, issues, warnings},
+    storyboardTimes: storyboardTimes(sceneReports, hook, endCard, duration),
   };
   fs.writeFileSync(path.join(dir, 'layout-report.json'), JSON.stringify(report, null, 1) + '\n');
-  const manifest = {toolkit: 'oddly-relatable-production', version: TOOLKIT_VERSION, schema: EPISODE_SCHEMA, episode: ep.id,
-    episodeFile: episodeFile ? path.relative(repoRoot, episodeFile).split(path.sep).join('/') : null, episodeSha256: sha(JSON.stringify(ep)),
+  const manifest = {toolkit: 'oddly-relatable-production', version: TOOLKIT_VERSION, schema: sourceData?.schema, story: story.id, episode: story.id,
+    episodeFile: sourceFile ? path.relative(repoRoot, sourceFile).split(path.sep).join('/') : null, episodeSha256: sha(JSON.stringify(sourceData)),
     sources, generated, project: 'project.json', note: 'Sources are copies; originals are never modified.'};
   fs.writeFileSync(path.join(dir, MARKER), JSON.stringify(manifest, null, 1) + '\n');
-  if (!checks.ok && !allowIssues) throw new Error(`Layout check failed: ${checks.issues.map(i => `${i.id}@${i.t}s ${i.problem}`).join('; ')}`);
-  return {projectFile: path.join(dir, 'project.json'), report, manifest, sequence: seq};
+  if (issues.length && !allowIssues) throw new Error(`Layout check failed: ${issues.map(i => `${i.id}@${i.t}s ${i.problem}`).join('; ')}`);
+  return {projectFile: path.join(dir, 'project.json'), report, manifest, sequence: first.seq};
 }
 
-// Good moments to inspect: mid-hook, each message once settled, mid-typing, mid end card.
-export function storyboardTimes(seq) {
+// Good moments to inspect: mid-hook, each message once settled, mid-typing, each camera cut/move, mid end card.
+export function storyboardTimes(sceneReports, hook, endCard, duration) {
   const t = [];
-  if (seq.hook) t.push({t: seq.hook.start + seq.hook.duration / 2, label: 'hook'});
-  for (const m of seq.messages) t.push({t: m.start + Math.min(0.7, m.duration * 0.6), label: `${m.speaker}: ${m.text.slice(0, 28)}`});
-  for (const ty of seq.typing) t.push({t: (ty.start + ty.end) / 2, label: `${ty.speaker} typing`});
-  if (seq.endCard) t.push({t: seq.endCard.start + seq.endCard.duration / 2, label: 'end card'});
-  return t.map(x => ({...x, t: +Math.min(x.t, seq.duration - 0.05).toFixed(3)})).sort((a, b) => a.t - b.t);
+  if (hook) t.push({t: hook.start + hook.duration / 2, label: 'hook'});
+  for (const r of sceneReports) {
+    const o = r.start, seq = r.seq;
+    for (const m of seq.messages) t.push({t: o + m.start + Math.min(0.7, m.duration * 0.6), label: `${m.speaker}: ${m.text.slice(0, 28)}`});
+    for (const ty of seq.typing) t.push({t: o + (ty.start + ty.end) / 2, label: `${ty.speaker} typing`});
+    for (const mv of r.out.camera.moves) t.push({t: o + (mv.start + mv.end) / 2, label: `camera ${mv.from}x to ${mv.to}x (move)`});
+  }
+  if (endCard) t.push({t: endCard.start + endCard.duration / 2, label: 'end card'});
+  const out = t.map(x => ({...x, t: +Math.min(x.t, duration - 0.05).toFixed(3)})).sort((a, b) => a.t - b.t);
+  return out.filter((x, i) => i === 0 || Math.abs(x.t - out[i - 1].t) > 0.05);
 }

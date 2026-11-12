@@ -1,18 +1,17 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-12 (after AP-80). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-12 (after AP-79). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
-1. **Owner: review pose 06 (TEST).** `bible/concepts/lookdev-richenv/ap80-pose06-test/compare-sheet-1-full-figures.png` and `compare-sheet-2-closeups.png`; approve or reject.
-2. **Owner: review the AP-79 proposal** (`docs/oddly-relatable/AP-79-PROPOSAL.md`): camera movement, pose transitions, cast model ready for multiple characters, format strategies for future story types. Nothing is built until approved.
-3. **After approval of 1 and 2:** update the Character 01 pose registry (approved statuses, corrected pose 06) as part of AP-79; implement AP-79; Short 001 technical preview with camera moves.
-4. **Final Short 001 production** only after AP-79 and an explicit final production approval. No publishing.
-5. **Still open creative items:** naming and personality of Character 01; audio (silent vs licensed sound and music).
+1. **Owner: review the AP-79 technical evidence** in `production/evidence/ap79/`: `short-001-ap79-technical-preview.mp4`, `short-001-ap79-storyboard.png`, `short-001-ap78-vs-ap79.png`, and the synthetic cast test `synthetic-two-member-technical-preview.mp4` / `synthetic-two-member-transitions-camera.png`.
+2. **Owner decisions before production:** audio (silent, or licensed notification/typing sounds and music); whether any Short 001 pose change should use pop or crossfade (the script specifies none, so all are hard cuts); naming of Character 01.
+3. **Final Short 001 production** (next milestone, needs explicit approval): final render, QA, platform-safe captions. No publishing.
+4. **Future formats** (phone call, split screen, face to face, solo) and **Character 02**: designed for in AP-79, each needs its own approval and artwork decision.
 
-**Approved now:** poses 02 and 05 (working use); pose 03 (working TEST, splayed hands kept); character v3 (working candidate); SCRIPT_V2 (working script, hook "Four words. No warning."). **Not approved:** pose 06 (awaiting review), any final production master, final production.
+**Approved now:** poses 02, 05 and 06 (working use); pose 03 (working TEST, splayed hands kept); character v3 (working candidate); SCRIPT_V2 (working script, hook "Four words. No warning."); AP-79 architecture and scope. **Not approved:** any final production master, final production, publishing.
 
-**Future architecture (recorded, not scheduled):** multiple characters with their own registries and interactions; phone-call, split-screen, face-to-face, text-message, multi-scene and solo formats; story, scene, character, dialogue/audio, camera, animation and render kept as separate layers (DECISIONS.md AP-80R).
+**Future architecture (recorded):** multiple characters with their own registries and interactions; phone-call, split-screen, face-to-face, text-message, multi-scene and solo formats; separate layers for story, scene, character, dialogue/audio, camera, animation and render (DECISIONS.md AP-80R). AP-79 built the foundations; only text-chat is implemented.
 
 ## 2. Still-open infrastructure and platform items (unchanged; each needs its own approval)
 

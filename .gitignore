@@ -36,3 +36,6 @@ handoff-AP74/evidence/
 
 # AP-78 toolkit build output (reproducible with: node production/cli.mjs build ...); evidence is kept in production/evidence/ap78/
 studio-work/short-001-v2-compat-test/
+# AP-79 toolkit build outputs (reproducible with node production/cli.mjs build ...); evidence is kept in production/evidence/ap79/
+studio-work/short-001-v2-ap79/
+studio-work/synthetic-two-member-cast-ap79/

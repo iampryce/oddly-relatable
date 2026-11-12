@@ -1,78 +1,122 @@
-# Oddly Relatable production toolkit (AP-78)
+# Oddly Relatable production toolkit (AP-78, AP-79)
 
-Turns a comedy **conversation script, written as structured data,** into a project for the existing renderer: text-message bubbles, typing indicator, hook, end card and character reactions in a 9:16 scene. The existing renderer (`skills/directing-stickman-videos/`) is **not modified**; this toolkit only produces its normal `project.json` input and uses its public functions read-only.
+Turns a story, written as structured data, into a project for the existing renderer (`skills/directing-stickman-videos/`), which is **not modified**. The toolkit only produces the renderer's normal `project.json` input and uses its public functions read-only.
 
-**No new dependencies.** It reuses the renderer's installed `@napi-rs/canvas` and bundled fonts (Noto Sans, Caveat). Requires Node ≥ 20 and, for preview/render, `FFMPEG` and `FFPROBE` environment variables (as the renderer does).
+**No new dependencies.** It reuses the renderer's installed `@napi-rs/canvas` and bundled fonts (Noto Sans, Caveat). Requires Node ≥ 20 and, for preview and render, the `FFMPEG` and `FFPROBE` environment variables (as the renderer does).
 
 ## Commands
 
 ```bash
-# 1. Compile an episode into a renderer project (assets, silent track, project.json, reports)
-node production/cli.mjs build production/fixtures/short-001-v2.conversation.json studio-work/short-001-v2-compat-test
+# Compile a story (or an AP-78 conversation episode) into a renderer project
+node production/cli.mjs build production/stories/short-001-v2.story.json studio-work/short-001-v2-ap79
 
-# 2. Inspect: renderer-exact stills at every beat, as one labelled sheet (no video encode)
-node production/cli.mjs storyboard studio-work/short-001-v2-compat-test/project.json
+# Inspect: renderer-exact stills at every beat and camera move, as one labelled sheet (no encode)
+node production/cli.mjs storyboard studio-work/short-001-v2-ap79/project.json
 
-# 3. Optional MP4 preview through the unmodified renderer CLI (max 60 s)
-node production/cli.mjs video studio-work/short-001-v2-compat-test/project.json --seconds 60 --replace
+# Optional MP4 preview through the unmodified renderer CLI (max 60 s)
+node production/cli.mjs video studio-work/short-001-v2-ap79/project.json --seconds 60 --replace
 
 # Tests
 node --test production/tests/*.test.mjs
 ```
 
-`build` fails if the layout checks fail (bubble over the face, hook over the header, text outside the platform safe zone); `--allow-issues` writes the project anyway and lists the issues in `layout-report.json`.
+`build` fails if a check fails: a bubble outside the platform safe zone, the hook over the header, or the camera cropping a face. `--allow-issues` writes the project anyway and lists the issues in `layout-report.json`. Softness warnings (a pose enlarged above 1.7× on screen) are reported but do not fail the build.
 
-## Architecture (one responsibility per module)
+## Architecture (AP-79): one responsibility per layer
 
-| Module | Responsibility |
+| Layer | Data | Module |
+|---|---|---|
+| Story | `stories/*.story.json`: title, format, hook, end card, ordered scenes | `lib/story.mjs` (validation, AP-78 episode adapter, environment resolution) |
+| Scene format | each scene names a format; one strategy per format | `lib/formats/` (`text-chat` implemented; `phone-call`, `split-screen`, `face-to-face`, `solo` declared, not implemented) |
+| Environment | `environments/environments.json` (ID → file, SHA-256) | `lib/story.mjs` |
+| Character / cast | `characters/<character-id>.json` pose registries; a scene's `cast` lists members by character ID with placement, height, `z` and `facing` | `lib/cast.mjs`, `lib/character.mjs` |
+| Dialogue / audio | scene `speakers` and `events` (messages, typing, pauses, pose changes, built-in SFX cues) | `lib/conversation.mjs` |
+| Camera | per-beat `camera` notes taken from the script | `lib/camera.mjs` |
+| Animation timeline | pose segments per cast member, transitions | `lib/timeline.mjs` |
+| UI graphics and layout | bubbles, typing indicator, header, hook, end card; chat stack | `lib/graphics.mjs`, `lib/layout.mjs` |
+| Render / post | renderer project (one shot per scene), silent track, reports, provenance, storyboard | `lib/scene.mjs`, `lib/preview.mjs`, `lib/wav.mjs` |
+
+Stories never contain image paths for characters. They name a character ID, and the registry resolves the pose files, verifying each file's SHA-256.
+
+**Renderer contract used (verified in `autopilot-core.mjs` and `autopilot-render.mjs`):**
+- Style B1, contiguous shots.
+- `image` layers with `from`/`to` visibility windows and `keys` (`t`, `x`, `y`, `w`, `alpha`), painted in array order.
+- At least one single-line caption.
+- An audio track whose length sets the duration.
+- Built-in SFX `tap`, `paper`, `pop`, `chime`, `jingle` (gain ≤ 0.3).
+
+## Camera (outside the renderer)
+
+- **How it moves:**
+  - Zoom about a pivot that stays fixed on screen. The pivot is the focus cast member's head top, so the face grows downward and never rises into the chat zone; feet crop in medium shots.
+  - The camera transforms world layers only (environment, characters, shadows). Screen-space UI (bubbles, header, hook, end card) is never moved or scaled.
+- **Frame-exact keys:** keys are sampled on the frame grid wherever the camera or a transition changes, and compressed on holds. The renderer never interpolates between moving keys.
+- **Limits:**
+  - Zoom is limited to 1×–1.5× (the approved limit for sheet poses).
+  - Shake and drift offsets are clamped so the background always covers the frame.
+  - A per-frame check fails the build if a face is cropped.
+
+| Script note | Mapping |
 |---|---|
-| `lib/conversation.mjs` | Conversation data: validation and sequencing (messages, typing, pauses, pose changes, SFX cues, hook/end-card timing). Generic; no episode knowledge. |
-| `lib/graphics.mjs` | Message bubbles (left/right), typing shell and dots, contact header with vector heart, title card (hook and end card), contact shadow. Drawn as PNGs because the B1 renderer composites image layers only. |
-| `lib/layout.mjs` | Chat stack: newest at the bottom, earlier bubbles slide up, items above the zone fade out, typing takes and releases a slot. Emits renderer keyframes; composition checks. |
-| `lib/character.mjs` | Character reactions: pose registry, feet-anchored placement and scale, face boxes, softness warning. Existing artwork only. |
-| `lib/scene.mjs` | Compiler: episode → renderer project folder (copies sources, writes generated PNGs, silent track, `project.json`, `layout-report.json`, `production-manifest.json` with SHA-256 of every file). |
-| `lib/preview.mjs` | Storyboard: exact frames from the renderer's own `loadProject` + `painter`, as a labelled sheet. |
-| `lib/palette.mjs`, `lib/text.mjs`, `lib/wav.mjs`, `lib/runtime.mjs` | Canon colour tokens, wrapping and emoji guard, silent WAV, shared runtime and write-protection. |
+| `Wide` | zoom 1.0, cut at the beat start |
+| `Medium N×` (or `Medium`) | zoom N (default 1.3), cut |
+| `Close` | zoom = 1.5 (cap), cut |
+| `Hard cut, …` | explicit cut. Framing changes at a beat start are cuts anyway |
+| `Slow push-in to N×` | eased zoom over the whole beat. `Push-in` without "slow" runs over min(1 s, beat) |
+| `Pull back to wide` | eased zoom to 1.0 over min(1.2 s, beat) |
+| `Hold`, `Still` | no change |
+| `small shake`, `shake` / `drift` | decaying shake / slow drift over the beat |
 
-**Renderer contract used (verified in `autopilot-core.mjs` / `autopilot-render.mjs`):** style B1, one shot covering the whole duration, `image` layers with `from`/`to` visibility windows and `keys` (`t`, `x`, `y`, `w`, `alpha`), painted in array order; at least one single-line caption; an audio track whose length sets the duration; built-in SFX kinds `tap`, `paper`, `pop`, `chime`, `jingle` (gain ≤ 0.3).
+Unknown wording is rejected, not guessed.
 
-## Episode format (`oddly-relatable/conversation-episode@1`)
+## Pose transitions
+
+`transition` on an event applies to the pose change it makes:
+- `cut` (default): the AP-78 behaviour.
+- `pop`: a 0.2 s scale bounce anchored at the feet; the size returns exactly to 1.
+- `crossfade`: a 0.16 s dissolve-over. The incoming pose fades in on top while the outgoing pose stays opaque, so the room never shows through.
+
+Transitions only move, scale or fade existing artwork; no in-between drawings are created.
+
+## Story format (`oddly-relatable/story@1`)
 
 ```jsonc
 {
-  "schema": "oddly-relatable/conversation-episode@1",
-  "id": "my-episode", "title": "My Episode",
+  "schema": "oddly-relatable/story@1", "id": "my-story", "title": "My Story",
   "format": {"width": 1080, "height": 1920, "fps": 30},
-  "background": {"path": "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png"},
-  "character": {"registry": "production/characters/character-01.json", "placement": {"feetX": 640, "feetY": 2070, "figureHeight": 880}},
-  "header": {"label": "Wife", "icon": "heart"},
-  "speakers": {"her": {"side": "left", "style": "her"}, "him": {"side": "right", "style": "him"}},
-  "timing": {"readingCps": 15, "minMessage": 2.0, "maxMessage": 4.5},
   "hook": {"text": "Four words. No warning.", "start": 0, "duration": 3},
-  "events": [
-    {"type": "message", "speaker": "her", "text": "We need to talk.", "duration": 3, "pose": "02", "sfx": "chime"},
-    {"type": "typing", "speaker": "her", "duration": 3, "visible": 2.4},
-    {"type": "pause", "duration": 1},
-    {"type": "pose", "pose": "03"}
-  ],
-  "endCard": {"duration": 3, "lines": [{"text": "My Episode", "size": 92}], "caption": "Oddly Relatable"}
+  "endCard": {"duration": 3, "lines": [{"text": "My Story", "size": 92}], "caption": "Oddly Relatable"},
+  "scenes": [{
+    "id": "scene-1", "format": "text-chat", "environment": "living-room-empty-03",
+    "cast": [{"id": "him", "character": "character-01", "placement": {"feetX": 640, "feetY": 2070, "figureHeight": 880}, "z": 0, "facing": "native"}],
+    "reactionCast": "him", "camera": {"focus": "him", "maxZoom": 1.5},
+    "header": {"label": "Wife", "icon": "heart"},
+    "speakers": {"her": {"side": "left", "style": "her"}, "him": {"side": "right", "style": "him"}},
+    "events": [
+      {"type": "message", "speaker": "her", "text": "We need to talk.", "duration": 3, "pose": "02", "sfx": "chime", "camera": "Wide, still"},
+      {"type": "typing", "speaker": "her", "duration": 3, "visible": 2.4, "camera": "Hold"},
+      {"type": "message", "speaker": "him", "text": "Define March.", "duration": 2, "poses": {"him": "03"}, "transition": "pop", "camera": "Medium 1.3×"}
+    ]
+  }]
 }
 ```
 
-- Units are renderer design units (the frame is 1280 wide; 1080×1920 output is 1280×2275.6).
-- `start` is optional; events run back to back. A message's `duration` is its beat length; it stays in the chat afterwards. Missing durations use a reading-time estimate.
-- Optional overrides: `layout` (margins, chat zone, slide timing, safe zone), `bubbles` (font size, padding, max width), `captions` (otherwise the end card's `caption` is used, shown on a light footer band).
-- Emoji are rejected (the bundled font has none); use `header.icon: "heart"`.
+- **Multi-character:** `pose` targets `reactionCast`; `poses: {castId: poseId}` sets several members at once.
+- **Multi-scene:** stories with several scenes become several contiguous renderer shots. The hook overlays the first shot and the end card extends the last.
+- **AP-78 files still work:** `oddly-relatable/conversation-episode@1` is converted to a one-scene story.
+- **Units:** renderer design units (the frame is 1280 wide; 1080×1920 output is 1280×2275.6).
 
-## Short 001 compatibility test
+## Fixtures and evidence
 
-`fixtures/short-001-v2.conversation.json` transcribes `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (unchanged) as test data, with the expected hook revision "Four words. No warning.". Evidence in `evidence/ap78/`: storyboard sheet (21 renderer frames), motion frames from the rendered MP4 (slide-in, typing pulse and removal, end-card fade), the 54 s preview MP4, layout report and render summary. **Technical compatibility only; not production-approved.**
+- **`stories/short-001-v2.story.json`:** Short 001. Its dialogue is identical to `fixtures/short-001-v2.conversation.json`, and its camera notes are verbatim from `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (tests enforce both). Character 01 only; pose changes stay hard cuts, because the script specifies none.
+- **`fixtures/synthetic-two-member-cast.story.json`:** **technical test only.** Two independently placed instances of Character 01 exercise the cast model, z-order, every transition and every camera feature. It is not a second character.
+- **Evidence:** `evidence/ap78/` and `evidence/ap79/` hold storyboards, previews, layout reports, the AP-78 vs AP-79 comparison and a render summary with a PSNR regression check. All technical evidence only, not production approval.
 
 ## Limitations
 
-- Static framing: no camera moves (the script's "push-in" / "pull back" notes are not implemented). The background is fixed and the character scale is constant.
-- Pose changes are hard cuts; no in-between animation or lip-sync.
-- Sheet poses are about 550 px tall and are enlarged about 1.3× here; the report flags anything above 1.7×.
-- Pose 06 is the uncorrected extract (skin correction not yet done); poses 02 and 05 are TEST corrections awaiting owner review (see `characters/character-01.json`).
-- SFX are the renderer's built-in synthesized sounds; no music.
-- The renderer requires at least one caption, so the end card carries one by default.
+- **Formats:** only `text-chat` is implemented. The other formats are declared strategies that fail clearly.
+- **Facing:** only `native` is supported. The B1 renderer cannot mirror images, so mirrored artwork would need separate approval.
+- **Close-up softness:** sheet poses are about 550 px tall, so at 1.5× zoom they are enlarged about 2× on screen (reported as softness warnings).
+- **Crossfade ghosting:** a short dissolve between two different drawings briefly shows both.
+- **Not built:** lip-sync, voices and music. SFX are the renderer's built-in synthesized sounds.
+- **One caption required:** the renderer requires at least one caption, so the end card carries one by default.

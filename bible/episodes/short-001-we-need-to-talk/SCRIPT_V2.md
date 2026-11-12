@@ -52,6 +52,6 @@
 6. **Message bubble look:** a simple flat style in the canon's palette, deliberately not imitating any real messaging app.
 
 ## Production notes (for AP-78 onward; nothing started)
-- **Poses used:** 02, 03 (approved test), 05 and 06. Pose 06 still needs its skin-only correction; poses 02 and 05 still need your review.
+- **Poses used:** 02, 05 and 06 (skin-corrected, approved for working production use, 2026-11-12) and 03 (approved working TEST asset, splayed hands kept exactly).
 - **Reading time:** each message is on screen at least 2 s, and longer messages up to 3.5 s.
 - **What AP-78 must provide:** message bubbles with stacking and scrolling, the typing indicator, the hook text and end card, all without changing the renderer.

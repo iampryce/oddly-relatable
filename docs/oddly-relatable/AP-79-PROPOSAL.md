@@ -1,6 +1,6 @@
 # AP-79 proposal: animation system (camera, transitions) on a multi-character, multi-format architecture
 
-**Status: PROPOSAL ONLY, awaiting owner approval. Nothing here is implemented.** Prepared 2026-11-12 after AP-80.
+**Status: APPROVED by the owner (2026-11-12) and IMPLEMENTED in AP-79** (see `production/README.md` and `DECISIONS.md` AP-79). Section 4 approvals were all given; text-chat is the only implemented format. Prepared 2026-11-12 after AP-80.
 
 ## 1. Owner requirements this proposal must respect
 

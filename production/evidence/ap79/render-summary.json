@@ -1,0 +1,41 @@
+{
+ "renderer": "skills/directing-stickman-videos/scripts/autopilot.mjs preview (unmodified)",
+ "note": "Technical evidence only; not final production approval.",
+ "short001": {
+  "output_sha256": "e78dc52170198f6b01b540828b5f7ee99a43917c44b2453863d4c88e5b68867e",
+  "resolution": "1080x1920",
+  "fps": 30,
+  "frames": 1620,
+  "duration": 54,
+  "full_decode": "pass",
+  "render_wall_seconds": 132
+ },
+ "synthetic_two_member": {
+  "output_sha256": "2a49b3272449f0685cec1dfc08c8808f4cb6d6da1dfe101c76f9e65352c633c3",
+  "resolution": "1080x1920",
+  "fps": 30,
+  "frames": 345,
+  "duration": 11.5,
+  "full_decode": "pass",
+  "render_wall_seconds": 37
+ },
+ "regression_vs_ap78": {
+  "method": "ffmpeg psnr per frame, AP-78 preview vs AP-79 preview (same fixture, same timing)",
+  "wide_zoom_1_0": {
+   "frames": 490,
+   "meanPSNR_dB": 55.5,
+   "minPSNR_dB": 44.6
+  },
+  "end_card": {
+   "frames": 90,
+   "meanPSNR_dB": 55.9,
+   "minPSNR_dB": 43.5
+  },
+  "zoomed_beats": {
+   "frames": 1040,
+   "meanPSNR_dB": 16.7,
+   "minPSNR_dB": 15.3,
+   "expected": "differs by design (camera framing)"
+  }
+ }
+}

@@ -1,0 +1,15 @@
+{
+  "note": "Environment registry: scenes refer to environments by ID, never by file path. Points at EXISTING files only (never edited by the toolkit); 'sha256' is verified on load. Status mirrors ASSET_REGISTER.md.",
+  "environments": {
+    "living-room-empty-03": {
+      "file": "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png",
+      "sha256": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70",
+      "status": "APPROVED TEST (empty-room plate matching the canon)"
+    },
+    "living-room-candidate-05": {
+      "file": "bible/concepts/lookdev-richenv/production-candidates/production-candidate-05-environment-master.png",
+      "sha256": "ac83bf7f4b70efde726f410c32e5fdf42f4efe0932def37ed8b5bc702437803e",
+      "status": "ALTERNATIVE empty plate (approved for a purpose, not canon)"
+    }
+  }
+}

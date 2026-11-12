@@ -1,6 +1,6 @@
 # Project Status — Stickman Comedy Studio
 
-**Last updated:** 2026-11-12 (after AP-80) · **Updated by:** Claude Code
+**Last updated:** 2026-11-12 (after AP-79) · **Updated by:** Claude Code
 **Repository:** private GitHub repository `iampryce/oddly-relatable`, default branch `main` (local working copy `C:\Users\PC\Desktop\Works\stickman-video-director`). Commits are signed and pushed with normal pushes. Latest verified AP-78 commit: `a0c044f2bbc1ca3eb2f9eb7b3fb4cdc6bea7b1e5`.
 **Roles:** Claude Code = technical and creative production agent. ChatGPT = creative and architectural decision partner. Project owner = final approval.
 
@@ -9,11 +9,11 @@
 | Category | Current state |
 |---|---|
 | **Canonical master artwork** | `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (PROTECTED, visual identity permanently locked) |
-| **Approved working assets** | Character v3 (`candidate-04_corrected-v3.png`, approved working candidate); pose 02 worried phone and pose 05 pleading (approved for working production use, AP-80); pose 03 shocked (approved working TEST asset, splayed hands kept exactly) |
-| **TEST assets awaiting owner review** | Pose 06 deadpan skin-only correction (`ap80-pose06-test/`) |
-| **Production toolkit** | `production/` (AP-78): built, tested (35/35), committed and pushed; renderer unchanged |
+| **Approved working assets** | Character v3 (`candidate-04_corrected-v3.png`, approved working candidate); poses 02 worried phone, 05 pleading and 06 deadpan (skin-corrected, approved for working production use); pose 03 shocked (approved working TEST asset, splayed hands kept exactly) |
+| **TEST assets awaiting owner review** | None at present |
+| **Production toolkit** | `production/` 1.1 (AP-79): story, scene formats (text-chat implemented), cast by character ID, camera, pose transitions; 60/60 tests; renderer unchanged |
 | **Script** | Short 001 `SCRIPT_V2.md` approved as the current working script (hook "Four words. No warning.") |
-| **Final production approval** | **Not given.** No final production master; no final Short 001 video; AP-79 animation system is a proposal only |
+| **Final production approval** | **Not given.** No final production master; no final Short 001 video. AP-79 Short 001 preview is technical evidence only |
 
 ## 1. Where we are
 
@@ -38,8 +38,8 @@
 | **Asset rules + v3 render check (AP-71/72)** | ✅ **Done; awaiting owner review** | ASSET_MANAGEMENT.md written; v3 rendered 9:16 with the unmodified renderer (`…/poc-vertical-v3-ap72/output/preview.mp4`); sharper, canon skin; single pose only. Nothing promoted. Evidence `lookdev-richenv/ap72-validation/`. |
 | **Pose library assessment (AP-73)** | ✅ **Assessment done; awaiting owner approval** | Sheet poses ~550 px tall: fine for wide shots, soft in close-ups. Recommended test pose: 03 shocked (skin-only first). Nothing extracted, corrected or promoted. `lookdev-richenv/POSE_LIBRARY_ASSESSMENT.md` |
 | **Pose 03 skin test (AP-74)** | ✅ **Approved working TEST asset (splayed hands kept exactly)** | Skin-only, 0 changed pixels outside the mask; hands/mouth untouched; Shot 2 rendered with the unmodified renderer; closer to canon colour, no sharpness gain. `lookdev-richenv/ap74-pose03-test/` |
-| **Pose library correction (AP-74 to AP-80)** | ✅/🟡 **Poses 02 and 05 APPROVED for working use; pose 03 approved working TEST; pose 06 corrected as TEST (AP-80), awaiting review** | Same skin-only method, 0 changed pixels outside masks; hands, phone and expressions untouched; pose 02 not rendered. Poses 01, 04, 05, 06 await review. `lookdev-richenv/ap75-pose02-test/` |
-| **Production toolkit (AP-78)** | ✅ **Built and tested; awaiting owner review** | `production/`: conversation data, bubbles, typing indicator, hook/end card, character reactions, layout checks, storyboard preview. Renderer unchanged; no new dependencies. Short 001 v2 compiles and renders as a technical test (`production/evidence/ap78/`). |
+| **Pose library correction (AP-74 to AP-80)** | ✅ **Poses 02, 05 and 06 APPROVED for working use; pose 03 approved working TEST** | Same skin-only method, 0 changed pixels outside masks; hands, phone and expressions untouched; pose 02 not rendered. Poses 01, 04, 05, 06 await review. `lookdev-richenv/ap75-pose02-test/` |
+| **Production toolkit (AP-78, AP-79)** | ✅ **Built, tested, committed; AP-79 camera, transitions and multi-character foundations added** | `production/`: conversation data, bubbles, typing indicator, hook/end card, character reactions, layout checks, storyboard preview. Renderer unchanged; no new dependencies. Short 001 v2 compiles and renders as a technical test (`production/evidence/ap78/`). |
 | **Multi-platform direction** | ✅ Approved; architecture drafted (proposal) | YouTube + TikTok + Facebook; 9:16 primary, 16:9 secondary; `bible/MULTI_PLATFORM_ARCHITECTURE.md`. **No publishing automation or APIs built** |**No publishing automation or APIs built** |
 | **Garage object storage** | 🟡 **Architecture direction approved (AP-25 to AP-38); deployment and production cutover NOT approved (AP-39)** | `docs/GARAGE_STORAGE_FINAL_ARCHITECTURE.md`. Second review approved write-once versions and a fixed working directory. Topology (G2) open until server specs. **Nothing installed, created or configured.** The owner's latest message was cut off; further "details to settle first" are awaited. **Architecture approval is not deployment approval.** |
 | **VPS production environment** | 🟡 **Read-only inspection done; design written; NOT deployed** | `docs/VPS_PRODUCTION_READINESS.md`. AP-40 to AP-43: the Contabo VPS is the central production environment for both projects; Windows is administration only. Server is clean and idle (Ubuntu 24.04, 4 vCPU, 7.8 GiB, no swap, one 100 GB disk, only SSH open); **nothing for Stickman is installed there**. 15 open decisions (P1–P15). **Architecture approval is not deployment approval.**  **Owner-confirmed (AP-44): the Kids session is the sole shared-infrastructure coordinator;** five mandatory safeguards recorded (AP-45 to AP-49); not blanket approval (AP-50). |
@@ -92,7 +92,7 @@
 Renderer unchanged · **no installs, Garage deployment, firewall/DNS/Terraform changes or heavy jobs on the VPS; read-only inspection only** · no pilot production · **no Garage install, configuration, buckets or keys** (architecture approval is not deployment approval)** · no paid image/voice/video services · no dependency installs · no commits or pushes · existing files preserved · independent of Kids Animation Studio · **no image generation until the owner approves the proof of concept.**
 
 ## 8. Risks and blockers
-- **Waiting on the owner (current):** pose 06 visual review; approval of the AP-79 architecture proposal; final production approval for Short 001; the multi-platform proposals M10–M16. (Earlier blockers V8 new character, V6 proof of concept and V1 visual identity are resolved.)
+- **Waiting on the owner (current):** review of the AP-79 technical preview; final production approval for Short 001; audio direction (silent vs licensed sound/music); naming of Character 01; the multi-platform proposals M10–M16.
 - **Bible is inconsistent with current direction** until rewritten (V9); bannered, not fixed, to avoid rewriting twice.
 - **Version control:** private GitHub repository `iampryce/oddly-relatable` (`main`); signed commits; push only after review; never force-push.
 - **Platform specs and policies are only partly verified:** YouTube Shorts and synthetic-content rules were read on official pages; **TikTok and Meta come from secondary sources only** (official pages could not be read). Research must be completed before any publishing automation.

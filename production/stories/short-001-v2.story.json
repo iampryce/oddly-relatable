@@ -1,0 +1,236 @@
+{
+ "schema": "oddly-relatable/story@1",
+ "id": "short-001-v2",
+ "title": "We Need to Talk",
+ "_note": "Short 001 v2 as a story (AP-79). Dialogue, durations, poses and SFX are identical to production/fixtures/short-001-v2.conversation.json; each event's \"camera\" is the verbatim Camera column of bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md (approved working script). Pose changes stay hard cuts (the script specifies none). Technical use only; not final production approval.",
+ "format": {
+  "width": 1080,
+  "height": 1920,
+  "fps": 30
+ },
+ "hook": {
+  "text": "Four words. No warning.",
+  "start": 0,
+  "duration": 3
+ },
+ "endCard": {
+  "duration": 3,
+  "lines": [
+   {
+    "text": "We Need to Talk",
+    "size": 92,
+    "weight": 800
+   },
+   {
+    "text": "Oddly Relatable",
+    "size": 54,
+    "weight": 700,
+    "color": "#BC4C15"
+   }
+  ],
+  "background": {
+   "type": "solid",
+   "color": "#2A1D16"
+  },
+  "caption": "Oddly Relatable"
+ },
+ "scenes": [
+  {
+   "id": "living-room-chat",
+   "format": "text-chat",
+   "environment": "living-room-empty-03",
+   "cast": [
+    {
+     "id": "him",
+     "character": "character-01",
+     "placement": {
+      "feetX": 640,
+      "feetY": 2070,
+      "figureHeight": 880
+     },
+     "z": 0,
+     "facing": "native"
+    }
+   ],
+   "reactionCast": "him",
+   "camera": {
+    "focus": "him",
+    "maxZoom": 1.5
+   },
+   "header": {
+    "label": "Wife",
+    "icon": "heart"
+   },
+   "speakers": {
+    "her": {
+     "side": "left",
+     "style": "her"
+    },
+    "him": {
+     "side": "right",
+     "style": "him"
+    }
+   },
+   "events": [
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "We need to talk.",
+     "duration": 3,
+     "pose": "02",
+     "sfx": "chime",
+     "camera": "Wide, still"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Is everything ok?",
+     "duration": 3,
+     "sfx": "pop",
+     "camera": "Slow push-in to 1.2×"
+    },
+    {
+     "type": "typing",
+     "speaker": "her",
+     "duration": 3,
+     "visible": 2.4,
+     "camera": "Hold"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "WHY DID THE DOTS STOP",
+     "duration": 2.5,
+     "pose": "03",
+     "sfx": "pop",
+     "camera": "Hard cut, medium 1.5×"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "Tonight.",
+     "duration": 2.5,
+     "sfx": "chime",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Is this about the dishwasher? I can explain the dishwasher.",
+     "duration": 3.5,
+     "pose": "05",
+     "sfx": "pop",
+     "camera": "Wide"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "What about the dishwasher?",
+     "duration": 2.5,
+     "sfx": "chime",
+     "camera": "Wide"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Nothing. The dishwasher is fine.",
+     "duration": 3,
+     "pose": "03",
+     "sfx": "pop",
+     "camera": "Medium 1.5×"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Unrelated question. How do you feel about the shelf.",
+     "duration": 3,
+     "pose": "05",
+     "sfx": "pop",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "The one you said you'd fix in March?",
+     "duration": 2.5,
+     "sfx": "chime",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Define March.",
+     "duration": 2,
+     "pose": "03",
+     "sfx": "pop",
+     "camera": "Medium 1.5×"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "Focus. It's about my mother.",
+     "duration": 3,
+     "pose": "02",
+     "sfx": "chime",
+     "camera": "Wide"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Is she ok??",
+     "duration": 2.5,
+     "sfx": "pop",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "She's fine. She's staying with us.",
+     "duration": 3,
+     "sfx": "chime",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "For the weekend?",
+     "duration": 2,
+     "sfx": "pop",
+     "camera": "Medium 1.3×"
+    },
+    {
+     "type": "typing",
+     "speaker": "her",
+     "duration": 2.5,
+     "camera": "Hold"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "For a month.",
+     "duration": 2,
+     "pose": "03",
+     "sfx": "chime",
+     "camera": "Hard cut, medium 1.5×"
+    },
+    {
+     "type": "message",
+     "speaker": "him",
+     "text": "Can we go back to the dishwasher?",
+     "duration": 2.5,
+     "pose": "06",
+     "sfx": "pop",
+     "camera": "Pull back to wide, hold"
+    },
+    {
+     "type": "message",
+     "speaker": "her",
+     "text": "What did you do to the dishwasher.",
+     "duration": 3,
+     "sfx": "chime",
+     "camera": "Wide, hold"
+    }
+   ]
+  }
+ ]
+}
