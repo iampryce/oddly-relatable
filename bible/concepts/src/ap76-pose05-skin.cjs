@@ -1,4 +1,4 @@
-// AP-76: skin-only correction of the EXISTING extracted Pose 02 (worried phone). Reads the source (never modified) and writes NEW files only
+// AP-76: skin-only correction of the EXISTING extracted Pose 05 (pleading). Reads the source (never modified) and writes NEW files only
 // into lookdev-richenv/ap76-pose05-test/. Same method as v3 (AP-67): colour-ratio skin mask with plateau weighting + per-channel gain,
 // gain computed from SAMPLED source and target values. Alpha channel is copied unchanged; hands, mouth, eyes, outline, sweater, shoes are not touched.
 const path = require('path'), fs = require('fs'), crypto = require('crypto');
@@ -67,7 +67,7 @@ async function meanSkin(file, box, gr0, br0, rMin) {
   // extra check: pink mouth pixels (g/r < 0.75, r > 150, head region) must be unchanged
   let pinkTotal = 0, pinkChanged = 0;
   for (let i = 0; i < N; i++) { const r = src[i * 4], g = src[i * 4 + 1]; if (src[i * 4 + 3] > 0 && r > 150 && g / r < 0.75 && ((i / W) | 0) < H * 0.40 && (src[i*4+2] / r) > 0.45) { pinkTotal++; if (re[i * 4] !== src[i * 4] || re[i * 4 + 1] !== src[i * 4 + 1] || re[i * 4 + 2] !== src[i * 4 + 2]) pinkChanged++; } }
-  // extra checks: near-white pixels (eye whites) and grey pixels (phone, r~g~b, mid brightness) inside the head/phone area must be unchanged
+  // extra checks: near-white pixels (eye whites) and grey pixels (r~g~b, mid brightness, e.g. outline blends) must be unchanged
   let whiteChanged = 0, greyChanged = 0, whiteTotal = 0, greyTotal = 0;
   for (let i = 0; i < N; i++) { if (src[i*4+3] < 255) continue; const r = src[i*4], g = src[i*4+1], b = src[i*4+2], mx = Math.max(r,g,b), mn = Math.min(r,g,b); const ch = re[i*4]!==r || re[i*4+1]!==g || re[i*4+2]!==b; if (mn > 238) { whiteTotal++; if (ch) whiteChanged++; } else if (mx - mn < 22 && mx > 40 && mx < 200) { greyTotal++; if (ch) greyChanged++; } }
   let rowMin = 1e9, rowMax = -1, blackBelow = 0, blackBelowChanged = 0;

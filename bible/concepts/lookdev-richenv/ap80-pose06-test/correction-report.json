@@ -1,0 +1,98 @@
+{
+ "task": "AP-80 pose 06 skin-only correction",
+ "method": "v3 method: colour-ratio plateau mask + per-channel gain from sampled values; alpha unchanged",
+ "source": "extracted\\canonical-character-01_06-deadpan-arms-crossed.png",
+ "output": "ap80-pose06-test\\character-01_pose-06-deadpan_skin-only_test.png",
+ "size": [
+  271,
+  591
+ ],
+ "sha256_before": {
+  "src": "aeb639342c436fd7c92d997595dd9941dad4ec5497bc15b4fe38e725f6b7b699",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sha256_after": {
+  "src": "aeb639342c436fd7c92d997595dd9941dad4ec5497bc15b4fe38e725f6b7b699",
+  "v3": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51",
+  "canon": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016"
+ },
+ "sources_unchanged": true,
+ "output_sha256": "ee9dd2574411c86bb2e325d48937d8b6106d646a079375060f82bd0076b93fd9",
+ "source_seed_rgb": [
+  254,
+  228,
+  198
+ ],
+ "ratios": {
+  "gr0": 0.8976,
+  "br0": 0.2205
+ },
+ "skin_mean_rgb": {
+  "original": [
+   253.1,
+   227.4,
+   197.4
+  ],
+  "corrected": [
+   252.1,
+   222.4,
+   180.1
+  ],
+  "canonical_sampled": [
+   249.6,
+   217.9,
+   171.3
+  ],
+  "canonical_sampled_pixels": 2067,
+  "canonical_recorded": [
+   252,
+   222,
+   180
+  ],
+  "target_used": [
+   252,
+   222,
+   180
+  ],
+  "approved_v3_sampled": [
+   252.7,
+   221.4,
+   179.9
+  ],
+  "v3_pixels": 65097,
+  "interior_pixels_used": 19009
+ },
+ "gain": [
+  0.9956,
+  0.9764,
+  0.9117
+ ],
+ "skin_mask_pixel_count": 21398,
+ "changed_pixels_inside_mask": 21354,
+ "changed_pixels_outside_mask": 0,
+ "max_delta_outside_mask": 0,
+ "alpha_pixels_changed": 0,
+ "near_white_pixels_checked": 2251,
+ "near_white_pixels_changed": 0,
+ "grey_pixels_checked": 671,
+ "grey_pixels_changed": 96,
+ "protected_checks": {
+  "near_black_checked": 21104,
+  "near_black_changed": 0,
+  "sweater_checked": 12781,
+  "sweater_changed": 0,
+  "shoes_checked": 3421,
+  "shoes_changed": 0,
+  "grey_class_changed_warm_skin_blends": 96,
+  "grey_class_changed_cool": 0
+ },
+ "changed_row_range": [
+  17,
+  203
+ ],
+ "black_pixels_below_head": 10871,
+ "black_pixels_below_head_changed": 0,
+ "pink_mouth_pixels_checked": 0,
+ "pink_mouth_pixels_changed": 0
+}

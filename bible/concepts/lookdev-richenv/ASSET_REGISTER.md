@@ -1,6 +1,6 @@
 # Asset register: Canonical Character 01 and canonical room
 
-Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evidence, keep) · **WORKING SOURCE** (conditionally approved, not final) · **ALTERNATIVE** (approved for a purpose, not canon) · **APPROVED WORKING CANDIDATE** (accepted by the owner as the current working version, not final) · **CANDIDATE** (awaiting owner's visual approval) · **EVIDENCE** (tests, drafts, defect history). **No asset is a final production master yet.** Hashes are SHA-256 (first 16 hex characters; full values in the READMEs and `correction-report.json`). Paths are relative to `bible/concepts/lookdev-richenv/`. Last updated 2026-11-11 (AP-76). Pose assessment: `POSE_LIBRARY_ASSESSMENT.md`. Management rules: `ASSET_MANAGEMENT.md` (AP-71).
+Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evidence, keep) · **WORKING SOURCE** (conditionally approved, not final) · **ALTERNATIVE** (approved for a purpose, not canon) · **APPROVED WORKING CANDIDATE** (accepted by the owner as the current working version, not final) · **APPROVED WORKING ASSET** (approved by the owner for working production use; not a final production master) · **CANDIDATE** (awaiting owner's visual approval) · **EVIDENCE** (tests, drafts, defect history). **No asset is a final production master yet.** Hashes are SHA-256 (first 16 hex characters; full values in the READMEs and `correction-report.json`). Paths are relative to `bible/concepts/lookdev-richenv/`. Last updated 2026-11-12 (AP-80). Pose assessment: `POSE_LIBRARY_ASSESSMENT.md`. Management rules: `ASSET_MANAGEMENT.md` (AP-71).
 
 | Asset | Path | Size | SHA-256 | Status |
 |---|---|---|---|---|
@@ -23,13 +23,15 @@ Status values: **PROTECTED** (read-only, never modify) · **APPROVED TEST** (evi
 | Character v3 transparent cut-out (AP-72) | `ap72-validation/character-01_master-v3_cutout_test.png` (+ `.json` provenance) | 535×1293 | `dd0f393972ff7610` | TEST (derived from v3; not approved) |
 | AP-72 diagnostic render (v3, 9:16) | `…/studio-work/poc-vertical-v3-ap72/output/preview.mp4` (outside repo) | 1080×1920 | `758392a7a35f5c0c` | TEST (diagnostic; awaiting review) |
 | AP-72 comparison evidence | `ap72-validation/*.png`, `README.md` | | | EVIDENCE |
-| Pose 03 skin-only corrected (AP-74) | `ap74-pose03-test/character-01_pose-03-shocked_skin-only_test.png` (+ `correction-report.json`, `mask-skin-weight.png`) | 274×596 | `477f8e713d6358fd` | TEST (derived from `extracted/…03-shocked-frozen.png` `fabe6f7a…`; 0 changed pixels outside the mask) · **APPROVED TEST ASSET (owner, AP-75 review)**; not a production asset |
+| Pose 03 skin-only corrected (AP-74) | `ap74-pose03-test/character-01_pose-03-shocked_skin-only_test.png` (+ `correction-report.json`, `mask-skin-weight.png`) | 274×596 | `477f8e713d6358fd` | TEST (derived from `extracted/…03-shocked-frozen.png` `fabe6f7a…`; 0 changed pixels outside the mask) · **APPROVED WORKING TEST ASSET (owner, AP-75 review; reconfirmed 2026-11-12)**; splayed hands kept exactly as drawn; not a final production master |
 | AP-74 single-shot render (Shot 2) | `…/studio-work/poc-vertical-pose03-ap74/output/preview.mp4` (outside repo) | 1080×1920, 2 s | `4610e8d75f02b9db` | TEST |
 | AP-74 comparison evidence | `ap74-pose03-test/*.png`, `README.md` | | | EVIDENCE |
-| Pose 02 skin-only corrected (AP-75) | `ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png` (+ report, mask) | 270×571 | `ee921285d86a356d` | TEST (derived from `extracted/…02-worried-phone.png` `389d597b…`; 0 changed pixels outside the mask; awaiting review) |
+| Pose 02 skin-only corrected (AP-75) | `ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png` (+ report, mask) | 270×571 | `ee921285d86a356d` | **APPROVED WORKING ASSET (owner, 2026-11-12)**: approved for working production use; not a final production master (derived from `extracted/…02-worried-phone.png` `389d597b…`; 0 changed pixels outside the mask) |
 | AP-75 comparison evidence | `ap75-pose02-test/*.png`, `README.md` | | | EVIDENCE |
-| Pose 05 skin-only corrected (AP-76) | `ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png` (+ report, mask) | 273×569 | `f2dae957eaf4b28d` | TEST (derived from `extracted/…05-pleading.png` `625e3fae…`; 0 changed pixels outside the mask; awaiting review) |
+| Pose 05 skin-only corrected (AP-76) | `ap76-pose05-test/character-01_pose-05-pleading_skin-only_test.png` (+ report, mask) | 273×569 | `f2dae957eaf4b28d` | **APPROVED WORKING ASSET (owner, 2026-11-12)**: approved for working production use; not a final production master (derived from `extracted/…05-pleading.png` `625e3fae…`; 0 changed pixels outside the mask) |
 | AP-76 comparison evidence | `ap76-pose05-test/*.png`, `README.md` | | | EVIDENCE |
+| Pose 06 skin-only corrected (AP-80) | `ap80-pose06-test/character-01_pose-06-deadpan_skin-only_test.png` (+ report, mask) | 271×591 | `ee9dd2574411c86b` | TEST (correction authorised by the owner 2026-11-12; derived from `extracted/…06-deadpan-arms-crossed.png` `aeb63934…`; 0 changed pixels outside the mask); **awaiting owner visual review, not approved** |
+| AP-80 comparison evidence | `ap80-pose06-test/*.png`, `README.md` | | | EVIDENCE |
 | Extraction defect history | `extracted/_v1…_v4-*-defect/` | | | EVIDENCE |
 
 ## Rules

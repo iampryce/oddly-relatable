@@ -1,8 +1,65 @@
-# Next Steps — Stickman Comedy Studio
+# Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-11 (after the owner's direction change). Work stops at each gate; nothing below starts until the gate before it is cleared.
+**Last updated:** 2026-11-12 (after AP-80). Work stops at each gate; nothing starts without the owner's approval.
 
-## 1. Immediate (gate G1: inputs and approvals from the owner)
+## 1. Current (active)
+
+1. **Owner: review pose 06 (TEST).** `bible/concepts/lookdev-richenv/ap80-pose06-test/compare-sheet-1-full-figures.png` and `compare-sheet-2-closeups.png`; approve or reject.
+2. **Owner: review the AP-79 proposal** (`docs/oddly-relatable/AP-79-PROPOSAL.md`): camera movement, pose transitions, cast model ready for multiple characters, format strategies for future story types. Nothing is built until approved.
+3. **After approval of 1 and 2:** update the Character 01 pose registry (approved statuses, corrected pose 06) as part of AP-79; implement AP-79; Short 001 technical preview with camera moves.
+4. **Final Short 001 production** only after AP-79 and an explicit final production approval. No publishing.
+5. **Still open creative items:** naming and personality of Character 01; audio (silent vs licensed sound and music).
+
+**Approved now:** poses 02 and 05 (working use); pose 03 (working TEST, splayed hands kept); character v3 (working candidate); SCRIPT_V2 (working script, hook "Four words. No warning."). **Not approved:** pose 06 (awaiting review), any final production master, final production.
+
+**Future architecture (recorded, not scheduled):** multiple characters with their own registries and interactions; phone-call, split-screen, face-to-face, text-message, multi-scene and solo formats; story, scene, character, dialogue/audio, camera, animation and render kept as separate layers (DECISIONS.md AP-80R).
+
+## 2. Still-open infrastructure and platform items (unchanged; each needs its own approval)
+
+### 2b. Multi-platform: next steps (no automation, no APIs)
+1. **Owner:** review and approve or change the proposals **M10–M16** in `DECISIONS.md` (author once / render many; master rule; external caption burn-in; extra ratios; Facebook scope; account names; research step).
+2. **Research (read-only, no cost):** complete the TODO in `bible/MULTI_PLATFORM_ARCHITECTURE.md` §13: official TikTok and Meta specs and policies, monetization eligibility, music licensing, 9:16 safe-zone templates, thumbnail and cover specs. Only after this can export presets and metadata templates be finalised.
+3. **Later, after approval:** safe-framing overlay guides; export-preset and per-platform metadata templates (declarative files); an external caption burn-in step. **Publishing automation and platform APIs stay off** until separately approved.
+4. Fold the multi-platform rules into the Bible rewrite (V9).
+
+### 2d. VPS production environment: next actions (planning done; nothing deployed)
+
+> **Architecture approval is not deployment approval.** Everything below that changes the server needs its own approval and is a **shared, coordinated** change with the Kids project. Details: `docs/VPS_PRODUCTION_READINESS.md`.
+
+**Owner confirmed (2026-11-11):** the Kids session is the **sole shared-infrastructure coordinator** (AP-44), so steps 1–4 below (server security, backup and monitoring, Garage, buckets) are **coordinated by it**, each still behind the owner's approval; Stickman owns steps 5–7 for its own project. **Mandatory safeguards (AP-45 to AP-49):** real large multipart upload test of Caddy; no irreplaceable assets in Garage before an off-server backup and a successful restore test; one heavy render across both projects initially; SSH hardening only with verified key access and a rollback; public services on 80/443 with SSH restricted separately. **This is not blanket approval (AP-50).**
+
+0. **Owner: reconcile the Kids and Stickman reports** and answer **P1–P15** in `DECISIONS.md` (the blockers are P4 off-box backup target, P1 repository transfer/version control, P2 Node ≥ 20 source, P3 DNS name, P5 swap and limits, P6 SSH hardening, P13 naming).
+1. **Step 1 (shared): server security, directories, storage:** admin and per-project users; `/srv/stickman` tree; systemd slices and limits; SSH hardening; swap decision.
+2. **Step 2 (shared): independent backup and monitoring.**
+3. **Step 3 (shared): one coordinated Garage deployment with TLS.** Not by this session alone.
+4. **Step 4: create `stickman-studio` and the four key roles;** test isolation and the unconfirmed Garage features.
+5. **Step 5: prepare the Stickman environment:** Node ≥ 20 and FFmpeg, repository transfer, `npm ci`, environment file, FFmpeg limiting wrapper, shared render lock.
+6. **Step 6: integrate:** `tools/storage/` and a dry run on the Phase 0 example.
+7. **Step 7: test rendering and recovery:** the benchmark plan (not run yet), restore drill, concurrency test with the other project.
+
+### 2c. Storage (Garage): principles approved; deployment NOT approved
+
+> **Architecture approval is not deployment approval.** Nothing is installed, created or configured. Each step below needs its own approval. Design: `docs/GARAGE_STORAGE_FINAL_ARCHITECTURE.md`.
+
+0. **Owner: please resend the rest of your last message.** It was cut off after "Fixed working directory: Approved"; the "few important details to settle first" did not arrive. Recorded so far: architecture direction approved; local-first, separate buckets, write-once versions and fixed working directory approved (AP-25, AP-27, AP-28, AP-37, AP-38); **deployment and production cutover not approved (AP-39)**.
+1. **N1: Owner supplies the Garage server specifications** (existing server or new; hosts, operating system, disks, network, node count, replication, administrator). *Server specifications were observed read-only on 2026-11-11 (see `docs/VPS_PRODUCTION_READINESS.md`): one Contabo VPS, 4 vCPU, 7.8 GiB RAM, no swap, one 100 GB disk. Topology is still open (single node, no off-box backup yet). Server addresses, key names and secrets are deliberately not recorded in these documents.* This resolves **G2** (topology), which is deliberately open until then; I will update the final proposal when it arrives.
+2. **N2: Owner decides the remaining open items:** G4 (secret storage method), G5 (transfer client), G6 (backup target, schedule, retention), G8 (encryption at rest), G13 (extra archive bucket?), G14 (names and key set), G15 (sync list), G16 (export naming), G17 (**fixed absolute working root**), G18 (repository backup), G10 (Terraform scope).
+3. **N3 (separate approval):** provision a **test** Garage instance behind TLS.
+4. **N4 (separate approval):** create the bucket and keys on the test instance; verify quotas, the no-create-bucket flag, delete behaviour and large uploads.
+5. **N5 (separate approval):** choose and install the transfer client, or approve small scripts.
+6. **N6 (separate approval):** build `tools/storage/` (config check, manifest, pull, push, verify), with **no renderer change**.
+7. **N7 (separate approval):** dry run on the Phase 0 example as a non-production episode (push, remove local copy, pull, re-render at the same path, compare).
+8. **N8 (separate approval):** backup target, backup job and a restore drill on test data.
+9. **N9 (separate approval):** production cut-over with the real bucket and keys.
+
+## 3. Standing rules (current)
+Renderer unchanged · no image generation, paid services or new dependencies without approval · never overwrite, delete or rename assets (new files only) · commit and push only reviewed files with normal pushes (never force) · no publishing · no VPS or shared-infrastructure changes without approval · do not touch the Kids Animation Studio project · Codex never bypasses an approval gate.
+
+## 4. Archive: earlier-stage steps (superseded; kept for history, NOT current instructions)
+
+> These come from earlier stages (before the visual identity lock, Canonical Character 01, the pose corrections, the toolkit and version control). Several contradict the current direction, for example "new lead character needed", "commit or push" forbidden, and "generate images before the proof of concept". Kept verbatim for history only.
+
+### 1. Immediate (gate G1: inputs and approvals from the owner)
 
 | # | Item | Who | Notes |
 |---|---|---|---|
@@ -12,7 +69,7 @@
 | 3 | **Approve the proof of concept** (V6): one new character, one living room, 12–15 s, unmodified renderer, up to 4 Codex images | Owner | See `bible/VISUAL_DIRECTION_RICH_ENVIRONMENTS.md` §8 |
 | 4 | Visual direction (V1) and flatness (V2) | Owner | Can be settled by the proof of concept |
 
-## 1b. Visual identity: LOCKED (nothing to decide)
+### 1b. Visual identity: LOCKED (nothing to decide)
 **The visual identity is permanently locked** to `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (AP-51 to AP-57). Both authorised technical tests are done and passed (strongly on-model character; near-identical empty room). **No alternatives will be proposed.**
 
 **AP-78 done: your review needed.** Watch `production/evidence/ap78/short-001-v2-compat-preview.mp4` and look at `short-001-v2-storyboard.png`. Decide: approve the toolkit; approve SCRIPT_V2 (with the hook change); pose 06 skin correction; poses 02 and 05 review; then AP-79 (integration) / AP-80 (production).
@@ -41,59 +98,23 @@
 4. Decide **naming and personality** for Canonical Character 01 (a creative decision for you).
 5. **Any additional character, location or generation** (including a depth-layered plate, another angle, or a new character) needs your explicit approval first. Images used so far: **3**.
 
-## 2. Reference picture: done
+### 2. Reference picture: done
 Inspected and compared; the originality safeguards in the report §7 now name what we will not reuse. Add any further reference frames to the same folder if you want them considered.
 
-## 2b. Multi-platform: next steps (no automation, no APIs)
-1. **Owner:** review and approve or change the proposals **M10–M16** in `DECISIONS.md` (author once / render many; master rule; external caption burn-in; extra ratios; Facebook scope; account names; research step).
-2. **Research (read-only, no cost):** complete the TODO in `bible/MULTI_PLATFORM_ARCHITECTURE.md` §13: official TikTok and Meta specs and policies, monetization eligibility, music licensing, 9:16 safe-zone templates, thumbnail and cover specs. Only after this can export presets and metadata templates be finalised.
-3. **Later, after approval:** safe-framing overlay guides; export-preset and per-platform metadata templates (declarative files); an external caption burn-in step. **Publishing automation and platform APIs stay off** until separately approved.
-4. Fold the multi-platform rules into the Bible rewrite (V9).
-
-## 2d. VPS production environment: next actions (planning done; nothing deployed)
-
-> **Architecture approval is not deployment approval.** Everything below that changes the server needs its own approval and is a **shared, coordinated** change with the Kids project. Details: `docs/VPS_PRODUCTION_READINESS.md`.
-
-**Owner confirmed (2026-11-11):** the Kids session is the **sole shared-infrastructure coordinator** (AP-44), so steps 1–4 below (server security, backup and monitoring, Garage, buckets) are **coordinated by it**, each still behind the owner's approval; Stickman owns steps 5–7 for its own project. **Mandatory safeguards (AP-45 to AP-49):** real large multipart upload test of Caddy; no irreplaceable assets in Garage before an off-server backup and a successful restore test; one heavy render across both projects initially; SSH hardening only with verified key access and a rollback; public services on 80/443 with SSH restricted separately. **This is not blanket approval (AP-50).**
-
-0. **Owner: reconcile the Kids and Stickman reports** and answer **P1–P15** in `DECISIONS.md` (the blockers are P4 off-box backup target, P1 repository transfer/version control, P2 Node ≥ 20 source, P3 DNS name, P5 swap and limits, P6 SSH hardening, P13 naming).
-1. **Step 1 (shared): server security, directories, storage:** admin and per-project users; `/srv/stickman` tree; systemd slices and limits; SSH hardening; swap decision.
-2. **Step 2 (shared): independent backup and monitoring.**
-3. **Step 3 (shared): one coordinated Garage deployment with TLS.** Not by this session alone.
-4. **Step 4: create `stickman-studio` and the four key roles;** test isolation and the unconfirmed Garage features.
-5. **Step 5: prepare the Stickman environment:** Node ≥ 20 and FFmpeg, repository transfer, `npm ci`, environment file, FFmpeg limiting wrapper, shared render lock.
-6. **Step 6: integrate:** `tools/storage/` and a dry run on the Phase 0 example.
-7. **Step 7: test rendering and recovery:** the benchmark plan (not run yet), restore drill, concurrency test with the other project.
-
-## 2c. Storage (Garage): principles approved; deployment NOT approved
-
-> **Architecture approval is not deployment approval.** Nothing is installed, created or configured. Each step below needs its own approval. Design: `docs/GARAGE_STORAGE_FINAL_ARCHITECTURE.md`.
-
-0. **Owner: please resend the rest of your last message.** It was cut off after "Fixed working directory: Approved"; the "few important details to settle first" did not arrive. Recorded so far: architecture direction approved; local-first, separate buckets, write-once versions and fixed working directory approved (AP-25, AP-27, AP-28, AP-37, AP-38); **deployment and production cutover not approved (AP-39)**.
-1. **N1: Owner supplies the Garage server specifications** (existing server or new; hosts, operating system, disks, network, node count, replication, administrator). *Server specifications were observed read-only on 2026-11-11 (see `docs/VPS_PRODUCTION_READINESS.md`): one Contabo VPS, 4 vCPU, 7.8 GiB RAM, no swap, one 100 GB disk. Topology is still open (single node, no off-box backup yet). Server addresses, key names and secrets are deliberately not recorded in these documents.* This resolves **G2** (topology), which is deliberately open until then; I will update the final proposal when it arrives.
-2. **N2: Owner decides the remaining open items:** G4 (secret storage method), G5 (transfer client), G6 (backup target, schedule, retention), G8 (encryption at rest), G13 (extra archive bucket?), G14 (names and key set), G15 (sync list), G16 (export naming), G17 (**fixed absolute working root**), G18 (repository backup), G10 (Terraform scope).
-3. **N3 (separate approval):** provision a **test** Garage instance behind TLS.
-4. **N4 (separate approval):** create the bucket and keys on the test instance; verify quotas, the no-create-bucket flag, delete behaviour and large uploads.
-5. **N5 (separate approval):** choose and install the transfer client, or approve small scripts.
-6. **N6 (separate approval):** build `tools/storage/` (config check, manifest, pull, push, verify), with **no renderer change**.
-7. **N7 (separate approval):** dry run on the Phase 0 example as a non-production episode (push, remove local copy, pull, re-render at the same path, compare).
-8. **N8 (separate approval):** backup target, backup job and a restore drill on test data.
-9. **N9 (separate approval):** production cut-over with the real bucket and keys.
-
-## 3. After G1: the proof of concept (see the report §8)## 3. After G1: the proof of concept (see the report §8)## 3. After G1: the proof of concept (see the report §8)
+### 3. After G1: the proof of concept (see the report §8)
 P1 design the new character for approval → P2 three plate candidates for the same shot (improved procedural room; Codex plate set, at most 4 images; the Codex plate flattened locally) → P3 compose a 12–15 s **vertical (9:16)** test with the unmodified renderer, then a 16:9 reframe of the same scene graph (tests the reuse approach) → P4 side-by-side review. Acceptance criteria are in the report.
 
-## 4. After the proof of concept: decide, then rewrite (gate G2)
+### 4. After the proof of concept: decide, then rewrite (gate G2)
 - Lock the visual identity (V1–V3).
 - **Rewrite the Bible for the world at large** (V9): cast, world, comedy guide, audio, content strategy, pilot treatment, language notes, cultural rules. Remove the West African setting and names; keep reusable structure (six-beat comedy framework, formats, hybrid-animation rules, content pillars).
 - The pilot title "When Your Wife Says We Need to Talk" may stay, but the story and characters need re-writing around the new character.
 - Owner approves the finished Bible.
 
-## 5. After G2: tooling foundations and pilot (each needs its own approval)
+### 5. After G2: tooling foundations and pilot (each needs its own approval)
 Asset exporter, project/camera builder, plate post-processor, overlay baker, audio mixer (all outside the renderer); voice and music sourcing decisions; final script, storyboard, preview, full render, QA, Shorts. Any dependency install (e.g. Blender, Whisper) needs explicit approval first. A `git init` is the owner's call.
 
-## 6. Housekeeping
+### 6. Housekeeping
 Keep the five root progress files current. Mirror docs to Confluence only after the Bible is approved (the Atlassian connector must be authorised first).
 
-## 7. Standing "do not"
+### 7. Standing "do not"
 Change the renderer · start pilot production · generate images before the proof of concept is approved · add paid image/voice/video services · install dependencies · commit or push · touch Kids Animation Studio · let Codex bypass an approval gate.

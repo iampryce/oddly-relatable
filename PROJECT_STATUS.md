@@ -1,8 +1,19 @@
 # Project Status — Stickman Comedy Studio
 
-**Last updated:** 2026-11-12 (after AP-78) · **Updated by:** Claude Code
-**Repository:** `C:\Users\PC\Desktop\Works\stickman-video-director` (the existing copy; kept, not recloned) · **Git:** none (`.git` is absent; nothing has ever been committed from here)
+**Last updated:** 2026-11-12 (after AP-80) · **Updated by:** Claude Code
+**Repository:** private GitHub repository `iampryce/oddly-relatable`, default branch `main` (local working copy `C:\Users\PC\Desktop\Works\stickman-video-director`). Commits are signed and pushed with normal pushes. Latest verified AP-78 commit: `a0c044f2bbc1ca3eb2f9eb7b3fb4cdc6bea7b1e5`.
 **Roles:** Claude Code = technical and creative production agent. ChatGPT = creative and architectural decision partner. Project owner = final approval.
+
+## 0. At a glance (current, 2026-11-12)
+
+| Category | Current state |
+|---|---|
+| **Canonical master artwork** | `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (PROTECTED, visual identity permanently locked) |
+| **Approved working assets** | Character v3 (`candidate-04_corrected-v3.png`, approved working candidate); pose 02 worried phone and pose 05 pleading (approved for working production use, AP-80); pose 03 shocked (approved working TEST asset, splayed hands kept exactly) |
+| **TEST assets awaiting owner review** | Pose 06 deadpan skin-only correction (`ap80-pose06-test/`) |
+| **Production toolkit** | `production/` (AP-78): built, tested (35/35), committed and pushed; renderer unchanged |
+| **Script** | Short 001 `SCRIPT_V2.md` approved as the current working script (hook "Four words. No warning.") |
+| **Final production approval** | **Not given.** No final production master; no final Short 001 video; AP-79 animation system is a proposal only |
 
 ## 1. Where we are
 
@@ -17,7 +28,7 @@
 | Technical spike (layered depth, unmodified renderer) | ✅ Done and verified | 6 s, 1920×1080, 30 fps; see §5 |
 | Codex background-plate test (1 image, earlier today) | ✅ Done | Rich, but clashes with a flat character |
 | **Owner's reference picture** | ✅ **Received and inspected** | One vertical TikTok frame; private copy in `…\studio-work\references\` (outside the repo). Findings in the report §0 |
-| **New lead character** | ⏳ **Needed from the owner** | Femi is retired |
+| **Lead character** | ✅ **Resolved: Canonical Character 01 is the master character (AP-51 to AP-57)** | Femi retired. Naming and personality still open |
 | **Visual identity** | 🔒 **PERMANENTLY LOCKED (AP-51 to AP-57)** | Canonical reference `bible/concepts/lookdev-richenv/lookdev-scene-01.png` (SHA-256 `36b7c97e…ff016`, read-only, three identical copies). **Two approved technical tests passed:** the master character stays strongly on-model across six poses and expressions; the same room recreates near-identically without the character. **3 images used; no further generation without approval.** Earlier looks archived or historical |
 | **Technical proof of concept (AP-58 to AP-60)** | ✅ **Done; awaiting creative direction** | Six poses extracted; composite tested; 8 s 1080×1920 render with the unmodified renderer (cold 34.8 s). Viable; limits: softness at zoom, no depth layers, per-pose drift. `bible/concepts/lookdev-richenv/{extracted,composite,poc-vertical}/` |
 | **Production-candidate artwork (AP-61/62)** | 🟡 **Two candidates generated; awaiting owner approval** | Character master 1024×1536 (on-model; hands/skin drift), environment master 941×1672 (near-identical to the earlier test). **2048 px target not met** (tool cap). 5 images used; no more without approval. `…/production-candidates/` |
@@ -26,13 +37,13 @@
 | **Hands refinement v3 (AP-68 to AP-70)** | ✅ **v3 accepted as the approved working candidate (not final); final visual sign-off pending** | Skin approved in principle (unchanged); hands v3: smaller palm, curved sweeping rounded fingers; v2 and earlier preserved. Sweater and shoes unchanged by instruction. Candidate 04 remains a working candidate, not the final master. `…/production-candidates/corrected/review-sheet-v3.png` |
 | **Asset rules + v3 render check (AP-71/72)** | ✅ **Done; awaiting owner review** | ASSET_MANAGEMENT.md written; v3 rendered 9:16 with the unmodified renderer (`…/poc-vertical-v3-ap72/output/preview.mp4`); sharper, canon skin; single pose only. Nothing promoted. Evidence `lookdev-richenv/ap72-validation/`. |
 | **Pose library assessment (AP-73)** | ✅ **Assessment done; awaiting owner approval** | Sheet poses ~550 px tall: fine for wide shots, soft in close-ups. Recommended test pose: 03 shocked (skin-only first). Nothing extracted, corrected or promoted. `lookdev-richenv/POSE_LIBRARY_ASSESSMENT.md` |
-| **Pose 03 skin test (AP-74)** | ✅ **Done as TEST; awaiting owner visual review** | Skin-only, 0 changed pixels outside the mask; hands/mouth untouched; Shot 2 rendered with the unmodified renderer; closer to canon colour, no sharpness gain. `lookdev-richenv/ap74-pose03-test/` |
-| **Pose library correction (AP-74 to AP-76)** | 🟡 **Pose 03 approved as working TEST asset; poses 02 and 05 produced, awaiting review** | Same skin-only method, 0 changed pixels outside masks; hands, phone and expressions untouched; pose 02 not rendered. Poses 01, 04, 05, 06 await review. `lookdev-richenv/ap75-pose02-test/` |
+| **Pose 03 skin test (AP-74)** | ✅ **Approved working TEST asset (splayed hands kept exactly)** | Skin-only, 0 changed pixels outside the mask; hands/mouth untouched; Shot 2 rendered with the unmodified renderer; closer to canon colour, no sharpness gain. `lookdev-richenv/ap74-pose03-test/` |
+| **Pose library correction (AP-74 to AP-80)** | ✅/🟡 **Poses 02 and 05 APPROVED for working use; pose 03 approved working TEST; pose 06 corrected as TEST (AP-80), awaiting review** | Same skin-only method, 0 changed pixels outside masks; hands, phone and expressions untouched; pose 02 not rendered. Poses 01, 04, 05, 06 await review. `lookdev-richenv/ap75-pose02-test/` |
 | **Production toolkit (AP-78)** | ✅ **Built and tested; awaiting owner review** | `production/`: conversation data, bubbles, typing indicator, hook/end card, character reactions, layout checks, storyboard preview. Renderer unchanged; no new dependencies. Short 001 v2 compiles and renders as a technical test (`production/evidence/ap78/`). |
 | **Multi-platform direction** | ✅ Approved; architecture drafted (proposal) | YouTube + TikTok + Facebook; 9:16 primary, 16:9 secondary; `bible/MULTI_PLATFORM_ARCHITECTURE.md`. **No publishing automation or APIs built** |**No publishing automation or APIs built** |
 | **Garage object storage** | 🟡 **Architecture direction approved (AP-25 to AP-38); deployment and production cutover NOT approved (AP-39)** | `docs/GARAGE_STORAGE_FINAL_ARCHITECTURE.md`. Second review approved write-once versions and a fixed working directory. Topology (G2) open until server specs. **Nothing installed, created or configured.** The owner's latest message was cut off; further "details to settle first" are awaited. **Architecture approval is not deployment approval.** |
 | **VPS production environment** | 🟡 **Read-only inspection done; design written; NOT deployed** | `docs/VPS_PRODUCTION_READINESS.md`. AP-40 to AP-43: the Contabo VPS is the central production environment for both projects; Windows is administration only. Server is clean and idle (Ubuntu 24.04, 4 vCPU, 7.8 GiB, no swap, one 100 GB disk, only SSH open); **nothing for Stickman is installed there**. 15 open decisions (P1–P15). **Architecture approval is not deployment approval.**  **Owner-confirmed (AP-44): the Kids session is the sole shared-infrastructure coordinator;** five mandatory safeguards recorded (AP-45 to AP-49); not blanket approval (AP-50). |
-| Character artwork, tooling, pilot production | ⛔ Not started (gated) | |
+| **Final Short 001 production** | ⛔ **Not started; final production approval not given** | Script approved as working script; animation system (AP-79) is a proposal: `docs/oddly-relatable/AP-79-PROPOSAL.md` |
 
 ## 2. Direction changes from the owner today (override earlier approvals)
 1. **World at large.** No Nigerian/African-specific stories, settings, names or language (reverses part of AP-3).
@@ -43,6 +54,7 @@
 6. **Visual identity permanently locked** to the canonical image (simple expressive 2D characters + richly illustrated cinematic 2D environments); the pictured character is the master character; no alternatives or silent changes (AP-51 to AP-57).
 
 ## 3. Approved vs proposed (summary; full register in `DECISIONS.md`)
+> **Superseded parts of this summary:** V1 visual identity resolved by the permanent lock (AP-51 to AP-57); V8 new character resolved by Canonical Character 01; V6 proof of concept done (AP-58 to AP-60). Current state: section 0.
 **Approved:** channel concept and pillars; original identity (no copying); hybrid animation; lightweight locally rendered production; balanced relationship humour; pilot title idea; renderer unchanged; phase-gated work; Codex policy (AP-15); the direction changes above (AP-16 to AP-18); the multi-platform direction (AP-19 to AP-24); the Garage storage principles (AP-25 to AP-36; architecture only, not deployment).
 **Proposed / open:** the visual identity (V1), the new character (V8), the proof of concept (V6), Bible rewrite scope (V9), and most `D1–D23` items (several are now superseded).
 
@@ -56,7 +68,7 @@
 | Python | 3.14.3; `PYTHONUTF8=1`; no `python3`; Whisper not installed |
 | GPU / Docker | None needed / installed, unused |
 | `doctor` | 6/6 |
-| Tests | Node 134/135 (one upstream Windows path bug); Python 11/14; shell 0/2 (Windows, macOS-only, no-`.git` causes) |
+| Tests | Renderer suite (`node --test tests/*.test.mjs` in the skill folder): 132/135 pass, 1 skipped, 2 pre-existing environment failures (a test calls bare `ffprobe`, which is not on PATH; the Jensen baseline file list does not match the folder). Production toolkit: 35/35 (2026-11-12). Earlier: Python 11/14; shell 0/2 (Windows, macOS-only) |
 | Backups | `C:\Users\PC\Desktop\Works\_backups\stickman-pre-lf-20261111` |
 
 ## 5. Technical findings so far
@@ -80,14 +92,14 @@
 Renderer unchanged · **no installs, Garage deployment, firewall/DNS/Terraform changes or heavy jobs on the VPS; read-only inspection only** · no pilot production · **no Garage install, configuration, buckets or keys** (architecture approval is not deployment approval)** · no paid image/voice/video services · no dependency installs · no commits or pushes · existing files preserved · independent of Kids Animation Studio · **no image generation until the owner approves the proof of concept.**
 
 ## 8. Risks and blockers
-- **Blocked on the owner:** the new character (V8), approval of the proof of concept (V6, now vertical-first), and the multi-platform proposals M10–M16.
+- **Waiting on the owner (current):** pose 06 visual review; approval of the AP-79 architecture proposal; final production approval for Short 001; the multi-platform proposals M10–M16. (Earlier blockers V8 new character, V6 proof of concept and V1 visual identity are resolved.)
 - **Bible is inconsistent with current direction** until rewritten (V9); bannered, not fixed, to avoid rewriting twice.
-- **No `.git`:** no change tracking.
+- **Version control:** private GitHub repository `iampryce/oddly-relatable` (`main`); signed commits; push only after review; never force-push.
 - **Platform specs and policies are only partly verified:** YouTube Shorts and synthetic-content rules were read on official pages; **TikTok and Meta come from secondary sources only** (official pages could not be read). Research must be completed before any publishing automation.
 - **Storage (if Garage is adopted):** Garage has no object versioning, no object lock and no bucket policies, so deletion/overwrite protection must come from write-once prefixes, restricted keys and a separate backup; a shared service still shares capacity and outages with the Kids project. No Garage host exists yet as far as the repository shows.
 - **VPS findings (observed read-only):** no swap with 7.8 GiB RAM (OOM risk if heavy renders overlap); **one disk, so backups must be off-box and no target exists (blocker P4)**; SSH has root login and password authentication enabled; Ubuntu's Node is 18.19 (renderer needs ≥ 20); Node, FFmpeg, Garage, TLS proxy, monitoring and backup tools are all absent; the other project's repository sits under `/root`.
 - **Absolute paths are baked into the renderer fingerprint and shot-cache keys [verified 2026-11-11]:** identical project content in three folders gave three fingerprints. An approved project must stay at a fixed absolute path; pulling it into a different folder would invalidate the preview approval and the cache (decision G17).
-- **Renderer captions** sit at a fixed bottom position- **Renderer captions** sit at a fixed bottom position that platform interfaces cover in portrait; plan is to burn captions in externally (M12).
+- **Renderer captions** sit at a fixed bottom position that platform interfaces cover in portrait; plan is to burn captions in externally (M12).
 - **Unverified:** AI plate consistency across angles; ChatGPT image output commercial terms; YouTube policy on synthetic/repetitive content.
 - **Originality:** compared against one frame only; the finished look still needs a by-eye check by the owner and ChatGPT.
 
