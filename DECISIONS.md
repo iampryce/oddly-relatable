@@ -107,6 +107,7 @@ Research confidence so far: YouTube Shorts length and disclosure rules were read
 | **AP-83** | **Local web studio MVP (2026-11-12):** `studio/` around the existing production engine (see `studio/README.md`). Local only (127.0.0.1), no new dependencies, no cloud, no publishing. Human review decisions are recorded separately from QA and never trigger the renderer's approval or any publication. |
 | **AP-84A** | **GPU visual generation architecture approved in principle by the owner (2026-11-12).** Initial GPU experiment budget: **$0**. No GPU provisioning, RunPod account, external generation APIs, model downloads or artwork changes until separately approved. |
 | **AP-84B1** | **Generation foundation implemented (2026-11-12, zero cost):** generation jobs, `none`/`fake` adapters, quarantine, human review, append-only history, versioned registry proposals (no registry writes). See `studio/README.md`. AP-84B2 not started; needs review and approval. |
+| **AP-84B2** | **Asset intelligence, reference packs and validation implemented (2026-11-13, zero cost).** Read-only towards registries, stories and artwork; validation is advisory and never approves; registry promotion is a design document only (`docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md`). AP-84B3 not authorised. |
 
 **Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
 
@@ -248,6 +249,7 @@ Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which
 
 | Date | Change |
 |---|---|
+| 2026-11-13 (AP-84B2) | Story asset requirements, immutable reference packs, advisory candidate validation and the registry-promotion design added; no registry, story, artwork or renderer changes. |
 | 2026-11-12 (AP-84B1) | GPU architecture approved in principle ($0 budget); zero-cost generation foundation added to the studio; no GPU, models or generation of artwork. |
 | 2026-11-12 (AP-83) | Local web studio added (episodes, background production runs, live progress, MP4/QA/storyboard viewing, review records); Short 001 produced through it; no publication approval. |
 | 2026-11-12 (AP-82) | One-command production engine (`produce`), audio assembly and automated QA added; Short 001 produced end to end (technical run, QA pass with softness warnings); no publication approval. |

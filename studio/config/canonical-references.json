@@ -1,0 +1,9 @@
+{
+  "note": "Canonical (non-registry) references used in reference packs (AP-84B2). Read-only: the studio only reads and hashes these files, never modifies them. Statuses mirror bible/concepts/lookdev-richenv/ASSET_REGISTER.md.",
+  "characters": {
+    "character-01": [
+      {"id": "canon-scene", "role": "canonical visual reference (locked identity)", "file": "bible/concepts/lookdev-richenv/lookdev-scene-01.png", "sha256": "36b7c97e8b9c31673d6b04dbc9c95b0a6b433dd14dee133fff9c87ad3ebff016", "width": 941, "height": 1672, "approval": "PROTECTED", "version": 1},
+      {"id": "master-v3", "role": "approved working character master (single neutral pose)", "file": "bible/concepts/lookdev-richenv/production-candidates/corrected/candidate-04_corrected-v3.png", "sha256": "d4dcb8082317ec2ab76c91e1bbcaf6ea20d9667ab721596f0e02718bbf07da51", "width": 1024, "height": 1536, "approval": "APPROVED_WORKING_CANDIDATE", "version": 3}
+    ]
+  }
+}

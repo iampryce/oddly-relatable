@@ -1,9 +1,10 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-12 (after AP-84B1, generation foundation). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-13 (after AP-84B2, asset intelligence). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
+0c. **AP-84B2 review:** Generation > Story requirements / Reference packs tabs and the validation report on each job page. Answer the open questions in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` §7 before any promotion work. AP-84B3 is not authorised; GPU budget stays $0.
 0b. **AP-84B1 review:** generation foundation (`#/generation` in the studio; `STUDIO_GEN_ADAPTER=fake` shows labelled synthetic fixtures). AP-84B2 (asset requests from stories, reference pack, validators, registry promotion design) needs your approval; GPU work stays at $0 until you approve a budget.
 0a. **Studio available (AP-83):** `node studio/server.mjs` (with FFMPEG/FFPROBE set), open http://127.0.0.1:4317/. Review Short 001 there: play the video, read QA, record a decision (approve for next step / request changes / reject). Please confirm the MP4 plays in your browser.
 0. **Produce command available (AP-82):** `node production/cli.mjs produce production/stories/short-001-v2.story.json studio-work/short-001-production` (needs FFMPEG/FFPROBE). Short 001 technical run: QA pass with 4 softness warnings; evidence `production/evidence/ap82/`.

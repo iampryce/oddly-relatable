@@ -61,3 +61,11 @@ video { width: 100%; max-height: 640px; background: #000; border-radius: 8px; }
 .toast { position: fixed; right: 20px; bottom: 20px; background: var(--panel); border: 1px solid var(--line); padding: 10px 14px; border-radius: 8px; box-shadow: var(--shadow); max-width: 420px; }
 /* AP-84B1 generation statuses */
 .s-candidate-ready { color: var(--info); } .s-approved { color: var(--ok); }
+/* AP-84B2: generation sub-navigation and validation check lists */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; border-bottom: 1px solid var(--line); }
+.tab { color: var(--muted); padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:hover { text-decoration: none; color: var(--text); }
+ul.checks { list-style: none; margin: 8px 0; padding: 0; }
+ul.checks li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+ul.checks li:last-child { border-bottom: 0; }

@@ -11,6 +11,7 @@ import {PRODUCTION_ROOT} from '../../production/lib/runtime.mjs';
 import {now, logEvent} from './db.mjs';
 import {Quarantine, GEN_JOB_ID} from './quarantine.mjs';
 import {adapterFor} from './gen-adapters.mjs';
+import {buildReferencePack, verifyPack, validateCandidate, referencesForAsset} from './asset-intel.mjs';
 
 export const GEN_STATUSES = ['queued', 'running', 'candidate_ready', 'failed', 'cancelled', 'approved', 'rejected'];
 export const ASSET_TYPES = ['character-pose', 'environment'];
@@ -76,6 +77,30 @@ CREATE TABLE IF NOT EXISTS gen_registry_proposals (
   created_at TEXT NOT NULL,
   UNIQUE(registry, entry_key, version)
 );
+-- AP-84B2: immutable reference packs (snapshots of reference files with hashes) and append-only validation reports.
+CREATE TABLE IF NOT EXISTS gen_reference_packs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  subject_kind TEXT NOT NULL,          -- character | story
+  subject_id TEXT NOT NULL,            -- character-01 or <file>.story.json
+  pack_sha256 TEXT NOT NULL,           -- hash of the sorted (ref, source, sha256, version) list
+  complete INTEGER NOT NULL,           -- 1 when every item was present and matched its registry hash
+  items_json TEXT NOT NULL,
+  problems_json TEXT NOT NULL,
+  note TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gen_validations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL REFERENCES gen_jobs(id),
+  candidate_id INTEGER NOT NULL REFERENCES gen_candidates(id),
+  candidate_sha256 TEXT NOT NULL,
+  status TEXT NOT NULL,                -- pass | warn | fail (advisory; never approves or changes the job)
+  checks_json TEXT NOT NULL,
+  reference_pack_id INTEGER REFERENCES gen_reference_packs(id),
+  trigger TEXT NOT NULL,               -- auto | manual
+  created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS gen_jobs_status ON gen_jobs(status, created_at);
 `;
 // Append-only guarantees at the database level.
@@ -84,6 +109,10 @@ CREATE TRIGGER IF NOT EXISTS gen_reviews_no_update BEFORE UPDATE ON gen_reviews 
 CREATE TRIGGER IF NOT EXISTS gen_reviews_no_delete BEFORE DELETE ON gen_reviews BEGIN SELECT RAISE(ABORT, 'gen_reviews is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS gen_proposals_no_delete BEFORE DELETE ON gen_registry_proposals BEGIN SELECT RAISE(ABORT, 'registry proposals are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS gen_candidates_no_update BEFORE UPDATE ON gen_candidates BEGIN SELECT RAISE(ABORT, 'candidates are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS gen_packs_no_update BEFORE UPDATE ON gen_reference_packs BEGIN SELECT RAISE(ABORT, 'reference packs are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS gen_packs_no_delete BEFORE DELETE ON gen_reference_packs BEGIN SELECT RAISE(ABORT, 'reference packs are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS gen_validations_no_update BEFORE UPDATE ON gen_validations BEGIN SELECT RAISE(ABORT, 'validation reports are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS gen_validations_no_delete BEFORE DELETE ON gen_validations BEGIN SELECT RAISE(ABORT, 'validation reports are append-only'); END;
 `;
 
 export const newGenJobId = () => {
@@ -112,8 +141,10 @@ function parseAssetKey(assetType, assetKey) {
   throw fail(400, `assetType must be one of: ${ASSET_TYPES.join(', ')}`);
 }
 
-export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 120000}) {
+export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 120000, sources}) {
   db.exec(SCHEMA); db.exec(TRIGGERS);
+  // AP-84B2 migration: a job may name the reference pack it was requested with (older databases lack the column).
+  if (!db.prepare('PRAGMA table_info(gen_jobs)').all().some(c => c.name === 'reference_pack_id')) db.exec('ALTER TABLE gen_jobs ADD COLUMN reference_pack_id INTEGER REFERENCES gen_reference_packs(id)');
   const quarantine = new Quarantine(workspace);
   const worker = adapterFor(adapter);
   let busy = false, stopped = false;
@@ -125,25 +156,87 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
   };
   const jobView = r => r && ({id: r.id, episodeId: r.episode_id, assetType: r.asset_type, assetKey: r.asset_key, description: r.description, status: r.status,
     adapter: r.adapter, initiatedBy: r.initiated_by, attempt: r.attempt, parentJobId: r.parent_job_id, progress: r.progress, error: r.error, retryable: !!r.retryable,
-    createdAt: r.created_at, updatedAt: r.updated_at, startedAt: r.started_at, finishedAt: r.finished_at});
+    createdAt: r.created_at, updatedAt: r.updated_at, startedAt: r.started_at, finishedAt: r.finished_at, referencePackId: r.reference_pack_id ?? null});
   const candidates = id => db.prepare('SELECT * FROM gen_candidates WHERE job_id = ? ORDER BY id').all(id).map(c => ({id: c.id, name: c.name, sha256: c.sha256, bytes: c.bytes,
     mediaType: c.media_type, width: c.width, height: c.height, synthetic: !!c.synthetic, provenance: JSON.parse(c.provenance_json), createdAt: c.created_at}));
   const reviews = id => db.prepare('SELECT * FROM gen_reviews WHERE job_id = ? ORDER BY id').all(id).map(r => ({id: r.id, candidateId: r.candidate_id, decision: r.decision,
     note: r.note, reviewer: r.reviewer, regeneratedJobId: r.regenerated_job_id, proposalId: r.proposal_id, createdAt: r.created_at}));
   const proposals = id => db.prepare('SELECT * FROM gen_registry_proposals WHERE job_id = ? ORDER BY id').all(id).map(p => ({id: p.id, candidateId: p.candidate_id, registry: p.registry,
     entryKey: p.entry_key, version: p.version, candidateSha256: p.candidate_sha256, promotable: !!p.promotable, status: p.status, reason: p.reason, createdAt: p.created_at}));
-  const detail = id => { const j = jobView(get(id)); return j && {...j, candidates: candidates(id), reviews: reviews(id), proposals: proposals(id)}; };
+  const validations = id => db.prepare('SELECT * FROM gen_validations WHERE job_id = ? ORDER BY id').all(id).map(v => ({id: v.id, candidateId: v.candidate_id,
+    candidateSha256: v.candidate_sha256, status: v.status, checks: JSON.parse(v.checks_json), referencePackId: v.reference_pack_id, trigger: v.trigger, createdAt: v.created_at}));
+  const detail = id => {
+    const j = jobView(get(id));
+    return j && {...j, candidates: candidates(id), reviews: reviews(id), proposals: proposals(id), validations: validations(id),
+      referencePack: j.referencePackId ? packSummary(db.prepare('SELECT * FROM gen_reference_packs WHERE id = ?').get(j.referencePackId)) : null};
+  };
 
-  function create({episodeId = null, assetType, assetKey, description, initiatedBy = 'owner'}, {parent = null} = {}) {
+  // ---------- reference packs (AP-84B2): immutable snapshots; artwork is only read and hashed, never copied or changed
+  const packSummary = r => r && ({id: r.id, subject: {kind: r.subject_kind, id: r.subject_id}, packSha256: r.pack_sha256, complete: !!r.complete,
+    itemCount: JSON.parse(r.items_json).length, problems: JSON.parse(r.problems_json), note: r.note, createdBy: r.created_by, createdAt: r.created_at});
+  async function createPack({kind, id, note = null, createdBy = 'owner'}) {
+    const who = text(createdBy, 'createdBy', 1, 60), n = note === null || note === undefined || note === '' ? null : text(note, 'note', 1, 500);
+    const pack = await buildReferencePack({kind, id}, sources);
+    const rowId = Number(db.prepare(`INSERT INTO gen_reference_packs (subject_kind, subject_id, pack_sha256, complete, items_json, problems_json, note, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(kind, id, pack.packSha256, pack.complete ? 1 : 0, JSON.stringify(pack.items), JSON.stringify(pack.problems), n, who, now()).lastInsertRowid);
+    logEvent(db, 'gen-pack-created', `Reference pack ${rowId} recorded for ${kind} ${id} (${pack.items.length} items${pack.complete ? '' : ', INCOMPLETE'})`);
+    return packDetail(rowId);
+  }
+  const listPacks = () => db.prepare('SELECT * FROM gen_reference_packs ORDER BY id DESC LIMIT 200').all().map(packSummary);
+  // Detail always re-verifies the files now, so drift (deleted or changed artwork) is visible.
+  function packDetail(id) {
+    const r = db.prepare('SELECT * FROM gen_reference_packs WHERE id = ?').get(Number(id));
+    if (!r) return null;
+    const items = JSON.parse(r.items_json);
+    return {...packSummary(r), items, verification: {...verifyPack(items), checkedAt: now()}};
+  }
+
+  // ---------- candidate validation (AP-84B2): measurable checks, append-only reports, never approval
+  async function validateJob(id, trigger = 'manual') {
+    const j = get(id);
+    if (!j) throw fail(404, 'generation job not found');
+    const cands = db.prepare(`SELECT * FROM gen_candidates WHERE job_id = ? AND name LIKE '%.png' ORDER BY id`).all(id);
+    if (!cands.length) throw fail(409, 'this job has no image candidates to validate');
+    const packId = j.reference_pack_id ?? null;
+    const refs = packId ? JSON.parse(db.prepare('SELECT items_json FROM gen_reference_packs WHERE id = ?').get(packId).items_json)
+      : await referencesForAsset(j.asset_type, j.asset_key, sources);
+    const reports = [];
+    for (const c of cands) {
+      const st = quarantine.stat(id, c.name);
+      let result;
+      if (!st) result = {status: 'fail', checks: [{id: 'quarantine-file', status: 'fail', detail: 'candidate file is missing from quarantine'}]};
+      else if (quarantine.sha256(id, c.name) !== c.sha256) result = {status: 'fail', checks: [{id: 'quarantine-file', status: 'fail', detail: 'candidate file changed since it was recorded'}]};
+      else {
+        result = await validateCandidate({file: st.file, bytes: st.size, assetType: j.asset_type, assetKey: j.asset_key, referenceItems: refs});
+        result.checks.unshift({id: 'quarantine-file', status: 'pass', detail: 'file matches its recorded SHA-256'});
+        if (c.synthetic) { result.checks.push({id: 'synthetic', status: 'warn', detail: 'synthetic test fixture: never promotable'}); if (result.status === 'pass') result.status = 'warn'; }
+      }
+      const vid = Number(db.prepare(`INSERT INTO gen_validations (job_id, candidate_id, candidate_sha256, status, checks_json, reference_pack_id, trigger, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, c.id, c.sha256, result.status, JSON.stringify(result.checks), packId, trigger, now()).lastInsertRowid);
+      reports.push({id: vid, candidateId: c.id, ...result});
+    }
+    logEvent(db, 'gen-validated', `Generation job ${id}: ${reports.length} candidate(s) validated (${reports.map(r => r.status).join(', ')}); validation never approves`);
+    return {jobId: id, reports, validations: validations(id)};
+  }
+
+  function create({episodeId = null, assetType, assetKey, description, initiatedBy = 'owner', referencePackId = null}, {parent = null} = {}) {
     if (!ASSET_TYPES.includes(assetType)) throw fail(400, `assetType must be one of: ${ASSET_TYPES.join(', ')}`);
     parseAssetKey(assetType, assetKey);
     const desc = text(description, 'description', 3, 1000), who = text(initiatedBy, 'initiatedBy', 1, 60);
     if (episodeId !== null && episodeId !== undefined) {
       if (typeof episodeId !== 'string' || !db.prepare('SELECT 1 FROM episodes WHERE id = ?').get(episodeId)) throw fail(404, `episode not found: ${episodeId}`);
     }
+    let packId = null;
+    if (referencePackId !== null && referencePackId !== undefined && referencePackId !== '') {
+      packId = Number(referencePackId);
+      const pk = Number.isInteger(packId) && db.prepare('SELECT * FROM gen_reference_packs WHERE id = ?').get(packId);
+      if (!pk) throw fail(404, `reference pack not found: ${referencePackId}`);
+      // A pose request must not use a pack recorded for a different character; the pack stays fixed for the job.
+      if (assetType === 'character-pose' && pk.subject_kind === 'character' && pk.subject_id !== assetKey.split('/')[0]) throw fail(422, 'reference pack is for a different character');
+    }
     const id = newGenJobId(), t = now();
-    db.prepare(`INSERT INTO gen_jobs (id, episode_id, asset_type, asset_key, description, status, adapter, initiated_by, attempt, parent_job_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`).run(id, episodeId || null, assetType, assetKey, desc, worker.id, who, parent ? parent.attempt + 1 : 1, parent?.id ?? null, t, t);
+    db.prepare(`INSERT INTO gen_jobs (id, episode_id, asset_type, asset_key, description, status, adapter, initiated_by, attempt, parent_job_id, created_at, updated_at, reference_pack_id)
+      VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`).run(id, episodeId || null, assetType, assetKey, desc, worker.id, who, parent ? parent.attempt + 1 : 1, parent?.id ?? null, t, t, packId);
     logEvent(db, 'gen-queued', `Generation job ${id} queued (${assetType} ${assetKey}, adapter ${worker.id})`, {episodeId: episodeId || null});
     queueMicrotask(() => kick());
     return detail(id);
@@ -169,10 +262,17 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
       if (!Array.isArray(outputs) || !outputs.length) throw new Error('worker returned no candidates');
       for (const o of outputs) {
         const w = quarantine.write(job.id, o.name, o.buffer);
-        const provenance = {...o.provenance, jobId: job.id, adapter: worker.id, request: {assetType: job.asset_type, assetKey: job.asset_key, description: job.description}, sha256: w.sha256, createdAt: now()};
+        const pack = job.reference_pack_id ? db.prepare('SELECT id, pack_sha256 FROM gen_reference_packs WHERE id = ?').get(job.reference_pack_id) : null;
+        const provenance = {...o.provenance, jobId: job.id, adapter: worker.id, request: {assetType: job.asset_type, assetKey: job.asset_key, description: job.description},
+          referencePack: pack ? {id: pack.id, packSha256: pack.pack_sha256} : null, sha256: w.sha256, createdAt: now()};
         db.prepare(`INSERT INTO gen_candidates (job_id, name, sha256, bytes, media_type, width, height, synthetic, provenance_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(job.id, w.name, w.sha256, w.bytes, w.mediaType, o.width ?? null, o.height ?? null, o.synthetic ? 1 : 0, JSON.stringify(provenance), now());
       }
+      // Automatic validation runs before the job is marked ready, so a ready job always has its report. It is advisory:
+      // whatever it finds (or if it cannot run), the job still becomes candidate_ready for a person to review.
+      update(job.id, {progress: 90});
+      try { await validateJob(job.id, 'auto'); } catch (e) { if (stopped) return; if (e.status !== 409) logEvent(db, 'gen-validation-error', `Generation job ${job.id}: validation could not run (${e.message})`); }
+      if (stopped || get(job.id).status !== 'running') return;          // cancelled or shutting down during validation
       update(job.id, {status: 'candidate_ready', progress: 100, finished_at: now()});
       logEvent(db, 'gen-candidate-ready', `Generation job ${job.id}: ${outputs.length} candidate(s) ready for review`);
     } catch (e) {
@@ -216,7 +316,7 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
       update(id, {status: 'rejected'});
     } else {
       update(id, {status: 'rejected'});
-      regenerated = create({episodeId: j.episode_id, assetType: j.asset_type, assetKey: j.asset_key, description: j.description, initiatedBy: who}, {parent: j}).id;
+      regenerated = create({episodeId: j.episode_id, assetType: j.asset_type, assetKey: j.asset_key, description: j.description, initiatedBy: who, referencePackId: j.reference_pack_id}, {parent: j}).id;
     }
     db.prepare(`INSERT INTO gen_reviews (job_id, candidate_id, decision, note, reviewer, regenerated_job_id, proposal_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, candidate?.id ?? null, decision, n, who, regenerated, proposalId, now());
@@ -250,7 +350,7 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
 
   const list = () => db.prepare('SELECT * FROM gen_jobs ORDER BY created_at DESC, id DESC LIMIT 200').all().map(jobView);
   const config = () => ({adapter: worker.id, ...worker.status(), assetTypes: ASSET_TYPES, decisions: GEN_DECISIONS,
-    note: 'Approval creates a versioned registry proposal only; registries are never modified by the studio in AP-84B1.'});
+    note: 'Approval creates a versioned registry proposal only; registries are never modified by the studio. Validation is advisory and never approves.'});
 
-  return {create, cancel, review, recover, list, detail, config, quarantine, kick, stop() { stopped = true; }, isJobId: id => GEN_JOB_ID.test(id)};
+  return {create, cancel, review, recover, list, detail, config, quarantine, kick, createPack, listPacks, packDetail, validateJob, stop() { stopped = true; }, isJobId: id => GEN_JOB_ID.test(id)};
 }

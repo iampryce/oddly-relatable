@@ -93,6 +93,56 @@ A local, zero-cost foundation for future GPU-generated assets. It has no GPU, no
 - **API:** `GET /api/generation`, `GET|POST /api/generation/jobs`, `GET /api/generation/jobs/:id`, `POST /api/generation/jobs/:id/cancel`, `POST /api/generation/jobs/:id/reviews`, and `GET /media/generation/:id/<name>` (whitelisted, served as data).
 - **Dashboard:** `#/generation` (jobs and a new-job form) and `#/generation/<job-id>` (candidates with previews, hash and provenance, review, history, proposals).
 
+## Asset intelligence, reference packs and validation (AP-84B2)
+
+All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, `config/canonical-references.json`).
+
+- **Story requirements.** For each story, the studio builds every scene's timeline with the engine's own format code. From that timeline it lists the characters, the poses each cast member uses (with use counts and scenes), and the environments. Each requirement gets one status, with a reason when it is not simply available:
+  - **available:** the registry entry exists, its file exists, its SHA-256 matches, and its approval class is approved.
+  - **missing:** the pose or environment is not in the registry, or its file is absent.
+  - **unapproved:** the entry exists, but its approval or status is not an approved class. Approved pose classes are `APPROVED_WORKING_ASSET`, `APPROVED_WORKING_TEST_ASSET` and `APPROVED_EXTRACT`. Environments with status `APPROVED…` or `ALTERNATIVE…` count as approved.
+  - **unresolved:** there is no registry for the character, the file's hash differs from the registry, a scene format is not implemented, or the scene gives a direct file path instead of an environment ID.
+- **Reference packs** (`gen_reference_packs`) are immutable snapshots: database triggers refuse update and delete. Each pack is recorded for a character or a story.
+  - **Items:** the canonical references in `config/canonical-references.json` (canon scene, master v3), every approved pose, and the story's environments.
+  - **Fields per item:** repository-relative source path, SHA-256, dimensions, approval and version.
+  - **Pack hash and completeness:** each pack gets a pack SHA-256 and is marked complete or incomplete, with the problems named.
+  - **Re-verification:** opening a pack re-hashes every file now and reports `missing` or `mismatch` (changed since recorded).
+  - **Files are never copied or modified.**
+  - A generation job can name a pack (`referencePackId`). The pack ID and hash then appear in each candidate's provenance, and a regenerated job keeps the same pack.
+- **Candidate validation** (`gen_validations`) is append-only and advisory. It runs automatically before a job becomes `candidate_ready`, and on demand. Checks per PNG candidate:
+  - **Always:**
+    - the file still matches its recorded hash;
+    - file size (20 MB limit);
+    - the PNG decodes;
+    - dimensions (sides 256–4096 px).
+  - **Character poses:**
+    - transparency: at least 20% fully transparent pixels;
+    - figure height: a warning below 1000 px, linked to the soft close-up concern;
+    - figure width/height within ±25% of the approved poses.
+  - **Environments:**
+    - fully opaque;
+    - 9:16 aspect ratio within 6%;
+    - a registered environment of the same ID to compare with.
+  - Synthetic fixtures are flagged, and a human-approval reminder is always included, so a report never comes out as a clean "approved".
+  - **Validation never changes a job's status and never approves.**
+- **Not measurable yet:** identity likeness, such as face and outfit matching the canon. That needs a person, or a model in a later, approved milestone.
+- **API:**
+
+  | Method | Path | Purpose |
+  |---|---|---|
+  | GET | `/api/generation/requirements[?story=<file>]` | requirements for all stories, or for one |
+  | GET / POST | `/api/generation/reference-packs` | list packs / record a pack (`{kind: character\|story, id, note?}`) |
+  | GET | `/api/generation/reference-packs/:id` | pack detail, re-verified now |
+  | POST | `/api/generation/jobs/:id/validate` | run validation again (a new, appended report) |
+
+  Job detail now includes `validations` and `referencePack`.
+- **Dashboard:** the Generation section has three tabs:
+  - **Jobs:** the new-job form can pick a reference pack.
+  - **Story requirements:** one table per story with a "Request generation" button for any requirement that is not available. The button pre-fills the job form.
+  - **Reference packs:** a list, a new-pack form, and pack detail showing the "now" verification for each item.
+  - **Job page:** shows the latest validation report for each candidate, with a "Validate again" button.
+- **Registry promotion** is designed in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` and is **not implemented**.
+
 ## Security
 
 - **Network:** binds to `127.0.0.1` only; a `Host` header check blocks DNS rebinding.
@@ -100,7 +150,8 @@ A local, zero-cost foundation for future GPU-generated assets. It has no GPU, no
 - **Input validation:** IDs, story names (only `production/stories/*.story.json`), decisions and text lengths are validated.
 - **Process:** child processes are started with an argument array (no shell).
 - **Media:** keys are whitelisted by pattern and resolved inside the run folder (no traversal, no symlinks).
-- **Nothing leaked:** no filesystem paths or environment values in responses.
+- **Nothing leaked:** no absolute filesystem paths or environment values in responses. The asset intelligence views show repository-relative paths of registered reference files only, and only files inside the repository are ever read.
+- **Read-only artwork:** asset intelligence, reference packs and validation only read and hash registry and artwork files. Tests assert that registries, stories, canon and every registered pose and environment are byte-identical after each run.
 - **Browser:** a strict Content-Security-Policy; all user text is rendered as text, never HTML.
 
 ## Limitations

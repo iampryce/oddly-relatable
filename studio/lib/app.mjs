@@ -10,6 +10,7 @@ import {LocalStorage, RUN_ID} from './storage.mjs';
 import {JobRunner, TERMINAL} from './jobs.mjs';
 import {listStories, storyInfo} from './stories.mjs';
 import {createGeneration} from './generation.mjs';
+import {requirementsFor} from './asset-intel.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const STATIC = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css'};
@@ -27,12 +28,12 @@ const cleanText = (v, name, min, max) => {
   return t;
 };
 
-export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true, genAdapter = 'none', genTimeoutMs} = {}) {
+export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true, genAdapter = 'none', genTimeoutMs, assetSources} = {}) {
   const storage = new LocalStorage(workspace);
   const db = openDb(path.join(storage.root, 'studio.db'));
   const jobs = new JobRunner({db, storage, command, pollMs});
   // Generation (AP-84B1): separate jobs, quarantine and reviews; the adapter is server configuration, never chosen by clients.
-  const gen = createGeneration({db, workspace: storage.root, adapter: genAdapter, ...(genTimeoutMs ? {timeoutMs: genTimeoutMs} : {})});
+  const gen = createGeneration({db, workspace: storage.root, adapter: genAdapter, sources: assetSources, ...(genTimeoutMs ? {timeoutMs: genTimeoutMs} : {})});
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
 
   // ---------- data helpers
@@ -120,7 +121,17 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
       return {...gen.config(), counts: Object.fromEntries(['queued', 'running', 'candidate_ready', 'failed', 'cancelled', 'approved', 'rejected'].map(st => [st, count(st)]))};
     }],
     ['GET', /^\/api\/generation\/jobs$/, () => gen.list()],
-    ['POST', /^\/api\/generation\/jobs$/, (m, body) => ({status: 202, body: gen.create({episodeId: body.episodeId ?? null, assetType: body.assetType, assetKey: body.assetKey, description: body.description, initiatedBy: body.initiatedBy ?? 'owner'})})],
+    ['POST', /^\/api\/generation\/jobs$/, (m, body) => ({status: 202, body: gen.create({episodeId: body.episodeId ?? null, assetType: body.assetType, assetKey: body.assetKey, description: body.description, initiatedBy: body.initiatedBy ?? 'owner', referencePackId: body.referencePackId ?? null})})],
+    // ---------- asset intelligence (AP-84B2): read-only analysis, immutable reference packs, advisory validation
+    ['GET', /^\/api\/generation\/requirements$/, (m, body, url) => {
+      const story = url.searchParams.get('story');
+      if (story) return requirementsFor(story, assetSources);
+      return listStories().map(st => requirementsFor(st.file, assetSources));
+    }],
+    ['GET', /^\/api\/generation\/reference-packs$/, () => gen.listPacks()],
+    ['POST', /^\/api\/generation\/reference-packs$/, async (m, body) => ({status: 201, body: await gen.createPack({kind: body.kind, id: body.id, note: body.note ?? null, createdBy: body.createdBy ?? 'owner'})})],
+    ['GET', /^\/api\/generation\/reference-packs\/(\d{1,9})$/, m => { const p = gen.packDetail(m[1]); if (!p) throw fail(404, 'reference pack not found'); return p; }],
+    ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/validate$/, async m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return {status: 201, body: await gen.validateJob(m[1], 'manual')}; }],
     ['GET', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); const d = gen.detail(m[1]); if (!d) throw fail(404, 'generation job not found'); return d; }],
     ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/cancel$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return gen.cancel(m[1]); }],
     ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/reviews$/, (m, body) => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return {status: 201, body: gen.review(m[1], {decision: body.decision, candidateId: body.candidateId, note: body.note, reviewer: body.reviewer ?? 'owner'})}; }],

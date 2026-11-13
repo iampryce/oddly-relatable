@@ -216,24 +216,38 @@ function reviewCard(r) {
 // ---------- generation (AP-84B1): jobs, quarantined candidates, human review, registry proposals
 const genUrl = (jobId, name) => `/media/generation/${encodeURIComponent(jobId)}/${encodeURIComponent(name)}`;
 
+// Sub-navigation shared by the generation pages (AP-84B2).
+const genTabs = active => h('div.tabs', {}, [['jobs', 'Jobs', '#/generation'], ['requirements', 'Story requirements', '#/generation/requirements'], ['packs', 'Reference packs', '#/generation/packs']]
+  .map(([k, t, href]) => h(`a.tab${k === active ? '.active' : ''}`, {href}, t)));
+// A requirement's "Request generation" button pre-fills the new-job form (kept in memory only).
+let genPrefill = null;
+const REQ_PILL = {available: 'pass', missing: 'fail', unapproved: 'warn', unresolved: 'warn'};
+const CHECK_PILL = {pass: 'pass', warn: 'warn', fail: 'fail'};
+
 async function generationPage() {
-  const [cfg, jobs, eps] = await Promise.all([api('/api/generation'), api('/api/generation/jobs'), api('/api/episodes')]);
-  const type = h('select', {id: 'gtype'}, cfg.assetTypes.map(t => h('option', {value: t}, t)));
-  const key = h('input', {id: 'gkey', placeholder: 'character-01/pose-07  or  living-room-night', maxlength: 129, required: true});
+  const [cfg, jobs, eps, packs] = await Promise.all([api('/api/generation'), api('/api/generation/jobs'), api('/api/episodes'), api('/api/generation/reference-packs')]);
+  const pre = genPrefill; genPrefill = null;
+  const type = h('select', {id: 'gtype'}, cfg.assetTypes.map(t => h('option', {value: t, selected: pre?.assetType === t ? true : undefined}, t)));
+  const key = h('input', {id: 'gkey', placeholder: 'character-01/pose-07  or  living-room-night', maxlength: 129, required: true, value: pre?.assetKey || ''});
   const desc = h('textarea', {id: 'gdesc', maxlength: 1000, placeholder: 'What should the asset show? (pose, expression, framing)', required: true});
+  if (pre?.description) desc.value = pre.description;
   const ep = h('select', {id: 'gep'}, h('option', {value: ''}, '(no episode)'), eps.map(e => h('option', {value: e.id}, `${e.title} (${e.id})`)));
+  const pack = h('select', {id: 'gpack'}, h('option', {value: ''}, '(none: compare with current registry)'),
+    packs.map(p => h('option', {value: String(p.id)}, `#${p.id} ${p.subject.kind} ${p.subject.id}${p.complete ? '' : ' (incomplete)'}`)));
   const submit = h('button.primary', {type: 'submit'}, 'Queue generation job');
   const form = h('form', {onsubmit: async ev => {
     ev.preventDefault(); submit.disabled = true;
     try {
-      const j = await api('/api/generation/jobs', {method: 'POST', body: JSON.stringify({assetType: type.value, assetKey: key.value.trim(), description: desc.value, episodeId: ep.value || null})});
+      const j = await api('/api/generation/jobs', {method: 'POST', body: JSON.stringify({assetType: type.value, assetKey: key.value.trim(), description: desc.value, episodeId: ep.value || null,
+        referencePackId: pack.value ? Number(pack.value) : null})});
       location.hash = `#/generation/${j.id}`;
     } catch (e) { toast(e.message, true); submit.disabled = false; }
   }}, h('label', {for: 'gtype'}, 'Asset type'), type, h('label', {for: 'gkey'}, 'Asset key'), key, h('label', {for: 'gdesc'}, 'Description'), desc,
-    h('label', {for: 'gep'}, 'Episode (optional)'), ep, h('div.row', {}, submit));
+    h('label', {for: 'gep'}, 'Episode (optional)'), ep, h('label', {for: 'gpack'}, 'Reference pack (optional)'), pack, h('div.row', {}, submit));
   render(
     h('div.head', {}, h('div', {}, h('h1', {}, 'Generation'), h('div.muted', {}, 'Candidate assets are quarantined and only enter a registry proposal after a human approves them')),
       h('div.row', {}, pill(cfg.available ? 'pass' : 'warn', `adapter: ${cfg.adapter}`))),
+    genTabs('jobs'),
     h('div.notice', {}, cfg.reason), h('div.notice', {}, cfg.note),
     h('div.grid.two', {},
       card('Generation jobs', jobs.length ? h('div.table-wrap', {}, h('table', {},
@@ -252,7 +266,8 @@ async function genJobPage(id) {
     h('div.row', {}, h('b.mono', {}, c.name), c.synthetic ? pill('warn', 'synthetic test fixture') : null),
     c.mediaType === 'image/png' ? h('a', {href: genUrl(id, c.name), target: '_blank', rel: 'noopener'}, h('img.storyboard', {src: genUrl(id, c.name), alt: c.name})) : null,
     h('dl.kv', {}, h('dt', {}, 'Candidate ID'), h('dd', {}, String(c.id)), h('dt', {}, 'SHA-256'), h('dd.mono', {}, c.sha256), h('dt', {}, 'Size'), h('dd', {}, `${fmtBytes(c.bytes)}${c.width ? ` · ${c.width}×${c.height}` : ''}`),
-      h('dt', {}, 'Provenance'), h('dd.mono', {}, JSON.stringify(c.provenance)))));
+      h('dt', {}, 'Provenance'), h('dd.mono', {}, JSON.stringify(c.provenance))),
+    validationBlock(j, c)));
   render(
     h('div.head', {}, h('div', {}, h('h1', {}, 'Generation job ', h('span.mono', {}, j.id)), h('div.muted', {}, `${j.assetType} · `, h('span.mono', {}, j.assetKey), j.episodeId ? ` · episode ${j.episodeId}` : '')),
       h('div.row', {}, pill(j.status.replace('_', '-'), j.status.replace('_', ' ')), cancel)),
@@ -261,6 +276,7 @@ async function genJobPage(id) {
       h('div.grid', {},
         card('Job', h('dl.kv', {}, h('dt', {}, 'Description'), h('dd', {}, j.description), h('dt', {}, 'Adapter'), h('dd.mono', {}, j.adapter), h('dt', {}, 'Initiated by'), h('dd', {}, j.initiatedBy),
           h('dt', {}, 'Attempt'), h('dd', {}, String(j.attempt)), h('dt', {}, 'Parent job'), h('dd', {}, j.parentJobId ? h('a.mono', {href: `#/generation/${j.parentJobId}`}, j.parentJobId) : '—'),
+          h('dt', {}, 'Reference pack'), h('dd', {}, j.referencePack ? h('a', {href: `#/generation/packs/${j.referencePack.id}`}, `#${j.referencePack.id} ${j.referencePack.subject.kind} ${j.referencePack.subject.id}`) : '— (current registry)'),
           h('dt', {}, 'Created'), h('dd', {}, fmtDate(j.createdAt)), h('dt', {}, 'Finished'), h('dd', {}, fmtDate(j.finishedAt)))),
         genReviewCard(j),
         card('Registry proposals', j.proposals.length ? h('ul.feed', {}, j.proposals.map(p => h('li', {}, h('span.mono', {}, `${p.registry} · ${p.entryKey}@v${p.version}`), ' ',
@@ -290,6 +306,88 @@ function genReviewCard(j) {
   return card('Human review', form, h('h3', {}, 'History'), history);
 }
 
+// ---------- AP-84B2: validation reports, story requirements, reference packs
+// Latest validation report for one candidate, plus a re-validate button. Validation is advisory only.
+function validationBlock(j, c) {
+  const all = (j.validations || []).filter(v => v.candidateId === c.id);
+  const latest = all[all.length - 1];
+  const again = h('button', {type: 'button', onclick: async ev => {
+    ev.target.disabled = true;
+    try { await api(`/api/generation/jobs/${j.id}/validate`, {method: 'POST', body: '{}'}); toast('Validation recorded'); genJobPage(j.id); }
+    catch (e) { toast(e.message, true); ev.target.disabled = false; }
+  }}, 'Validate again');
+  if (!latest) return h('div', {}, h('h3', {}, 'Validation'), h('div.muted', {}, 'No validation report yet.'), j.candidates.length ? h('div.row', {}, again) : null);
+  return h('div', {}, h('h3', {}, 'Validation ', pill(CHECK_PILL[latest.status], latest.status)),
+    h('div.muted', {}, `${latest.trigger} · ${fmtDate(latest.createdAt)} · ${all.length} report(s)${latest.referencePackId ? ` · pack #${latest.referencePackId}` : ''}. Advisory only: it never approves.`),
+    h('ul.checks', {}, latest.checks.map(ch => h('li', {}, pill(CHECK_PILL[ch.status], ch.status), ' ', h('b', {}, ch.id), h('div.muted', {}, ch.detail)))),
+    h('div.row', {}, again));
+}
+
+async function requirementsPage() {
+  const stories = await api('/api/generation/requirements');
+  const request = (assetType, assetKey, description) => { genPrefill = {assetType, assetKey, description}; location.hash = '#/generation'; };
+  const reqRow = (kind, key, r, onRequest) => h('tr', {},
+    h('td', {}, kind), h('td.mono', {}, key), h('td', {}, pill(REQ_PILL[r.status], r.status)),
+    h('td.mono', {}, r.approval || '—'), h('td', {}, r.uses ? `${r.uses}× · ${r.scenes.join(', ')}` : r.scenes?.join(', ') || '—'),
+    h('td', {}, r.reason || ''), h('td', {}, r.status === 'available' ? '' : onRequest ? h('button', {type: 'button', onclick: onRequest}, 'Request generation') : ''));
+  const storyCard = s => {
+    if (!s.valid) return card(s.storyFile, h('div.notice.error', {}, s.error));
+    const rows = [];
+    for (const c of s.characters) for (const p of c.poses)
+      rows.push(reqRow('pose', p.pose ? `${c.character}/pose-${p.pose}` : c.character, p,
+        p.pose && c.registryFound ? () => request('character-pose', `${c.character}/pose-${p.pose}`, `Pose ${p.pose} for ${c.character}, needed by ${s.title}`) : null));
+    for (const e of s.environments) rows.push(reqRow('environment', e.id || e.legacyFile, e, e.id ? () => request('environment', e.id, `Environment ${e.id}, needed by ${s.title}`) : null));
+    const mk = h('button', {type: 'button', onclick: async ev => {
+      ev.target.disabled = true;
+      try { const p = await api('/api/generation/reference-packs', {method: 'POST', body: JSON.stringify({kind: 'story', id: s.storyFile})}); location.hash = `#/generation/packs/${p.id}`; }
+      catch (e) { toast(e.message, true); ev.target.disabled = false; }
+    }}, 'Record reference pack');
+    return card(null, h('div.head', {}, h('div', {}, h('h2', {}, s.title), h('div.muted.mono', {}, s.storyFile)),
+      h('div.row', {}, ...Object.entries(s.summary).map(([k, n]) => pill(REQ_PILL[k], `${n} ${k}`)), mk)),
+      h('div.table-wrap', {}, h('table', {}, h('thead', {}, h('tr', {}, ...['Kind', 'Asset', 'Status', 'Approval', 'Used', 'Reason', ''].map(t => h('th', {}, t)))), h('tbody', {}, rows))));
+  };
+  render(h('div.head', {}, h('div', {}, h('h1', {}, 'Story requirements'), h('div.muted', {}, 'What each approved story needs, checked against the registries and files (read-only)'))),
+    genTabs('requirements'), stories.length ? h('div.grid', {}, stories.map(storyCard)) : h('div.empty', {}, 'No stories in production/stories/'));
+}
+
+async function packsPage() {
+  const packs = await api('/api/generation/reference-packs');
+  const kind = h('select', {id: 'pkind'}, h('option', {value: 'character'}, 'character'), h('option', {value: 'story'}, 'story'));
+  const id = h('input', {id: 'pid', placeholder: 'character-01  or  short-001-v2.story.json', maxlength: 100, required: true});
+  const note = h('input', {id: 'pnote', placeholder: 'Optional note', maxlength: 500});
+  const submit = h('button.primary', {type: 'submit'}, 'Record reference pack');
+  const form = h('form', {onsubmit: async ev => {
+    ev.preventDefault(); submit.disabled = true;
+    try { const p = await api('/api/generation/reference-packs', {method: 'POST', body: JSON.stringify({kind: kind.value, id: id.value.trim(), note: note.value})}); location.hash = `#/generation/packs/${p.id}`; }
+    catch (e) { toast(e.message, true); submit.disabled = false; }
+  }}, h('div.notice', {}, 'A pack records each reference file\'s source, SHA-256, dimensions, approval and version. Packs cannot be changed; files are never copied or modified.'),
+    h('label', {for: 'pkind'}, 'Subject'), kind, h('label', {for: 'pid'}, 'Character or story'), id, h('label', {for: 'pnote'}, 'Note'), note, h('div.row', {}, submit));
+  render(h('div.head', {}, h('div', {}, h('h1', {}, 'Reference packs'), h('div.muted', {}, 'Immutable snapshots of the references a generation request is compared with'))),
+    genTabs('packs'),
+    h('div.grid.two', {},
+      card('Recorded packs', packs.length ? h('div.table-wrap', {}, h('table', {}, h('thead', {}, h('tr', {}, ...['Pack', 'Subject', 'Items', 'State', 'Created'].map(t => h('th', {}, t)))),
+        h('tbody', {}, packs.map(p => h('tr', {}, h('td', {}, h('a', {href: `#/generation/packs/${p.id}`}, `#${p.id}`)), h('td', {}, `${p.subject.kind} · `, h('span.mono', {}, p.subject.id)),
+          h('td', {}, String(p.itemCount)), h('td', {}, pill(p.complete ? 'pass' : 'warn', p.complete ? 'complete' : 'incomplete')), h('td', {}, fmtDate(p.createdAt))))))) : h('div.empty', {}, 'No reference packs yet')),
+      card('New reference pack', form)));
+}
+
+async function packDetailPage(id) {
+  const p = await api(`/api/generation/reference-packs/${encodeURIComponent(id)}`);
+  const now = Object.fromEntries(p.verification.results.map(r => [r.ref, r]));
+  const verifyPill = r => r.state === 'ok' ? pill('pass', 'matches') : pill('fail', r.state === 'missing' ? 'missing now' : 'changed since recorded');
+  render(
+    h('div.head', {}, h('div', {}, h('h1', {}, `Reference pack #${p.id}`), h('div.muted', {}, `${p.subject.kind} · `, h('span.mono', {}, p.subject.id), ` · ${fmtDate(p.createdAt)} · ${p.createdBy}`)),
+      h('div.row', {}, pill(p.complete ? 'pass' : 'warn', p.complete ? 'complete when recorded' : 'incomplete when recorded'), pill(p.verification.ok ? 'pass' : 'fail', p.verification.ok ? 'verified now' : 'drift detected'))),
+    genTabs('packs'),
+    p.problems.length ? h('div.notice.error', {}, `Problems when recorded: ${p.problems.join('; ')}`) : null,
+    p.note ? h('div.notice', {}, p.note) : null,
+    card('Pack', h('dl.kv', {}, h('dt', {}, 'Pack SHA-256'), h('dd.mono', {}, p.packSha256), h('dt', {}, 'Checked'), h('dd', {}, fmtDate(p.verification.checkedAt)))),
+    card('Items', h('div.table-wrap', {}, h('table', {},
+      h('thead', {}, h('tr', {}, ...['Reference', 'Role', 'Source', 'SHA-256', 'Size', 'Approval', 'Version', 'Now'].map(t => h('th', {}, t)))),
+      h('tbody', {}, p.items.map(i => h('tr', {}, h('td.mono', {}, i.ref), h('td', {}, i.role || ''), h('td.mono', {}, i.source), h('td.mono', {title: i.sha256 || ''}, i.sha256 ? `${i.sha256.slice(0, 16)}…` : '—'),
+        h('td', {}, i.width ? `${i.width}×${i.height}` : '—'), h('td.mono', {}, i.approval || '—'), h('td', {}, `v${i.version}`), h('td', {}, now[i.ref] ? verifyPill(now[i.ref]) : '—'))))))));
+}
+
 // ---------- router, polling, theme, engine status
 function poll(fn, ms) { clearTimeout(timer); timer = setTimeout(() => { if (document.visibilityState === 'visible') fn().catch(() => {}); else poll(fn, ms); }, ms); }
 async function route() {
@@ -304,6 +402,9 @@ async function route() {
     else if (parts[0] === 'episodes') await episodes();
     else if (parts[0] === 'runs' && parts[1]) await runDetail(decodeURIComponent(parts[1]));
     else if (parts[0] === 'runs') await runsPage();
+    else if (parts[0] === 'generation' && parts[1] === 'requirements') await requirementsPage();
+    else if (parts[0] === 'generation' && parts[1] === 'packs' && parts[2]) await packDetailPage(decodeURIComponent(parts[2]));
+    else if (parts[0] === 'generation' && parts[1] === 'packs') await packsPage();
     else if (parts[0] === 'generation' && parts[1]) await genJobPage(decodeURIComponent(parts[1]));
     else if (parts[0] === 'generation') await generationPage();
     else render(h('div.empty', {}, 'Page not found'));
