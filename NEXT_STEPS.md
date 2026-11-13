@@ -1,10 +1,10 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-13 (AP-84B3-D1 specification filed; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-13 (D1-1 to D1-3 approved; D1-4 to D1-7 open; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
-0g. **AP-84B3-D1 FILED — owner decisions D1-1 to D1-7:** see `docs/oddly-relatable/AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` §8. Confirm the Qwen release (2511 recommended), the manifest and workflows, the prompt drafts, provider/GPU, and the cost ceiling ($5.00, 3 h proposed). Implementation (§7.1, local, $0) and execution are separate approvals; neither is authorised. GPU budget stays $0.
+0g. **AP-84B3-D1 owner decisions** (`docs/oddly-relatable/AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` §8; record in `DECISIONS.md`): **D1-1 complete** (Qwen-Image-Edit-2511 approved); **D1-2 complete** (manifest and both workflow specifications approved with four caveats); **D1-3 complete** (revised prompts Q and S approved, wording only). **Open, each a separate owner approval, in this order:** D1-4 provider and GPU (RunPod Secure L40S 48 GB proposed, A40 fallback); D1-5 cost ceiling ($5.00, 3 h proposed); D1-6 implementation (§7.1, local, $0); D1-7 execution (only after D1-1 to D1-6 and after §7.1 is accepted). Nothing is authorised by D1-1 to D1-3 beyond what they state. GPU budget stays $0.
 0f. **(Done 2026-11-13) AP-84B3-D1 authorised by the owner** as research only; result in 0g.
 0e. **REGISTRY PROMOTION BUILT — review:** `studio/lib/promotion.mjs`, job page "Check promotion". Nothing has been promoted; real promotions need real (non-synthetic) candidates, so they wait for generation (AP-84B3, needs its brief and a GPU budget). Still to build when wanted: "make current" (preview render + separate owner approval) and story version pinning.
 0d. **AP-84B2 accepted; OWNER DECISIONS 2026-11-13 (post AP-84B2) recorded** (see DECISIONS.md). Next scope needs explicit owner approval: registry promotion implementation (local, $0) or AP-84B3 (needs its brief and a GPU budget).

@@ -3,7 +3,8 @@
 **Status (2026-11-13):** research only, authorised by the owner on 2026-11-13 ("Proceed with AP-84B3-D1").
 - Nothing here has been run. No account, payment method, instance, API call, model download or image generation.
 - Spend to date: **$0**. GPU budget remains **$0** until the owner approves a ceiling.
-- This document proposes; it selects nothing. Open owner decisions are in §8.
+- **Owner decisions so far (2026-11-13):** D1-1, D1-2 and D1-3 are approved; D1-4 to D1-7 are open (§8). `DECISIONS.md` is the authoritative record.
+- Everything else here is a proposal. No approval so far authorises implementation, spending or execution.
 
 **How the facts were gathered (all free, read-only, no login):**
 - Model files, sizes, SHA-256 hashes and revisions: Hugging Face public metadata API, 2026-11-13.
@@ -24,7 +25,7 @@ Follows `AP-84B3-TECHNICAL-DECISION-REPORT.md`.
    | Qwen-Image-Edit-2509 | 2025-09 | Better single-subject consistency, multi-image input |
    | Qwen-Image-Edit-2511 | 2025-12 | "Mitigates image drift", better character consistency |
 
-   All three are Apache 2.0. Because the experiment tests identity preservation, this specification pins **2511**. That is a recommendation for the owner to confirm (§8).
+   All three are Apache 2.0. Because the experiment tests identity preservation, this specification pins **2511**. The owner approved 2511 on 2026-11-13 (D1-1, §8).
 2. **A quantised set is about 30 GB, not 57.7 GB.** The 57.7 GB figure is the full-precision repository. ComfyUI's repackaged FP8 files are about half that (§2).
 3. **Cheaper 48 GB GPUs exist on RunPod.** A40 ($0.59/h) and RTX A6000 ($0.69/h) have the same 48 GB as the L40S ($1.09/h). They are slower, which matters little for three images.
 4. **Price corrections.** RunPod now lists the RTX 5090 at $1.39/h (the report said $1.19/h). Other RunPod figures match. RunPod's hosted endpoint also offers the 2511 release at $0.02 per request.
@@ -100,11 +101,12 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 - **Graph:** ComfyUI's built-in "Qwen Image Edit 2511" template, changed only as the table says (model file, size, seed, prompt, Lightning LoRA off).
   - Expected nodes: Load Diffusion Model, Load CLIP (type `qwen_image`), Load VAE, Load Image, the Qwen edit text-encode node, model-sampling shift, KSampler, VAE Decode, Save Image.
   - The exact node list and the shift value are **unverified** here; the ComfyUI documentation page does not list them. They are frozen at execution by exporting the workflow in API format and recording its SHA-256 before the first candidate.
-- **Prompt (draft, for the owner to approve):**
+- **Prompt (approved by the owner, D1-3, 2026-11-13):**
 
-  > Keep exactly the same character: the same round bald head, large round eyes, ears, skin colour, rust-orange ribbed turtleneck, thin black limbs, black mitten hands, brown shoes, thick black outlines and flat colours. Change only the pose and expression. He stands, full body, turned slightly to his left, holding a dark smartphone up in his left hand and looking at its screen. His right hand is raised to his chest. He looks worried: eyebrows slanted up in the middle, mouth open and turned down. Keep the plain flat light-grey background. Show the whole figure from head to shoes with space around it. No shadows, no text, no extra objects.
+  > Keep exactly the same character: the same round bald head, large round eyes, ears, skin colour, rust-orange turtleneck with a ribbed collar and ribbed hem, thin black limbs, black mitten hands, brown shoes, thick black outlines and flat colours. Change only the pose and expression. He stands, full body, turned slightly toward the right of the image, holding a dark smartphone up in the hand on the right of the image and looking at its screen. His other hand is raised to his chest. He looks worried: eyebrows slanted up in the middle, mouth open and turned down. Keep the plain flat light-grey background. Show the whole figure from head to shoes with space around it. No shadows, no text, no extra objects.
 
-  The wording mirrors the approved pose 02 so that the comparison is like for like.
+  - The pose mirrors the approved pose 02 so that the comparison is like for like. Orientation is given from the viewer's side.
+  - The three-quarter turn is intentional: the experiment tests whether the model can change the pose without changing Character 01's identity.
 
 **Known uncertainties to observe, not fix in advance:**
 - The template scales the reference to about 1 megapixel for the encoder. Output at 1024×1536 (1.57 MP) is within the model's range, but sharpness at that size is **unverified**.
@@ -124,8 +126,9 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 | Seed | C: `8403001` |
 | Batch size | 1 |
 
-- **Prompt (draft):** *flat 2D cartoon character, round bald head, large round eyes, rust-orange ribbed turtleneck, thin black limbs, black mitten hands, brown shoes, thick black outlines, flat colours, standing full body, holding a smartphone in one raised hand and looking at it, worried expression, plain flat light-grey background*
-- **Negative prompt (draft):** *photo, realistic, 3d, shading, gradient, shadow, text, watermark, cropped, extra limbs, extra fingers, background scene*
+- **Prompt (approved by the owner, D1-3, 2026-11-13):** *flat 2D cartoon character, round bald head, large round eyes, rust-orange turtleneck with a ribbed collar and ribbed hem, thin black limbs, black mitten hands, brown shoes, thick black outlines, flat colours, standing full body, holding a smartphone in one raised hand and looking at it, worried expression, plain flat light-grey background*
+- **Negative prompt (approved, D1-3):** *photo, realistic, 3d, shading, gradient, shadow, text, watermark, cropped, extra limbs, extra fingers, background scene*
+- Prompt S is deliberately less precise than Prompt Q. It must not be silently improved to match it.
 - Both the 832×1248 raw output and the 1024×1536 resize are kept and hashed.
 
 **Why this is a fair but weak baseline.** IP-Adapter carries appearance, not identity, and it also carries the reference's neutral pose. The prompt has to pull the pose away from the reference. A poor result is informative: it shows what a lighter, cheaper stack costs in identity. The SDXL settings are conventional defaults, not tuned; tuning would mean more generations and a larger budget.
@@ -303,21 +306,37 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 | R10 | Two images are a small sample | Over-reading one good result | §6.7 states what each outcome does and does not show |
 | R11 | Published prices change | Estimate off | Re-check the rate on the day; the ceiling is in dollars, not hours |
 
-## 8. Owner decisions requested
+## 8. Owner decisions
 
-None of these is decided. Each is separate.
+Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authoritative record.
 
-| # | Decision | Recommendation |
-|---|---|---|
-| D1-1 | Qwen release to test | Qwen-Image-Edit-2511, FP8 mixed (§2.1) |
-| D1-2 | Accept this manifest and both workflow specifications | Yes |
-| D1-3 | Approve the prompt drafts (§3, §4) | Review the wording against pose 02 |
-| D1-4 | Provider and GPU for the experiment | RunPod Secure Cloud, L40S 48 GB (A40 fallback) |
-| D1-5 | Cost ceiling | $5.00 consumption, 3 h limit, minimum top-up |
-| D1-6 | Authorise the implementation work in §7.1 | A separate local, $0 milestone before any spend |
-| D1-7 | Authorise execution | Only after D1-1 to D1-6 and after §7.1 is accepted |
+| # | Decision | Recommendation | Status |
+|---|---|---|---|
+| D1-1 | Qwen release to test | Qwen-Image-Edit-2511, FP8 mixed (§2.1) | **APPROVED** |
+| D1-2 | Accept this manifest and both workflow specifications | Yes | **APPROVED with four caveats** (below) |
+| D1-3 | Approve the prompts (§3, §4) | Review the wording against pose 02 | **APPROVED with revised prompts**; wording only |
+| D1-4 | Provider and GPU for the experiment | RunPod Secure Cloud, L40S 48 GB (A40 fallback) | Open |
+| D1-5 | Cost ceiling | $5.00 consumption, 3 h limit, minimum top-up | Open |
+| D1-6 | Authorise the implementation work in §7.1 | A separate local, $0 milestone before any spend | Open; not authorised |
+| D1-7 | Authorise execution | Only after D1-1 to D1-6 and after §7.1 is accepted | Open; not authorised |
 
-Until then: GPU budget **$0**; provider, model, implementation and image generation **not authorised**.
+**D1-1.** The 2511 consistency improvements are publisher claims; the experiment exists to test them.
+
+**D1-2 caveats (part of the approval):**
+1. **Quantisation:** FP8 is accepted to reduce download size and VRAM pressure. Image fidelity must be evaluated during review.
+2. **Qwen workflow:** the exact node graph and shift value must be exported, hashed and recorded before any candidate is generated. No silent workflow changes.
+3. **SDXL:** the baseline is deliberately untuned. Its result is for comparison, not expected to outperform Qwen.
+4. **Compatibility:** if IP-Adapter does not work with the pinned ComfyUI version, stop and return for a decision. Do not substitute another implementation.
+
+**D1-3 changes and caveats (part of the approval):**
+- "rust-orange ribbed turtleneck" became "rust-orange turtleneck with a ribbed collar and ribbed hem" in both prompts, because master v3 has a ribbed collar and hem but a smooth sweater body.
+- Prompt Q gives orientation from the viewer's side instead of the character's left and right.
+- The three-quarter turn is intentional.
+- Prompt S stays a deliberately less precise baseline.
+- Identity drift in SDXL is an expected comparison risk, not permission to accept a redesigned character.
+- Master v3 remains the reference. No change to canonical artwork or approved character identity.
+
+Until D1-4 to D1-7 are decided: GPU budget **$0**; provider, cost ceiling, implementation and image generation **not authorised**. No GPU provisioning, spending or model downloads.
 
 ## 9. Sources
 
