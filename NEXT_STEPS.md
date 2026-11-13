@@ -1,10 +1,11 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-13 (AP-84B3 research report filed; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-13 (AP-84B3-D1 specification filed; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
-0f. **AP-84B3-D1 decision (owner):** approve or decline the research-only experiment specification and cost validation (pinned model manifest, workflow spec, cost ceiling proposal, test protocol). See `docs/oddly-relatable/AP-84B3-TECHNICAL-DECISION-REPORT.md` §6 for the local facts D1 must cover. GPU budget stays $0.
+0g. **AP-84B3-D1 FILED — owner decisions D1-1 to D1-7:** see `docs/oddly-relatable/AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` §8. Confirm the Qwen release (2511 recommended), the manifest and workflows, the prompt drafts, provider/GPU, and the cost ceiling ($5.00, 3 h proposed). Implementation (§7.1, local, $0) and execution are separate approvals; neither is authorised. GPU budget stays $0.
+0f. **(Done 2026-11-13) AP-84B3-D1 authorised by the owner** as research only; result in 0g.
 0e. **REGISTRY PROMOTION BUILT — review:** `studio/lib/promotion.mjs`, job page "Check promotion". Nothing has been promoted; real promotions need real (non-synthetic) candidates, so they wait for generation (AP-84B3, needs its brief and a GPU budget). Still to build when wanted: "make current" (preview render + separate owner approval) and story version pinning.
 0d. **AP-84B2 accepted; OWNER DECISIONS 2026-11-13 (post AP-84B2) recorded** (see DECISIONS.md). Next scope needs explicit owner approval: registry promotion implementation (local, $0) or AP-84B3 (needs its brief and a GPU budget).
 0c. **AP-84B2 review:** Generation > Story requirements / Reference packs tabs and the validation report on each job page. Answer the open questions in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` §7 before any promotion work. AP-84B3 is not authorised; GPU budget stays $0.
