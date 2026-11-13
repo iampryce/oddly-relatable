@@ -2,9 +2,9 @@
 
 **Status (2026-11-13):** research only, authorised by the owner on 2026-11-13 ("Proceed with AP-84B3-D1").
 - Nothing here has been run. No account, payment method, instance, API call, model download or image generation.
-- Spend to date: **$0**. GPU budget remains **$0** until the owner approves a ceiling.
-- **Owner decisions so far (2026-11-13):** D1-1, D1-2 and D1-3 are approved; D1-4 to D1-7 are open (§8). `DECISIONS.md` is the authoritative record.
-- Everything else here is a proposal. No approval so far authorises implementation, spending or execution.
+- Spend to date: **$0**. D1-5 sets the limits for a future run (§5.5). No money may be spent until execution is authorised (D1-7).
+- **Owner decisions (2026-11-13):** D1-1 to D1-5 are approved (§8). **D1-6 (implementation) and D1-7 (execution) are not authorised.** `DECISIONS.md` is the authoritative record.
+- No approval so far authorises implementation, account creation, funding, provisioning, model downloads or image generation.
 
 **How the facts were gathered (all free, read-only, no login):**
 - Model files, sizes, SHA-256 hashes and revisions: Hugging Face public metadata API, 2026-11-13.
@@ -148,7 +148,9 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 - **Disk:** container disk $0.10/GB/month, erased when the Pod stops, not billed while stopped. Volume disk $0.20/GB/month while stopped.
 - **Data transfer:** no ingress or egress fees (RunPod documentation).
 - **To start a Pod:** the account needs at least one hour's worth of credit for the configuration.
-- **Minimum credit purchase:** not stated on the pages fetched. **Unverified**; I believe it is $10. Confirm it on the billing page before funding.
+- **Minimum funding:** RunPod's billing documentation says "you can start with as little as $10". Prepaid cards should deposit at least $100 per transaction.
+- **Refunds:** "Runpod credits are non-refundable and cannot be withdrawn once deposited."
+- **At $0 balance:** RunPod stops all Pods and terminates those without a network volume.
 
 ### 5.2 Storage plan
 
@@ -183,18 +185,34 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 - **Modal:** the Starter plan advertises $30/month of free compute. Whether a card is required is **unverified**. It needs code to be written first, so it is more implementation, not less.
 - **Vast.ai:** not costed; prices unverified (§1).
 
-### 5.5 Proposed cost ceiling
+### 5.5 Approved limits and required safeguards (D1-4, D1-5)
 
-| Limit | Proposal |
-|---|---|
-| Consumption ceiling | **$5.00** total |
-| Hard time limit | **3 hours** of Pod time, then terminate whatever the state |
-| Account funding | the provider's minimum top-up (believed $10, unverified); unspent credit stays on the account |
-| Configuration | L40S 48 GB or A40 48 GB, Secure Cloud, 80 GB container disk, no volume |
+**Owner-approved limits.** These are three separate things.
 
-- The ceiling covers the worst case for either 48 GB option with room to spare.
-- **Recommendation:** L40S. It costs about $0.75 more over the planned run and is markedly faster, which shortens the window in which something can go wrong. A40 is the fallback if no L40S is available.
-- Secure Cloud, not Community Cloud: the artwork is uploaded to the machine, and Community hosts are third parties.
+| Limit | Approved value | Decision |
+|---|---|---|
+| Funding commitment | **One $10 RunPod deposit.** Credits are non-refundable, so $10 is the cash committed. No additional funding without fresh owner approval | D1-5 |
+| Consumption ceiling | **$5.00** maximum for the entire experiment | D1-5 |
+| Runtime limit | **3 hours** maximum Pod runtime | D1-5 |
+| Configuration | RunPod Secure Cloud; L40S 48 GB primary, A40 48 GB fallback, no L40 second fallback; 80 GB container disk, no volume disk and no network volume | D1-4 |
+
+- At the published rates, 3 hours costs about $3.30 on the L40S and about $1.80 on the A40 (§5.4), so the runtime limit is reached before the consumption ceiling.
+- Expected consumption is about $1.66 (L40S, 1.5 h, an unmeasured estimate). Unspent credit stays on the account and cannot be withdrawn.
+
+**Safeguards required by D1-5.** The owner has approved these as conditions. **None has been verified yet.** Each must be verified, and the evidence recorded, before execution.
+
+| # | Safeguard | When it is verified |
+|---|---|---|
+| S1 | Auto-pay is disabled | Before any funding |
+| S2 | The L40S rate does not exceed $1.09/hour; the A40 rate does not exceed $0.59/hour | In the console, before deploying |
+| S3 | A runtime watchdog is running, and a manual stop backup is in place | Watchdog tested before the run and confirmed running when the Pod starts |
+| S4 | Outputs are copied to durable storage and their checksums verified | Before the Pod is stopped |
+
+- RunPod has no built-in per-Pod budget or auto-terminate setting, so the consumption ceiling and runtime limit are enforced by the operator and the watchdog, not by the provider.
+- With $10 funded and auto-pay off, the account balance is the provider-side hard stop.
+- The watchdog and the scripts that apply these safeguards are implementation (§7.1) and are not authorised.
+- **Why this configuration:** the L40S costs about $0.75 more than the A40 over the planned run and is markedly faster, which shortens the window in which something can go wrong. Secure Cloud is used because the artwork is uploaded to the machine and Community hosts are third parties.
+- D1-5 sets limits only. The deposit may be made only as part of authorised execution (D1-7).
 
 ## 6. Three-candidate experiment protocol
 
@@ -216,6 +234,13 @@ Target: `character-01`, pose 02 (worried, looking at phone), proposed as **versi
 4. Implementation dependencies in §7 are built, tested and accepted.
 5. Prompts, seeds and settings are frozen in a run sheet. No changes after this point.
 
+**Funding and deployment checks (only once execution is authorised under D1-7; safeguards S1 to S3 in §5.5):**
+
+6. Verify that auto-pay is disabled, and record the evidence, before any funding.
+7. Make one $10 deposit. No additional funding without fresh owner approval.
+8. Check the rate in the console before deploying: L40S at most $1.09/hour. If no L40S is available, A40 at most $0.59/hour. If neither is available within its cap, do not deploy; return to the owner.
+9. Start the runtime watchdog when the Pod starts and confirm it is running. Keep the manual stop backup ready.
+
 ### 6.3 On the Pod
 
 1. Install ComfyUI and the custom node at the pinned commits.
@@ -224,17 +249,22 @@ Target: `character-01`, pose 02 (worried, looking at phone), proposed as **versi
 4. **Smoke run:** at most **one** per workflow, 512×768, 8 steps, a fixed seed not used by any candidate. It only proves the pipeline runs. It is saved, hashed and labelled `smoke`; it is never a candidate.
 5. Generate A, B, then C. **One generation each. No retries for quality.**
 6. A retry is allowed only for a technical failure (crash, out of memory, corrupt file), with identical settings, and is recorded.
-7. Download every output. Hash on the Pod and again locally; the two must match.
-8. Terminate the Pod. Confirm in the console that no Pod, volume or network storage remains.
+7. Copy every output to durable storage off the Pod as it is produced. Hash on the Pod and again after copying; the two must match (safeguard S4).
+8. Only after every output is copied and its checksum verified, stop and terminate the Pod. Confirm in the console that no Pod, volume or network storage remains.
 
 **Every image generated is kept and recorded.** Nothing is discarded, so nothing is cherry-picked.
 
 ### 6.4 Stop rules
 
-Terminate the Pod immediately if any of these happens:
-- 3 hours of Pod time, or $5.00 consumed;
+Stop the Pod if any of these happens:
+- 3 hours of Pod runtime (D1-5);
+- $5.00 consumed (D1-5);
 - a hash mismatch on any model file;
 - the pinned software will not run without changing a pin (record it and return to the owner).
+
+- The runtime watchdog enforces the 3-hour limit; the manual stop is the backup (safeguard S3).
+- Because outputs are copied and verified as they are produced (§6.3, step 7), a forced stop loses nothing already generated. The limits are not extended to finish a run.
+- A run stopped at a limit is not restarted, and no funds are added, without fresh owner approval.
 
 ### 6.5 After the Pod (local, $0)
 
@@ -301,7 +331,7 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 | R5 | Download slower than assumed | More paid time | Budgeted to 45 min; 3 h limit |
 | R6 | Storage left billing | Cost after the run | Container disk only; termination check in §6.3 |
 | R7 | Artwork on a third-party machine | Master v3 leaves local control for the run | Secure Cloud; one file; Pod terminated and disk erased |
-| R8 | Minimum top-up larger than the ceiling | More cash committed than consumed | Confirm before funding (§5.1) |
+| R8 | Minimum deposit larger than the ceiling | More cash committed than consumed | Verified: $10 minimum, non-refundable (§5.1). The owner approved one $10 deposit (D1-5) |
 | R9 | Upstream files moved or changed | Download fails or hash differs | Revisions pinned; hash check stops the run |
 | R10 | Two images are a small sample | Over-reading one good result | §6.7 states what each outcome does and does not show |
 | R11 | Published prices change | Estimate off | Re-check the rate on the day; the ceiling is in dollars, not hours |
@@ -310,15 +340,15 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 
 Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authoritative record.
 
-| # | Decision | Recommendation | Status |
+| # | Decision | Outcome | Status |
 |---|---|---|---|
 | D1-1 | Qwen release to test | Qwen-Image-Edit-2511, FP8 mixed (§2.1) | **APPROVED** |
-| D1-2 | Accept this manifest and both workflow specifications | Yes | **APPROVED with four caveats** (below) |
-| D1-3 | Approve the prompts (§3, §4) | Review the wording against pose 02 | **APPROVED with revised prompts**; wording only |
-| D1-4 | Provider and GPU for the experiment | RunPod Secure Cloud, L40S 48 GB (A40 fallback) | Open |
-| D1-5 | Cost ceiling | $5.00 consumption, 3 h limit, minimum top-up | Open |
-| D1-6 | Authorise the implementation work in §7.1 | A separate local, $0 milestone before any spend | Open; not authorised |
-| D1-7 | Authorise execution | Only after D1-1 to D1-6 and after §7.1 is accepted | Open; not authorised |
+| D1-2 | Manifest and both workflow specifications | Accepted as pinned in §2 to §4 | **APPROVED with four caveats** (below) |
+| D1-3 | Prompts (§3, §4) | Revised prompts Q and S | **APPROVED with revised prompts**; wording only |
+| D1-4 | Provider and GPU for the experiment | RunPod Secure Cloud; L40S 48 GB primary, A40 48 GB fallback; 80 GB container disk only | **APPROVED**; selection only |
+| D1-5 | Cost ceiling and funding | One $10 deposit; $5.00 consumption ceiling; 3-hour Pod runtime limit; four safeguards (§5.5) | **APPROVED**; limits only |
+| D1-6 | Implementation work in §7.1 | A separate local, $0 milestone before any spend | **Not authorised** |
+| D1-7 | Execution | Only after D1-1 to D1-6 and after §7.1 is accepted | **Not authorised** |
 
 **D1-1.** The 2511 consistency improvements are publisher claims; the experiment exists to test them.
 
@@ -336,7 +366,24 @@ Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authorita
 - Identity drift in SDXL is an expected comparison risk, not permission to accept a redesigned character.
 - Master v3 remains the reference. No change to canonical artwork or approved character identity.
 
-Until D1-4 to D1-7 are decided: GPU budget **$0**; provider, cost ceiling, implementation and image generation **not authorised**. No GPU provisioning, spending or model downloads.
+**D1-4 (hardware and provider selection only):**
+- Provider: RunPod Secure Cloud.
+- Primary GPU: NVIDIA L40S 48 GB. Fallback GPU: NVIDIA A40 48 GB. No L40 second fallback.
+- Storage: 80 GB container disk, no volume disk and no network volume.
+- It does not authorise account creation, adding credits, provisioning, model downloads or execution.
+
+**D1-5 (limits only):**
+- **Funding commitment:** one $10 RunPod deposit. No additional funding without fresh owner approval.
+- **Consumption ceiling:** $5.00 maximum for the entire experiment.
+- **Runtime limit:** maximum Pod runtime 3 hours.
+- **Safeguards that must be verified before execution:**
+  - auto-pay disabled and verified before any funding;
+  - L40S rate at most $1.09/hour and A40 rate at most $0.59/hour;
+  - a verified runtime watchdog and a manual stop backup;
+  - outputs copied to durable storage and checksums verified before the Pod is stopped.
+- The deposit may be made only as part of authorised execution.
+
+**Not authorised:** D1-6 (implementation) and D1-7 (execution). Until they are approved, there is no account creation, funding, provisioning, model download, image generation or cost.
 
 ## 9. Sources
 
