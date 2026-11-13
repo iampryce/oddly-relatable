@@ -222,7 +222,7 @@ const genTabs = active => h('div.tabs', {}, [['jobs', 'Jobs', '#/generation'], [
 // A requirement's "Request generation" button pre-fills the new-job form (kept in memory only).
 let genPrefill = null;
 const REQ_PILL = {available: 'pass', missing: 'fail', unapproved: 'warn', unresolved: 'warn'};
-const CHECK_PILL = {pass: 'pass', warn: 'warn', fail: 'fail'};
+const CHECK_PILL = {pass: 'pass', warn: 'warn', fail: 'fail', 'n/a': 'na'};
 
 async function generationPage() {
   const [cfg, jobs, eps, packs] = await Promise.all([api('/api/generation'), api('/api/generation/jobs'), api('/api/episodes'), api('/api/generation/reference-packs')]);
@@ -336,7 +336,7 @@ async function requirementsPage() {
     for (const c of s.characters) for (const p of c.poses)
       rows.push(reqRow('pose', p.pose ? `${c.character}/pose-${p.pose}` : c.character, p,
         p.pose && c.registryFound ? () => request('character-pose', `${c.character}/pose-${p.pose}`, `Pose ${p.pose} for ${c.character}, needed by ${s.title}`) : null));
-    for (const e of s.environments) rows.push(reqRow('environment', e.id || e.legacyFile, e, e.id ? () => request('environment', e.id, `Environment ${e.id}, needed by ${s.title}`) : null));
+    for (const e of s.environments) rows.push(reqRow('environment', e.id || '(direct file path)', e, e.id ? () => request('environment', e.id, `Environment ${e.id}, needed by ${s.title}`) : null));
     const mk = h('button', {type: 'button', onclick: async ev => {
       ev.target.disabled = true;
       try { const p = await api('/api/generation/reference-packs', {method: 'POST', body: JSON.stringify({kind: 'story', id: s.storyFile})}); location.hash = `#/generation/packs/${p.id}`; }
@@ -383,9 +383,19 @@ async function packDetailPage(id) {
     p.note ? h('div.notice', {}, p.note) : null,
     card('Pack', h('dl.kv', {}, h('dt', {}, 'Pack SHA-256'), h('dd.mono', {}, p.packSha256), h('dt', {}, 'Checked'), h('dd', {}, fmtDate(p.verification.checkedAt)))),
     card('Items', h('div.table-wrap', {}, h('table', {},
-      h('thead', {}, h('tr', {}, ...['Reference', 'Role', 'Source', 'SHA-256', 'Size', 'Approval', 'Version', 'Now'].map(t => h('th', {}, t)))),
-      h('tbody', {}, p.items.map(i => h('tr', {}, h('td.mono', {}, i.ref), h('td', {}, i.role || ''), h('td.mono', {}, i.source), h('td.mono', {title: i.sha256 || ''}, i.sha256 ? `${i.sha256.slice(0, 16)}…` : '—'),
-        h('td', {}, i.width ? `${i.width}×${i.height}` : '—'), h('td.mono', {}, i.approval || '—'), h('td', {}, `v${i.version}`), h('td', {}, now[i.ref] ? verifyPill(now[i.ref]) : '—'))))))));
+      h('thead', {}, h('tr', {}, ...['Reference', 'Role', 'SHA-256', 'Size', 'Measured figure', 'Approval', 'Version', 'Now'].map(t => h('th', {}, t)))),
+      h('tbody', {}, p.items.map(i => h('tr', {}, h('td.mono', {}, i.ref), h('td', {}, i.role || ''), h('td.mono', {title: i.sha256 || ''}, i.sha256 ? `${i.sha256.slice(0, 16)}…` : '—'),
+        h('td', {}, i.width ? `${i.width}×${i.height}` : '—'), h('td', {}, measuredText(i)),
+        h('td.mono', {}, i.approval || '—'), h('td', {}, `v${i.version}`), h('td', {}, now[i.ref] ? verifyPill(now[i.ref]) : '—'))))))));
+}
+// Silhouette and feet anchor measured from a reference (cut-outs only); source paths are never shown.
+function measuredText(i) {
+  const m = i.measured;
+  if (!m) return '—';
+  if (!m.cutout) return 'opaque image';
+  const feet = m.feet ? ` · feet ${m.feet.x},${m.feet.y}` : '';
+  const reg = i.registeredFeet ? ` (registered ${i.registeredFeet.x},${i.registeredFeet.y})` : '';
+  return `${m.silhouette.width}×${m.silhouette.height}${feet}${reg}`;
 }
 
 // ---------- router, polling, theme, engine status

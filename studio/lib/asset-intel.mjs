@@ -3,9 +3,11 @@
 //
 //  requirementsFor(storyFile)  which characters / poses / environments a story needs, and whether each is
 //                              available | missing | unapproved | unresolved (with the reason)
-//  buildReferencePack(...)     immutable snapshot of reference files (source, SHA-256, dimensions, approval, version)
+//  buildReferencePack(...)     immutable snapshot of reference files (source, SHA-256, dimensions, approval, version,
+//                              measured silhouette / feet / palette); only approved, verified references are included
 //  verifyPack(pack)            re-hash every item now: detects missing files and hash mismatches
 //  validateCandidate(...)      measurable checks on a quarantined candidate (never approves anything)
+//  publicPackItem / publicRequirements   API views without filesystem paths (sources stay internal)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -118,18 +120,97 @@ export function analyseStory(story, {storyFile = null, sources} = {}) {
   return out;
 }
 
-// ---------- 2. reference packs (snapshots; persisted immutably by generation.mjs)
-async function dims(abs) { try { const i = await canvas.loadImage(abs); return {width: i.width, height: i.height}; } catch { return {width: null, height: null}; } }
+// ---------- 2. image measurement (shared by references and candidates; read-only)
+// Colour bins: 4 bits per channel for pose palettes (4096 bins), 3 bits per channel for environment histograms (512 bins).
+const BIN4 = (r, g, b) => ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+const BIN3 = (r, g, b) => ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+const SOLID = 128;                                                    // alpha above this counts as part of the figure
 
+// Measures what can honestly be measured from pixels: transparency, the figure's silhouette (bounding box of
+// solid pixels), the feet anchor (centre of the lowest band of the silhouette), clipping at canvas edges, edge
+// quality (isolated specks, near-white fringe pixels on the outline), a palette (cut-outs) or a colour histogram
+// (opaque plates), and flat borders (letterboxing) on opaque plates.
+// Loads from the file path: @napi-rs/canvas fails to decode some valid PNGs (e.g. the lookdev plates) from a Buffer
+// ("Invalid SVG image") but decodes them from a path. withCounts adds the full colour-bin counts (not stored in packs).
+export async function measureImage(file, {withCounts = false} = {}) {
+  const img = await canvas.loadImage(file);
+  const W = img.width, H = img.height, N = W * H;
+  const c = canvas.createCanvas(W, H), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+  const px = ctx.getImageData(0, 0, W, H).data;
+  const solid = new Uint8Array(N), pal = new Map(), hist = new Float64Array(512);
+  let transparent = 0, partial = 0, opaque = 0, x0 = W, x1 = -1, y0 = H, y1 = -1;
+  for (let i = 0; i < N; i++) {
+    const o = i * 4, a = px[o + 3];
+    if (a === 0) transparent++; else if (a < 255) partial++;
+    if (a <= SOLID) continue;
+    solid[i] = 1; opaque++;
+    const x = i % W, y = (i / W) | 0;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    const k = BIN4(px[o], px[o + 1], px[o + 2]); pal.set(k, (pal.get(k) || 0) + 1);
+    hist[BIN3(px[o], px[o + 1], px[o + 2])]++;
+  }
+  const out = {width: W, height: H, transparentFraction: +(transparent / N).toFixed(4), partialFraction: +(partial / N).toFixed(4),
+    cutout: transparent / N >= 0.2, silhouette: null, feet: null, feetRelX: null, clipped: [], edge: null, palette: null, histogram: null, flatBorders: []};
+  if (withCounts) out.counts = pal;
+  if (opaque) {
+    const sw = x1 - x0 + 1, shh = y1 - y0 + 1;
+    out.silhouette = {x: x0, y: y0, width: sw, height: shh};
+    if (out.cutout) {
+      out.clipped = [x0 === 0 && 'left', y0 === 0 && 'top', x1 === W - 1 && 'right', y1 === H - 1 && 'bottom'].filter(Boolean);
+      // Feet anchor: centre of the solid pixels in the lowest 3% of the silhouette (at least 2 rows).
+      const band = Math.max(2, Math.round(shh * 0.03));
+      let fx0 = W, fx1 = -1;
+      for (let y = y1 - band + 1; y <= y1; y++) for (let x = x0; x <= x1; x++) if (solid[y * W + x]) { if (x < fx0) fx0 = x; if (x > fx1) fx1 = x; }
+      if (fx1 >= fx0) { const fx = Math.round((fx0 + fx1) / 2); out.feet = {x: fx, y: y1}; out.feetRelX = +((fx - x0) / sw).toFixed(4); }
+      // Edge quality: outline pixels (solid with a non-solid 4-neighbour), isolated specks, near-white fringe.
+      let boundary = 0, specks = 0, white = 0;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const i = y * W + x;
+        if (!solid[i]) continue;
+        const n = (x > 0 && solid[i - 1]) + (x < W - 1 && solid[i + 1]) + (y > 0 && solid[i - W]) + (y < H - 1 && solid[i + W]);
+        if (n === 0) specks++;
+        if (n < 4) { boundary++; const o = i * 4; if (Math.min(px[o], px[o + 1], px[o + 2]) > 230) white++; }
+      }
+      out.edge = {boundary, speckFraction: +(specks / opaque).toFixed(5), haloFraction: boundary ? +(white / boundary).toFixed(4) : 0};
+      // Palette: most frequent bins covering 95% of the figure's pixels (at most 256 bins).
+      const bins = [...pal.entries()].sort((a, b) => b[1] - a[1]);
+      const keep = []; let acc = 0;
+      for (const [k, n] of bins) { keep.push(k); acc += n; if (acc / opaque >= 0.95 || keep.length >= 256) break; }
+      out.palette = keep;
+    } else {
+      out.histogram = Array.from(hist, v => +(v / opaque).toFixed(5));
+      // Flat borders: a 2 px strip along a side with (almost) no luminance variation suggests letterboxing or padding.
+      const strip = (xa, ya, xb, yb) => {
+        let n = 0, s = 0, s2 = 0;
+        for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) { const o = (y * W + x) * 4, l = 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]; n++; s += l; s2 += l * l; }
+        return n ? Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) : 0;
+      };
+      out.flatBorders = [['top', strip(0, 0, W, 2)], ['bottom', strip(0, H - 2, W, H)], ['left', strip(0, 0, 2, H)], ['right', strip(W - 2, 0, W, H)]]
+        .filter(([, sd]) => sd < 1.5).map(([side]) => side);
+    }
+  }
+  return out;
+}
+
+// Validation configuration (expected canvas sizes). Null means "not defined": the check reports n/a instead of guessing.
+function validationConfig(src) {
+  try { return readJson(src.canonFile).validation || {}; } catch { return {}; }
+}
+
+// ---------- 3. reference packs (snapshots; persisted immutably by generation.mjs)
 // subject: {kind: 'character', id: 'character-01'} or {kind: 'story', id: '<file>.story.json'}
+// Internally each item keeps its repository-relative source so it can be re-verified; publicPackItem() removes it.
 export async function buildReferencePack(subject, sources) {
   const src = {...DEFAULT_SOURCES, ...sources};
-  const items = [];
+  const items = [], extraProblems = [];
   const push = async (it) => {
     const abs = repoFile(it.file), st = fileState(it.file, it.expected);
-    const d = abs && fs.existsSync(abs) ? await dims(abs) : {width: null, height: null};
-    items.push({ref: it.ref, role: it.role, source: it.file, sha256: st.sha256 || it.expected || null, expectedSha256: it.expected || null, width: d.width, height: d.height,
-      approval: it.approval || null, version: it.version || 1, state: st.state, ...(st.reason ? {reason: st.reason} : {})});
+    let features = null;
+    if (st.state === 'ok') { try { features = await measureImage(abs); } catch {} }
+    items.push({ref: it.ref, role: it.role, source: it.file, sha256: st.sha256 || it.expected || null, expectedSha256: it.expected || null,
+      width: features?.width ?? null, height: features?.height ?? null, approval: it.approval || null, approved: it.approved !== false, version: it.version || 1,
+      ...(it.feet ? {feet: it.feet} : {}), ...(it.figureHeight ? {figureHeight: it.figureHeight} : {}),
+      state: st.state, ...(st.reason ? {reason: st.reason} : {}), features});
   };
   const characterItems = async id => {
     let canon = {characters: {}};
@@ -140,7 +221,8 @@ export async function buildReferencePack(subject, sources) {
     const reg = readJson(regAbs);
     for (const [pose, r] of Object.entries(reg.poses || {})) {
       if (!APPROVED_POSE.has(r.approval)) continue;                 // only approved poses are references
-      await push({ref: `${id}:pose-${pose}`, role: `pose ${pose} (${r.name || ''})`.trim(), file: r.file, expected: r.sha256, approval: r.approval, version: Number(r.version) || 1});
+      await push({ref: `${id}:pose-${pose}`, role: `pose ${pose} (${r.name || ''})`.trim(), file: r.file, expected: r.sha256, approval: r.approval,
+        version: Number(r.version) || 1, feet: r.feet, figureHeight: r.figureHeight});
     }
   };
   if (subject?.kind === 'character') {
@@ -149,15 +231,34 @@ export async function buildReferencePack(subject, sources) {
   } else if (subject?.kind === 'story') {
     const req = requirementsFor(subject.id, src);
     if (!req.valid) throw Object.assign(new Error(`story cannot be analysed: ${req.error}`), {status: 422});
-    for (const c of req.characters) if (c.registryFound) await characterItems(c.character);
-    for (const e of req.environments) if (e.file) await push({ref: `env:${e.id}`, role: 'environment plate', file: e.file, expected: e.sha256, approval: e.approval, version: e.version});
+    for (const c of req.characters) {
+      if (c.registryFound) await characterItems(c.character);
+      // A story's pack is only complete when everything the story needs is available.
+      for (const p of c.poses) if (p.status !== 'available') extraProblems.push(`${c.character}:pose-${p.pose ?? '?'}: ${p.status} (${p.reason})`);
+    }
+    for (const e of req.environments) {
+      // Only approved, verified environments become references; anything else is named as a problem, never included silently.
+      if (e.status === 'available') await push({ref: `env:${e.id}`, role: 'environment plate', file: e.file, expected: e.sha256, approval: e.approval, version: e.version});
+      else extraProblems.push(`env:${e.id ?? 'direct-file'}: ${e.status} (${e.reason}); not used as a reference`);
+    }
   } else throw Object.assign(new Error('subject must be {kind: "character"|"story", id}'), {status: 400});
   const canonical = items.map(i => ({ref: i.ref, source: i.source, sha256: i.sha256, version: i.version})).sort((a, b) => a.ref.localeCompare(b.ref));
-  return {subject, items, packSha256: crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex'),
-    complete: items.every(i => i.state === 'ok'), problems: items.filter(i => i.state !== 'ok').map(i => `${i.ref}: ${i.reason}`)};
+  const problems = [...items.filter(i => i.state !== 'ok').map(i => `${i.ref}: ${i.reason}`), ...extraProblems];
+  return {subject, items, packSha256: crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex'), complete: problems.length === 0, problems};
 }
 
-// References a candidate is compared with: the character's pack, or the registered environment of the same ID.
+// Packs recorded before measurements existed: measure items whose file still matches the recorded hash.
+export async function ensureFeatures(items) {
+  for (const i of items) {
+    if (i.features || i.state !== 'ok') continue;
+    const abs = repoFile(i.source);
+    if (abs && fs.existsSync(abs) && sha(abs) === i.sha256) { try { i.features = await measureImage(abs); } catch {} }
+  }
+  return items;
+}
+
+// References a candidate is compared with. Poses: the character's approved references. Environments: the registered
+// environment with the same ID (flagged if unapproved) plus every approved environment plate as a style family.
 export async function referencesForAsset(assetType, assetKey, sources) {
   const src = {...DEFAULT_SOURCES, ...sources};
   if (assetType === 'character-pose') {
@@ -165,10 +266,17 @@ export async function referencesForAsset(assetType, assetKey, sources) {
   }
   let reg = {environments: {}};
   try { reg = readJson(src.environmentsFile); } catch {}
-  const e = reg.environments?.[assetKey];
-  if (!e) return [];
-  const abs = repoFile(e.file), d = abs && fs.existsSync(abs) ? await dims(abs) : {};
-  return [{ref: `env:${assetKey}`, source: e.file, sha256: e.sha256 || null, width: d.width ?? null, height: d.height ?? null, approval: e.status || null, version: Number(e.version) || 1}];
+  const items = [];
+  for (const [id, e] of Object.entries(reg.environments || {})) {
+    const approved = approvedEnv(e.status);
+    if (!approved && id !== assetKey) continue;
+    const st = fileState(e.file, e.sha256);
+    let features = null;
+    if (st.state === 'ok') { try { features = await measureImage(repoFile(e.file)); } catch {} }
+    items.push({ref: `env:${id}`, role: 'environment plate', source: e.file, sha256: st.sha256 || e.sha256 || null, width: features?.width ?? null, height: features?.height ?? null,
+      approval: e.status || null, approved, version: Number(e.version) || 1, state: st.state, features});
+  }
+  return items;
 }
 
 // Re-hash every pack item now and report drift (missing files, changed files).
@@ -182,49 +290,130 @@ export function verifyPack(items) {
   return {ok: results.every(r => r.state === 'ok'), results};
 }
 
-// ---------- 3. candidate validation (measurable checks only; never approval)
-export const VALIDATION_LIMITS = Object.freeze({maxBytes: 20 * 1024 * 1024, minSide: 256, maxSide: 4096, minPoseFigureHeight: 1000, environmentAspect: 9 / 16});
+// ---------- public views: no filesystem paths leave the studio (identifiers, roles, hashes, sizes, approvals only)
+export function publicPackItem(i) {
+  const f = i.features;
+  return {ref: i.ref, role: i.role, sha256: i.sha256, expectedSha256: i.expectedSha256 ?? null, width: i.width, height: i.height,
+    approval: i.approval, approved: i.approved !== false, version: i.version, state: i.state, ...(i.reason ? {reason: i.reason} : {}),
+    registeredFeet: i.feet ?? null, measured: f ? {silhouette: f.silhouette, transparentFraction: f.transparentFraction, cutout: f.cutout, feet: f.feet} : null};
+}
+export function publicRequirements(r) {
+  const strip = ({file, registry, legacyFile, ...rest}) => ({...rest, ...(legacyFile !== undefined ? {directFile: !!legacyFile} : {})});
+  return {...r, characters: r.characters.map(c => ({...strip(c), poses: c.poses.map(strip)})), environments: r.environments.map(strip)};
+}
 
-export async function validateCandidate({file, bytes, assetType, assetKey, referenceItems = []}) {
+// ---------- 4. candidate validation (measurable checks only; never approval)
+// Statuses: pass | warn | fail | n/a. "n/a" means the check cannot be measured honestly with the data available.
+export const VALIDATION_LIMITS = Object.freeze({maxBytes: 20 * 1024 * 1024, minSide: 256, maxSide: 4096, minPoseFigureHeight: 1000, environmentAspect: 9 / 16,
+  proportionTolerance: 0.25, feetRelTolerance: 0.15, palettePass: 0.75, paletteFail: 0.4, envPalettePass: 0.6, envPaletteFail: 0.25, haloMargin: 0.15});
+const L = VALIDATION_LIMITS;
+const range = xs => [Math.min(...xs), Math.max(...xs)];
+const f2 = v => v.toFixed(2);
+
+// Fraction of the candidate's figure pixels whose colour bin is in (or next to) the approved poses' palettes.
+function paletteCoverage(counts, refPalettes) {
+  const allowed = new Set();
+  for (const pal of refPalettes) for (const k of pal) {
+    const r = k >> 8, g = (k >> 4) & 15, b = k & 15;
+    for (let dr = -1; dr <= 1; dr++) for (let dg = -1; dg <= 1; dg++) for (let db = -1; db <= 1; db++) {
+      const R = r + dr, G = g + dg, B = b + db;
+      if (R >= 0 && R < 16 && G >= 0 && G < 16 && B >= 0 && B < 16) allowed.add((R << 8) | (G << 4) | B);
+    }
+  }
+  let inside = 0, total = 0;
+  for (const [k, n] of counts) { total += n; if (allowed.has(k)) inside += n; }
+  return total ? inside / total : 0;
+}
+const intersect = (a, b) => a.reduce((s, v, i) => s + Math.min(v, b[i] || 0), 0);
+
+export async function validateCandidate({file, bytes, assetType, assetKey, referenceItems = [], sources}) {
+  const src = {...DEFAULT_SOURCES, ...sources};
+  const expectedCanvas = validationConfig(src).expectedCanvas || {};
   const checks = [];
   const add = (id, status, detail) => checks.push({id, status, detail});
-  add('file-size', bytes > 0 && bytes <= VALIDATION_LIMITS.maxBytes ? 'pass' : 'fail', `${bytes} bytes (limit ${VALIDATION_LIMITS.maxBytes})`);
-  let img;
-  try { img = await canvas.loadImage(fs.readFileSync(file)); add('image-integrity', 'pass', 'PNG decodes'); }
+  add('file-size', bytes > 0 && bytes <= L.maxBytes ? 'pass' : 'fail', `${bytes} bytes (limit ${L.maxBytes})`);
+  let m;
+  try { m = await measureImage(file, {withCounts: true}); add('image-integrity', 'pass', 'PNG decodes'); }
   catch (e) { add('image-integrity', 'fail', `does not decode as an image: ${e.message}`); return finish(checks); }
-  const {width: W, height: H} = img;
-  const sideOk = Math.min(W, H) >= VALIDATION_LIMITS.minSide && Math.max(W, H) <= VALIDATION_LIMITS.maxSide;
-  add('dimensions', sideOk ? 'pass' : 'fail', `${W}×${H} (allowed sides ${VALIDATION_LIMITS.minSide}–${VALIDATION_LIMITS.maxSide})`);
-  const c = canvas.createCanvas(W, H), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
-  const px = ctx.getImageData(0, 0, W, H).data;
-  let transparent = 0, partial = 0, x0 = W, x1 = -1, y0 = H, y1 = -1;
-  for (let i = 0; i < W * H; i++) {
-    const a = px[i * 4 + 3];
-    if (a === 0) transparent++; else if (a < 255) partial++;
-    if (a > 128) { const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-  }
-  const tFrac = transparent / (W * H);
+  const {width: W, height: H} = m;
+  add('dimensions', Math.min(W, H) >= L.minSide && Math.max(W, H) <= L.maxSide ? 'pass' : 'fail', `${W}×${H} (allowed sides ${L.minSide}–${L.maxSide})`);
+  const exp = expectedCanvas[assetType];
+
   if (assetType === 'character-pose') {
-    add('transparency', tFrac >= 0.2 ? 'pass' : 'fail', `${(tFrac * 100).toFixed(1)}% fully transparent pixels (a character cut-out needs a transparent background)`);
-    const figH = y1 >= y0 ? y1 - y0 + 1 : 0, figW = x1 >= x0 ? x1 - x0 + 1 : 0;
-    add('figure-height', figH >= VALIDATION_LIMITS.minPoseFigureHeight ? 'pass' : 'warn', `opaque figure ${figW}×${figH} px (target ≥ ${VALIDATION_LIMITS.minPoseFigureHeight} px tall to avoid soft close-ups)`);
-    // Consistency with approved poses of the same character: figure aspect (width/height) within the reference range.
-    const poseRefs = referenceItems.filter(r => r.ref.includes(':pose-') && r.width && r.height);
-    if (poseRefs.length && figH) {
-      const ratios = poseRefs.map(r => r.width / r.height), lo = Math.min(...ratios) * 0.75, hi = Math.max(...ratios) * 1.25, ratio = figW / figH;
-      add('pose-proportions', ratio >= lo && ratio <= hi ? 'pass' : 'warn', `figure width/height ${ratio.toFixed(2)} vs approved poses ${Math.min(...ratios).toFixed(2)}–${Math.max(...ratios).toFixed(2)} (±25%)`);
-    } else add('pose-proportions', 'warn', 'no approved pose references to compare with');
+    const refs = referenceItems.filter(r => r.ref.includes(':pose-') && r.approved !== false && r.features?.silhouette);
+    if (exp) add('canvas-dimensions', W === exp.width && H === exp.height ? 'pass' : 'warn', `${W}×${H} (expected ${exp.width}×${exp.height})`);
+    else add('canvas-dimensions', 'n/a', 'no expected canvas size is configured for character poses (approved poses are tight crops of different sizes)');
+    add('transparency', m.cutout ? 'pass' : 'fail', `${(m.transparentFraction * 100).toFixed(1)}% fully transparent pixels (a character cut-out needs a transparent background)`);
+    const sil = m.silhouette;
+    if (!sil || !m.cutout) {
+      for (const id of ['figure-height', 'pose-proportions', 'feet-anchor', 'palette-consistency', 'edge-integrity'])
+        add(id, 'fail', sil ? 'no separable figure: the image has no transparent background' : 'no figure found: the image has no solid pixels');
+    } else {
+      add('figure-height', sil.height >= L.minPoseFigureHeight ? 'pass' : 'warn', `measured figure ${sil.width}×${sil.height} px (target ≥ ${L.minPoseFigureHeight} px tall to avoid soft close-ups)`);
+      // Proportions: measured silhouette width/height compared with the measured silhouettes of the approved poses.
+      if (refs.length) {
+        const [lo, hi] = range(refs.map(r => r.features.silhouette.width / r.features.silhouette.height)), ratio = sil.width / sil.height;
+        add('pose-proportions', ratio >= lo * (1 - L.proportionTolerance) && ratio <= hi * (1 + L.proportionTolerance) ? 'pass' : 'warn',
+          `silhouette width/height ${f2(ratio)} vs approved poses ${f2(lo)}–${f2(hi)} (±${L.proportionTolerance * 100}%)`);
+      } else add('pose-proportions', 'n/a', 'no measured approved pose silhouettes to compare with');
+      // Feet anchor: detectable, not cut off, and placed within the figure like the registered anchors of approved poses.
+      const anchored = refs.filter(r => r.feet && Number.isFinite(r.feet.x));
+      if (!m.feet) add('feet-anchor', 'fail', 'no feet anchor could be measured');
+      else if (m.clipped.includes('bottom')) add('feet-anchor', 'fail', `figure touches the bottom edge: feet may be cut off (measured anchor ${m.feet.x},${m.feet.y})`);
+      else if (!anchored.length) add('feet-anchor', 'warn', `measured anchor ${m.feet.x},${m.feet.y}; no registered feet anchors on approved poses to compare with`);
+      else {
+        const [lo, hi] = range(anchored.map(r => (r.feet.x - r.features.silhouette.x) / r.features.silhouette.width));
+        const ok = m.feetRelX >= lo - L.feetRelTolerance && m.feetRelX <= hi + L.feetRelTolerance;
+        add('feet-anchor', ok ? 'pass' : 'warn', `measured anchor ${m.feet.x},${m.feet.y} at ${f2(m.feetRelX)} of the figure width; registered anchors of ${anchored.length} approved poses span ${f2(lo)}–${f2(hi)} (±${L.feetRelTolerance})`);
+      }
+      // Palette: share of figure pixels in colours used by the approved poses.
+      const palRefs = refs.filter(r => r.features.palette?.length);
+      if (palRefs.length) {
+        const cov = paletteCoverage(m.counts, palRefs.map(r => r.features.palette));
+        add('palette-consistency', cov >= L.palettePass ? 'pass' : cov >= L.paletteFail ? 'warn' : 'fail',
+          `${(cov * 100).toFixed(1)}% of figure pixels use colours of the approved poses (pass ≥ ${L.palettePass * 100}%, fail < ${L.paletteFail * 100}%)`);
+      } else add('palette-consistency', 'n/a', 'no measured approved pose palettes to compare with');
+      // Edges: cut off at the canvas edge, stray specks, near-white fringe from background removal (relative to approved poses).
+      const edgeRefs = refs.filter(r => r.features.edge);
+      const issues = [];
+      if (m.clipped.length) issues.push(['fail', `figure is cut off at the ${m.clipped.join(', ')} edge`]);
+      const maxSpeck = edgeRefs.length ? Math.max(...edgeRefs.map(r => r.features.edge.speckFraction)) : 0;
+      const maxHalo = edgeRefs.length ? Math.max(...edgeRefs.map(r => r.features.edge.haloFraction)) : 0;
+      if (m.edge.speckFraction > maxSpeck * 2 + 0.001) issues.push(['warn', `${(m.edge.speckFraction * 100).toFixed(2)}% isolated specks (approved poses ≤ ${(maxSpeck * 100).toFixed(2)}%)`]);
+      if (m.edge.haloFraction > maxHalo + L.haloMargin) issues.push(['warn', `${(m.edge.haloFraction * 100).toFixed(1)}% near-white outline pixels, a possible halo (approved poses ≤ ${(maxHalo * 100).toFixed(1)}%)`]);
+      add('edge-integrity', issues.some(i => i[0] === 'fail') ? 'fail' : issues.length ? 'warn' : 'pass',
+        issues.length ? issues.map(i => i[1]).join('; ') : `not cut off; specks ${(m.edge.speckFraction * 100).toFixed(2)}%, near-white outline ${(m.edge.haloFraction * 100).toFixed(1)}%${edgeRefs.length ? ' (within the approved poses\' range)' : ''}`);
+    }
   } else if (assetType === 'environment') {
-    add('opacity', tFrac === 0 && partial === 0 ? 'pass' : 'fail', `${(tFrac * 100).toFixed(1)}% transparent (an environment plate must be fully opaque)`);
-    const aspect = W / H, want = VALIDATION_LIMITS.environmentAspect;
-    add('aspect-ratio', Math.abs(aspect - want) / want <= 0.06 ? 'pass' : 'warn', `${aspect.toFixed(3)} (9:16 is ${want.toFixed(3)})`);
-    const envRef = referenceItems.find(r => r.ref === `env:${assetKey}`);
-    add('environment-reference', envRef ? 'pass' : 'warn', envRef ? `compares to registered ${envRef.ref} (${envRef.width}×${envRef.height})` : 'no registered environment with this ID to compare with (new environment)');
+    const same = referenceItems.find(r => r.ref === `env:${assetKey}`);
+    const family = referenceItems.filter(r => r.ref.startsWith('env:') && r.approved !== false && r.features?.histogram);
+    add('opacity', m.transparentFraction === 0 && m.partialFraction === 0 ? 'pass' : 'fail', `${(m.transparentFraction * 100).toFixed(1)}% transparent (an environment plate must be fully opaque)`);
+    const aspect = W / H;
+    add('aspect-ratio', Math.abs(aspect - L.environmentAspect) / L.environmentAspect <= 0.06 ? 'pass' : 'warn', `${aspect.toFixed(3)} (9:16 is ${L.environmentAspect.toFixed(3)})`);
+    // Expected canvas: configured, or the size shared by every approved plate; otherwise not measurable.
+    const sizes = [...new Set(family.map(r => `${r.width}×${r.height}`))];
+    if (exp) add('canvas-dimensions', W === exp.width && H === exp.height ? 'pass' : 'warn', `${W}×${H} (expected ${exp.width}×${exp.height})`);
+    else if (sizes.length === 1) add('canvas-dimensions', `${W}×${H}` === sizes[0] ? 'pass' : 'warn', `${W}×${H} (every approved plate is ${sizes[0]})`);
+    else add('canvas-dimensions', 'n/a', sizes.length ? `approved plates differ in size (${sizes.join(', ')}); no single expected canvas` : 'no approved plates or configured size to compare with');
+    if (same && same.approved !== false) add('environment-reference', 'pass', `compares with registered ${same.ref} (${same.approval})`);
+    else if (same) add('environment-reference', 'warn', `${same.ref} is registered but not approved (${same.approval}); it is not used as a reference`);
+    else add('environment-reference', 'warn', family.length ? `new environment: compared with ${family.length} approved plate(s) as a style family` : 'new environment: no approved plates to compare with');
+    const sameOk = same && same.approved !== false && same.width;
+    add('environment-reference-dimensions', sameOk ? (same.width === W && same.height === H ? 'pass' : 'warn') : 'n/a',
+      sameOk ? `${W}×${H} vs registered ${same.width}×${same.height}` : 'no approved environment with this ID to compare dimensions with');
+    if (m.histogram && family.length) {
+      const targets = sameOk && same.features?.histogram ? [same] : family;
+      const best = Math.max(...targets.map(r => intersect(m.histogram, r.features.histogram)));
+      add('environment-palette', best >= L.envPalettePass ? 'pass' : best >= L.envPaletteFail ? 'warn' : 'fail',
+        `colour histogram overlap ${(best * 100).toFixed(1)}% with ${targets.length === 1 && targets[0] === same ? same.ref : 'the closest approved plate'} (pass ≥ ${L.envPalettePass * 100}%, fail < ${L.envPaletteFail * 100}%)`);
+    } else add('environment-palette', 'n/a', m.histogram ? 'no approved plates to compare colours with' : 'the image is not an opaque plate');
+    add('edge-integrity', m.flatBorders.length ? 'warn' : 'pass', m.flatBorders.length ? `flat border on the ${m.flatBorders.join(', ')} side(s): possible letterboxing or padding` : 'no flat borders (no letterboxing or padding detected)');
   }
   add('human-approval', 'warn', 'validation never approves; a person must review the candidate');
   return finish(checks);
 }
 function finish(checks) {
-  const status = checks.some(c => c.status === 'fail') ? 'fail' : checks.some(c => c.status === 'warn') ? 'warn' : 'pass';
+  const st = checks.filter(c => c.status !== 'n/a');
+  const status = st.some(c => c.status === 'fail') ? 'fail' : st.some(c => c.status === 'warn') ? 'warn' : 'pass';
   return {status, checks};
 }

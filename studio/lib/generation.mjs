@@ -11,7 +11,7 @@ import {PRODUCTION_ROOT} from '../../production/lib/runtime.mjs';
 import {now, logEvent} from './db.mjs';
 import {Quarantine, GEN_JOB_ID} from './quarantine.mjs';
 import {adapterFor} from './gen-adapters.mjs';
-import {buildReferencePack, verifyPack, validateCandidate, referencesForAsset} from './asset-intel.mjs';
+import {buildReferencePack, verifyPack, validateCandidate, referencesForAsset, ensureFeatures, publicPackItem} from './asset-intel.mjs';
 
 export const GEN_STATUSES = ['queued', 'running', 'candidate_ready', 'failed', 'cancelled', 'approved', 'rejected'];
 export const ASSET_TYPES = ['character-pose', 'environment'];
@@ -184,11 +184,12 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
   }
   const listPacks = () => db.prepare('SELECT * FROM gen_reference_packs ORDER BY id DESC LIMIT 200').all().map(packSummary);
   // Detail always re-verifies the files now, so drift (deleted or changed artwork) is visible.
+  // Items are returned as public views: source paths are kept internally for verification and never sent out.
   function packDetail(id) {
     const r = db.prepare('SELECT * FROM gen_reference_packs WHERE id = ?').get(Number(id));
     if (!r) return null;
     const items = JSON.parse(r.items_json);
-    return {...packSummary(r), items, verification: {...verifyPack(items), checkedAt: now()}};
+    return {...packSummary(r), items: items.map(publicPackItem), verification: {...verifyPack(items), checkedAt: now()}};
   }
 
   // ---------- candidate validation (AP-84B2): measurable checks, append-only reports, never approval
@@ -198,7 +199,8 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
     const cands = db.prepare(`SELECT * FROM gen_candidates WHERE job_id = ? AND name LIKE '%.png' ORDER BY id`).all(id);
     if (!cands.length) throw fail(409, 'this job has no image candidates to validate');
     const packId = j.reference_pack_id ?? null;
-    const refs = packId ? JSON.parse(db.prepare('SELECT items_json FROM gen_reference_packs WHERE id = ?').get(packId).items_json)
+    // Pack references are used as recorded; packs from before measurements existed are measured now (hash-checked first).
+    const refs = packId ? await ensureFeatures(JSON.parse(db.prepare('SELECT items_json FROM gen_reference_packs WHERE id = ?').get(packId).items_json))
       : await referencesForAsset(j.asset_type, j.asset_key, sources);
     const reports = [];
     for (const c of cands) {
@@ -207,7 +209,7 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
       if (!st) result = {status: 'fail', checks: [{id: 'quarantine-file', status: 'fail', detail: 'candidate file is missing from quarantine'}]};
       else if (quarantine.sha256(id, c.name) !== c.sha256) result = {status: 'fail', checks: [{id: 'quarantine-file', status: 'fail', detail: 'candidate file changed since it was recorded'}]};
       else {
-        result = await validateCandidate({file: st.file, bytes: st.size, assetType: j.asset_type, assetKey: j.asset_key, referenceItems: refs});
+        result = await validateCandidate({file: st.file, bytes: st.size, assetType: j.asset_type, assetKey: j.asset_key, referenceItems: refs, sources});
         result.checks.unshift({id: 'quarantine-file', status: 'pass', detail: 'file matches its recorded SHA-256'});
         if (c.synthetic) { result.checks.push({id: 'synthetic', status: 'warn', detail: 'synthetic test fixture: never promotable'}); if (result.status === 'pass') result.status = 'warn'; }
       }

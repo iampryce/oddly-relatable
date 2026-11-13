@@ -103,29 +103,42 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
   - **unapproved:** the entry exists, but its approval or status is not an approved class. Approved pose classes are `APPROVED_WORKING_ASSET`, `APPROVED_WORKING_TEST_ASSET` and `APPROVED_EXTRACT`. Environments with status `APPROVED…` or `ALTERNATIVE…` count as approved.
   - **unresolved:** there is no registry for the character, the file's hash differs from the registry, a scene format is not implemented, or the scene gives a direct file path instead of an environment ID.
 - **Reference packs** (`gen_reference_packs`) are immutable snapshots: database triggers refuse update and delete. Each pack is recorded for a character or a story.
-  - **Items:** the canonical references in `config/canonical-references.json` (canon scene, master v3), every approved pose, and the story's environments.
-  - **Fields per item:** repository-relative source path, SHA-256, dimensions, approval and version.
+  - **Items:** the canonical references in `config/canonical-references.json` (canon scene, master v3), every approved pose, and the story's approved environments. **Only approved, verified references are included.** In a story pack, any unapproved, missing or unresolved pose or environment is left out, named as a problem, and the pack is marked incomplete.
+  - **Fields per item:** identifier and role, SHA-256, dimensions, approval and version, the registered feet anchor (poses), and measurements taken from the pixels: silhouette, measured feet anchor, transparency, edge statistics, and a palette (cut-outs) or colour histogram (opaque plates).
+  - **Source paths stay internal.** The database keeps each item's repository-relative source so it can be re-verified. API responses never include it.
   - **Pack hash and completeness:** each pack gets a pack SHA-256 and is marked complete or incomplete, with the problems named.
+  - **Older packs:** a pack recorded before measurements existed is measured when it is used for validation, but only for files that still match the recorded hash.
   - **Re-verification:** opening a pack re-hashes every file now and reports `missing` or `mismatch` (changed since recorded).
   - **Files are never copied or modified.**
   - A generation job can name a pack (`referencePackId`). The pack ID and hash then appear in each candidate's provenance, and a regenerated job keeps the same pack.
-- **Candidate validation** (`gen_validations`) is append-only and advisory. It runs automatically before a job becomes `candidate_ready`, and on demand. Checks per PNG candidate:
+- **Candidate validation** (`gen_validations`) is append-only and advisory. It runs automatically before a job becomes `candidate_ready`, and on demand.
+  - **Results:** each check reports `pass`, `warn`, `fail` or `n/a`. `n/a` means the check cannot be measured honestly with the data available; it is shown, but it does not count towards the overall result.
   - **Always:**
     - the file still matches its recorded hash;
     - file size (20 MB limit);
     - the PNG decodes;
     - dimensions (sides 256–4096 px).
-  - **Character poses:**
-    - transparency: at least 20% fully transparent pixels;
-    - figure height: a warning below 1000 px, linked to the soft close-up concern;
-    - figure width/height within ±25% of the approved poses.
+  - **Character poses** (compared with the approved poses' measurements):
+    - **canvas dimensions:** against `validation.expectedCanvas` in the config. This is `null` today, so the check is `n/a`: approved poses are tight crops of different sizes, so no canvas size is implied.
+    - **transparency:** at least 20% fully transparent pixels. Without transparency there is no separable figure, so the figure checks below fail rather than measure the background.
+    - **figure height:** the measured silhouette, with a warning below 1000 px (linked to the soft close-up concern).
+    - **pose proportions:** silhouette width/height within ±25% of the approved poses' measured silhouettes, not their canvases.
+    - **feet anchor:** a feet anchor can be measured (the centre of the lowest 3% of the silhouette); the figure is not cut off at the bottom; and the anchor's position across the figure is within ±0.15 of the registered anchors of the approved poses. On the approved poses, the measured anchors agree with the registered ones to within 6 px.
+    - **palette consistency:** the share of figure pixels in colours used by the approved poses (4-bit bins, ±1 bin tolerance). Pass at 75% or more; fail below 40%.
+    - **edge integrity:** fails if the figure is cut off at any canvas edge. Warns on isolated specks or a near-white outline (background-removal halo) beyond the approved poses' own levels.
   - **Environments:**
     - fully opaque;
     - 9:16 aspect ratio within 6%;
-    - a registered environment of the same ID to compare with.
+    - **canvas dimensions:** configured, or the size shared by every approved plate (941×1672 today);
+    - **environment reference:** the registered plate with the same ID. If that plate is not approved it is flagged and not used. A new ID is compared with the approved plates as a style family.
+    - **environment reference dimensions:** compared with the same-ID approved plate, otherwise `n/a`;
+    - **environment palette:** colour-histogram overlap with the same-ID plate or the closest approved plate. Pass at 60% or more; fail below 25%.
+    - **edge integrity:** flat borders that suggest letterboxing or padding.
   - Synthetic fixtures are flagged, and a human-approval reminder is always included, so a report never comes out as a clean "approved".
   - **Validation never changes a job's status and never approves.**
+- **Calibration:** an approved pose scaled up 2.2× passes every pose check, and an approved plate re-encoded passes every environment check (both are in the tests).
 - **Not measurable yet:** identity likeness, such as face and outfit matching the canon. That needs a person, or a model in a later, approved milestone.
+- **Decoding note:** images are loaded from their file path, because `@napi-rs/canvas` fails to decode some valid PNGs (the lookdev plates) from an in-memory buffer.
 - **API:**
 
   | Method | Path | Purpose |
@@ -150,7 +163,7 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
 - **Input validation:** IDs, story names (only `production/stories/*.story.json`), decisions and text lengths are validated.
 - **Process:** child processes are started with an argument array (no shell).
 - **Media:** keys are whitelisted by pattern and resolved inside the run folder (no traversal, no symlinks).
-- **Nothing leaked:** no absolute filesystem paths or environment values in responses. The asset intelligence views show repository-relative paths of registered reference files only, and only files inside the repository are ever read.
+- **Nothing leaked:** no filesystem paths (absolute or repository-relative) or environment values in responses. Requirements and reference packs expose identifiers, roles, hashes, sizes, approvals, measurements and verification results only; source paths stay inside the database. Tests check every requirements, pack and validation response for paths. Only files inside the repository are ever read.
 - **Read-only artwork:** asset intelligence, reference packs and validation only read and hash registry and artwork files. Tests assert that registries, stories, canon and every registered pose and environment are byte-identical after each run.
 - **Browser:** a strict Content-Security-Policy; all user text is rendered as text, never HTML.
 

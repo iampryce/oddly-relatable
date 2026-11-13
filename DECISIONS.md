@@ -108,6 +108,7 @@ Research confidence so far: YouTube Shorts length and disclosure rules were read
 | **AP-84A** | **GPU visual generation architecture approved in principle by the owner (2026-11-12).** Initial GPU experiment budget: **$0**. No GPU provisioning, RunPod account, external generation APIs, model downloads or artwork changes until separately approved. |
 | **AP-84B1** | **Generation foundation implemented (2026-11-12, zero cost):** generation jobs, `none`/`fake` adapters, quarantine, human review, append-only history, versioned registry proposals (no registry writes). See `studio/README.md`. AP-84B2 not started; needs review and approval. |
 | **AP-84B2** | **Asset intelligence, reference packs and validation implemented (2026-11-13, zero cost).** Read-only towards registries, stories and artwork; validation is advisory and never approves; registry promotion is a design document only (`docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md`). AP-84B3 not authorised. |
+| **AP-84B2 correction** | **Review corrections applied (2026-11-13):** API never exposes filesystem paths; validation adds measured feet anchor, palette, edge integrity, canvas and environment reference checks with explicit `n/a` where not measurable; reference packs only include approved references. Pending owner/ChatGPT acceptance. |
 
 **Resolved or superseded by the lock:** V1 (direction), V2 (character flatness), V5 (literal Modern Pop test), V8 (the lead character) and V11 are resolved; V3 (environment route) is partly resolved; V6 (images) is exercised; D2 (Inkblock) and D3 (vector puppet kits) are superseded; D15 (fonts) and D19 (brand colours) are no longer part of the visual identity and stay open.
 
@@ -249,6 +250,7 @@ Whether Dez appears · Tunde scene vs phone call · the "drone" subplot · which
 
 | Date | Change |
 |---|---|
+| 2026-11-13 (AP-84B2 correction) | Path exposure removed from the studio API; validator completed to the brief; unapproved items excluded from reference packs; renderer suite run and recorded. |
 | 2026-11-13 (AP-84B2) | Story asset requirements, immutable reference packs, advisory candidate validation and the registry-promotion design added; no registry, story, artwork or renderer changes. |
 | 2026-11-12 (AP-84B1) | GPU architecture approved in principle ($0 budget); zero-cost generation foundation added to the studio; no GPU, models or generation of artwork. |
 | 2026-11-12 (AP-83) | Local web studio added (episodes, background production runs, live progress, MP4/QA/storyboard viewing, review records); Short 001 produced through it; no publication approval. |

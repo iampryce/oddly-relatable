@@ -10,7 +10,7 @@ import {LocalStorage, RUN_ID} from './storage.mjs';
 import {JobRunner, TERMINAL} from './jobs.mjs';
 import {listStories, storyInfo} from './stories.mjs';
 import {createGeneration} from './generation.mjs';
-import {requirementsFor} from './asset-intel.mjs';
+import {requirementsFor, publicRequirements} from './asset-intel.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const STATIC = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css'};
@@ -125,8 +125,9 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
     // ---------- asset intelligence (AP-84B2): read-only analysis, immutable reference packs, advisory validation
     ['GET', /^\/api\/generation\/requirements$/, (m, body, url) => {
       const story = url.searchParams.get('story');
-      if (story) return requirementsFor(story, assetSources);
-      return listStories().map(st => requirementsFor(st.file, assetSources));
+      // Public view: no registry or artwork paths in responses (AP-84B2 correction).
+      if (story) return publicRequirements(requirementsFor(story, assetSources));
+      return listStories().map(st => publicRequirements(requirementsFor(st.file, assetSources)));
     }],
     ['GET', /^\/api\/generation\/reference-packs$/, () => gen.listPacks()],
     ['POST', /^\/api\/generation\/reference-packs$/, async (m, body) => ({status: 201, body: await gen.createPack({kind: body.kind, id: body.id, note: body.note ?? null, createdBy: body.createdBy ?? 'owner'})})],
