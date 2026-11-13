@@ -65,8 +65,13 @@ Today a pose entry is a single object (version 1 by default). A future shape kee
 - Changing stories to use new versions.
 - Any GPU, model or external service.
 
-## 7. Open questions for the owner
+## 7. Owner decisions (2026-11-13)
 
-1. Which approval class should a promoted generated pose receive at first (`APPROVED_WORKING_TEST_ASSET` until it passes a render test)?
-2. Where should promoted files live (proposed: `bible/concepts/lookdev-richenv/generated/`)?
-3. Should promotion require a passing preview render with the new pose before the entry is marked `current`?
+The owner answered the open questions on 2026-11-13, following ChatGPT's recommendations. These decisions set the rules for a future implementation. **They do not authorise implementing promotion**, which still needs its own approved milestone.
+
+1. **Initial approval class:** a promoted generated pose starts as `APPROVED_WORKING_TEST_ASSET`.
+2. **Location:** promoted files live under `bible/concepts/lookdev-richenv/generated/` (write-once, versioned names), separate from existing canonical artwork.
+3. **Preview render before `current`:** a promoted version can become `current` only after a successful preview render that uses it.
+   - **The render is a prerequisite, never an automatic approval.**
+   - The owner still explicitly approves the promotion (step 3 in §3), and separately approves changing `current` (§4).
+4. **Generated pose canvas:** newly generated poses use **1024×1536**, matching master v3. It is enforced as the `canvas-dimensions` validation check (`studio/config/canonical-references.json`). Existing approved poses are unchanged.

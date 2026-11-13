@@ -119,7 +119,7 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
     - the PNG decodes;
     - dimensions (sides 256–4096 px).
   - **Character poses** (compared with the approved poses' measurements):
-    - **canvas dimensions:** against `validation.expectedCanvas` in the config. This is `null` today, so the check is `n/a`: approved poses are tight crops of different sizes, so no canvas size is implied.
+    - **canvas dimensions:** against `validation.expectedCanvas` in the config. The owner approved **1024×1536** for newly generated poses on 2026-11-13, matching master v3. Existing approved poses are tight crops of different sizes and are not affected. If no size is configured, the check reports `n/a`.
     - **transparency:** at least 20% fully transparent pixels. Without transparency there is no separable figure, so the figure checks below fail rather than measure the background.
     - **figure height:** the measured silhouette, with a warning below 1000 px (linked to the soft close-up concern).
     - **pose proportions:** silhouette width/height within ±25% of the approved poses' measured silhouettes, not their canvases.

@@ -327,3 +327,9 @@ Chronological, newest last. Each entry records what was done, by which agent and
 ## 2026-11-13 · AP-84B2 ACCEPTED
 - ChatGPT reviewed the correction commit `f756198` and accepted AP-84B2: no paths in API responses, measured validation checks with n/a where not measurable, approved-only reference packs, all three suites recorded. Identity likeness remains a human review.
 - Open owner decisions (not adopted; ChatGPT recommendations in brackets): (1) expected canvas for newly generated poses [1024×1536, matching master v3; future constraint only, existing artwork unchanged]; (2) initial approval class for promoted generated poses [APPROVED_WORKING_TEST_ASSET]; (3) location of promoted files [bible/concepts/lookdev-richenv/generated/]; (4) require a successful preview render before a promoted asset becomes current [yes]. None of these authorises promotion, generation or AP-84B3.
+
+---
+
+## 2026-11-13 · Owner decisions after AP-84B2
+- OWNER DECISIONS 2026-11-13 (post AP-84B2): owner approved all four, as recommended by ChatGPT. (1) newly generated poses use a 1024x1536 canvas (enforced by the canvas-dimensions check; existing artwork unchanged); (2) promoted generated poses start as APPROVED_WORKING_TEST_ASSET; (3) promoted files live under bible/concepts/lookdev-richenv/generated/; (4) a successful preview render is required before a promoted version becomes current, as a prerequisite only: the owner still explicitly approves promotion and the change of current. Promotion implementation, image generation, GPU work and AP-84B3 remain unauthorised.
+- Applied: `studio/config/canonical-references.json` expectedCanvas character-pose = 1024x1536; tests updated (studio 22/22); design doc section 7 records the decisions.

@@ -179,8 +179,9 @@ test('candidate validation: realistic candidates pass; each measurable defect is
   const POSE = 'character-01/pose-07';
   // Approved pose 02 scaled up 2.2x on a transparent canvas: a realistic, on-model candidate.
   const art = await canvas.loadImage(path.join(REPO, pose02.source));
-  const good = await run(await png(path.join(dir, 'good.png'), 800, 1400, c => c.drawImage(art, 100, 40, art.width * 2.2, art.height * 2.2)), 'character-pose', POSE, poseRefs);
-  assert.deepEqual(byId(good), {'file-size': 'pass', 'image-integrity': 'pass', dimensions: 'pass', 'canvas-dimensions': 'n/a', transparency: 'pass', 'figure-height': 'pass',
+  // Owner-approved pose canvas (2026-11-13): 1024x1536, matching master v3.
+  const good = await run(await png(path.join(dir, 'good.png'), 1024, 1536, c => c.drawImage(art, 200, 80, art.width * 2.2, art.height * 2.2)), 'character-pose', POSE, poseRefs);
+  assert.deepEqual(byId(good), {'file-size': 'pass', 'image-integrity': 'pass', dimensions: 'pass', 'canvas-dimensions': 'pass', transparency: 'pass', 'figure-height': 'pass',
     'pose-proportions': 'pass', 'feet-anchor': 'pass', 'palette-consistency': 'pass', 'edge-integrity': 'pass', 'human-approval': 'warn'});
   assert.equal(good.status, 'warn', 'never "approved": a person must review (n/a checks do not count)');
   // Opaque pose: no separable figure, so the figure checks fail instead of measuring the background.
@@ -189,6 +190,14 @@ test('candidate validation: realistic candidates pass; each measurable defect is
   // Thin bar: proportions measured from the silhouette, not the canvas.
   const thin = await run(await png(path.join(dir, 'thin.png'), 800, 800, c => { c.fillStyle = '#000'; c.fillRect(380, 100, 40, 600); }), 'character-pose', POSE, poseRefs);
   assert.equal(byId(thin)['figure-height'], 'warn'); assert.equal(byId(thin)['pose-proportions'], 'warn');
+  assert.equal(byId(thin)['canvas-dimensions'], 'warn', '800x800 is not the approved 1024x1536 pose canvas');
+  // With no configured size (temporary config), the canvas check stays n/a rather than guessing.
+  const cfgSrc = tempSources();
+  try {
+    writeJson(cfgSrc.canonFile, {characters: {}, validation: {expectedCanvas: {'character-pose': null}}});
+    const r = await validateCandidate({file: path.join(dir, 'good.png'), bytes: fs.statSync(path.join(dir, 'good.png')).size, assetType: 'character-pose', assetKey: POSE, referenceItems: poseRefs, sources: cfgSrc});
+    assert.equal(byId(r)['canvas-dimensions'], 'n/a');
+  } finally { cfgSrc.cleanup(); }
   // Off-palette figure cut off at the bottom edge: palette, feet anchor and edge integrity fail.
   const clipped = await run(await png(path.join(dir, 'clipped.png'), 800, 1400, c => { c.fillStyle = '#ff00ff'; c.fillRect(150, 200, 520, 1200); }), 'character-pose', POSE, poseRefs);
   assert.equal(byId(clipped)['palette-consistency'], 'fail'); assert.equal(byId(clipped)['feet-anchor'], 'fail'); assert.equal(byId(clipped)['edge-integrity'], 'fail');

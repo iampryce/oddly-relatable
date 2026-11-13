@@ -7,7 +7,7 @@
     ]
   },
   "validation": {
-    "note": "Expected canvas sizes for generated candidates. null = not defined yet: the canvas-dimensions check then reports n/a for poses, and for environments uses the size shared by all approved plates. Set by the owner together with a generation specification.",
-    "expectedCanvas": {"character-pose": null, "environment": null}
+    "note": "Expected canvas sizes for generated candidates. character-pose 1024x1536 approved by the owner on 2026-11-13 (matches master v3); applies to newly generated poses only, existing approved artwork is unchanged. environment null = use the size shared by all approved plates.",
+    "expectedCanvas": {"character-pose": {"width": 1024, "height": 1536}, "environment": null}
   }
 }
