@@ -330,8 +330,11 @@ export function createGeneration({db, workspace, adapter = 'none', timeoutMs = 1
   function registryVersion(registry, entryKey) {
     try {
       if (registry.startsWith('characters/')) {
-        const reg = JSON.parse(fs.readFileSync(path.join(PRODUCTION_ROOT, `${registry}.json`), 'utf8'));
-        const e = reg.poses?.[entryKey]; return e ? (Number(e.version) || 1) : 0;
+        const dir = sources?.charactersDir || path.join(PRODUCTION_ROOT, 'characters');
+        const reg = JSON.parse(fs.readFileSync(path.join(dir, `${registry.slice('characters/'.length)}.json`), 'utf8'));
+        // Highest of the current entry (version 1 unless stated) and any promoted versions (AP-84 promotion).
+        const e = reg.poses?.[entryKey], promoted = Object.keys(reg.promotions?.[entryKey] || {}).map(Number);
+        return Math.max(e ? (Number(e.version) || 1) : 0, ...promoted, 0);
       }
       const reg = JSON.parse(fs.readFileSync(path.join(PRODUCTION_ROOT, 'environments', 'environments.json'), 'utf8'));
       const e = reg.environments?.[entryKey]; return e ? (Number(e.version) || 1) : 0;

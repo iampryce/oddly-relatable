@@ -279,8 +279,7 @@ async function genJobPage(id) {
           h('dt', {}, 'Reference pack'), h('dd', {}, j.referencePack ? h('a', {href: `#/generation/packs/${j.referencePack.id}`}, `#${j.referencePack.id} ${j.referencePack.subject.kind} ${j.referencePack.subject.id}`) : '— (current registry)'),
           h('dt', {}, 'Created'), h('dd', {}, fmtDate(j.createdAt)), h('dt', {}, 'Finished'), h('dd', {}, fmtDate(j.finishedAt)))),
         genReviewCard(j),
-        card('Registry proposals', j.proposals.length ? h('ul.feed', {}, j.proposals.map(p => h('li', {}, h('span.mono', {}, `${p.registry} · ${p.entryKey}@v${p.version}`), ' ',
-          pill(p.promotable ? 'pass' : 'warn', p.promotable ? 'promotable later' : 'not promotable'), h('div.muted', {}, p.reason), h('div.muted.mono', {}, `candidate ${p.candidateId} · ${p.candidateSha256.slice(0, 16)}…`)))) : h('div.muted', {}, 'None. Approval creates a versioned proposal; registries are never changed here.'))),
+        proposalsCard(j)),
       h('div.grid', {}, candCards.length ? candCards : card('Candidates', h('div.empty', {}, active ? 'Waiting for the worker…' : 'No candidates.'))))
   );
   if (active) poll(() => genJobPage(id), 1500);
@@ -304,6 +303,53 @@ function genReviewCard(j) {
   }}, h('div.notice', {}, 'Approval is an explicit human decision. It creates a versioned registry proposal only; it never edits approved artwork or registries.'),
     decision, h('label', {for: 'gcand'}, 'Candidate'), cand, h('label', {for: 'gnote'}, 'Note'), note, h('div.row', {}, submit));
   return card('Human review', form, h('h3', {}, 'History'), history);
+}
+
+// ---------- registry promotion (owner decisions 2026-11-13): checks, explicit decision, never "current"
+function proposalsCard(j) {
+  if (!j.proposals.length) return card('Registry proposals', h('div.muted', {}, 'None. Approval creates a versioned proposal; promotion into a registry is a separate owner decision.'));
+  return card('Registry proposals', h('ul.feed.proposals', {}, j.proposals.map(p => {
+    const done = (j.promotions || []).find(x => x.proposalId === p.id);
+    const slot = h('div', {});
+    const checkBtn = p.promotable && p.status === 'proposed' ? h('button', {type: 'button', onclick: async ev => {
+      ev.target.disabled = true;
+      try { slot.replaceChildren(promotionForm(j, p, await api(`/api/generation/proposals/${p.id}/promotion-check`))); }
+      catch (e) { toast(e.message, true); ev.target.disabled = false; }
+    }}, 'Check promotion') : null;
+    return h('li', {}, h('span.mono', {}, `${p.registry} · ${p.entryKey}@v${p.version}`), ' ',
+      done ? pill('pass', 'promoted (not current)') : pill(p.promotable ? 'pass' : 'warn', p.promotable ? 'promotable' : 'not promotable'),
+      // The stored proposal reason predates promotion ("future milestone"); show the current state instead when promotable.
+      h('div.muted', {}, done ? `Promoted by ${done.promotedBy} · ${fmtDate(done.createdAt)} · ${done.approval} · asset ${done.asset}: "${done.note}"`
+        : p.promotable && p.status === 'proposed' ? 'Approved candidate. Run the promotion checks; promotion is a separate owner decision and never makes the version current.' : p.reason),
+      h('div.muted.mono', {}, `candidate ${p.candidateId} · ${p.candidateSha256.slice(0, 16)}…`), checkBtn ? h('div.row', {}, checkBtn) : null, slot);
+  })));
+}
+
+function promotionForm(j, p, c) {
+  const list = h('ul.checks', {}, c.checks.map(ch => h('li', {}, pill(CHECK_PILL[ch.status] || 'warn', ch.status), ' ', h('b', {}, ch.id), h('div.muted', {}, ch.detail))));
+  if (!c.ok) return h('div', {}, h('h3', {}, 'Promotion checks ', pill('fail', 'blocked')), list);
+  const num = (id, v) => h('input', {id, type: 'number', min: 0, step: 1, value: String(v), required: true});
+  const fx = num(`fx${p.id}`, c.measured.feet.x), fy = num(`fy${p.id}`, c.measured.feet.y), fh = num(`fh${p.id}`, c.measured.figureHeight);
+  const note = h('textarea', {id: `pn${p.id}`, maxlength: 2000, required: true, placeholder: 'Why this version is promoted (required)'});
+  const confirm = h('input', {type: 'checkbox', id: `pc${p.id}`});
+  const submit = h('button.primary', {type: 'submit'}, `Promote as ${p.entryKey} v${p.version}`);
+  return h('form', {onsubmit: async ev => {
+    ev.preventDefault();
+    if (!confirm.checked) return toast('Tick the confirmation to promote', true);
+    submit.disabled = true;
+    try {
+      await api(`/api/generation/proposals/${p.id}/promote`, {method: 'POST', body: JSON.stringify({note: note.value, confirm: true, approval: c.approval,
+        feet: {x: Number(fx.value), y: Number(fy.value)}, figureHeight: Number(fh.value)})});
+      toast('Promoted as a new version (not current)'); genJobPage(j.id);
+    } catch (e) { toast(e.message, true); submit.disabled = false; }
+  }}, h('h3', {}, 'Promotion checks ', pill('pass', 'all passed')), list,
+    h('div.notice', {}, c.notice),
+    h('dl.kv', {}, h('dt', {}, 'Registry'), h('dd.mono', {}, c.plan.registry), h('dt', {}, 'New version'), h('dd.mono', {}, `${c.plan.entryKey} v${c.plan.version}`),
+      h('dt', {}, 'Asset'), h('dd.mono', {}, c.plan.asset), h('dt', {}, 'Approval class'), h('dd.mono', {}, c.approval)),
+    h('div.row', {}, h('div', {}, h('label', {for: fx.id}, 'Feet x (px)'), fx), h('div', {}, h('label', {for: fy.id}, 'Feet y (px)'), fy), h('div', {}, h('label', {for: fh.id}, 'Figure height (px)'), fh)),
+    h('label', {for: note.id}, 'Note'), note,
+    h('label.confirm', {for: confirm.id}, confirm, ` I approve adding ${p.entryKey} v${p.version} to ${c.plan.registry} as ${c.approval}. It will not become current.`),
+    h('div.row', {}, submit));
 }
 
 // ---------- AP-84B2: validation reports, story requirements, reference packs

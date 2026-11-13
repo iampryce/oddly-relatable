@@ -11,6 +11,7 @@ import {JobRunner, TERMINAL} from './jobs.mjs';
 import {listStories, storyInfo} from './stories.mjs';
 import {createGeneration} from './generation.mjs';
 import {requirementsFor, publicRequirements} from './asset-intel.mjs';
+import {createPromotion} from './promotion.mjs';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const STATIC = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css'};
@@ -28,12 +29,15 @@ const cleanText = (v, name, min, max) => {
   return t;
 };
 
-export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true, genAdapter = 'none', genTimeoutMs, assetSources} = {}) {
+export function createStudio({workspace, port = 4317, command, pollMs = 1000, seed = true, genAdapter = 'none', genTimeoutMs, assetSources, promotionLibrary} = {}) {
   const storage = new LocalStorage(workspace);
   const db = openDb(path.join(storage.root, 'studio.db'));
   const jobs = new JobRunner({db, storage, command, pollMs});
   // Generation (AP-84B1): separate jobs, quarantine and reviews; the adapter is server configuration, never chosen by clients.
   const gen = createGeneration({db, workspace: storage.root, adapter: genAdapter, sources: assetSources, ...(genTimeoutMs ? {timeoutMs: genTimeoutMs} : {})});
+  // Registry promotion: owner-approved new versions only, never "current" (see lib/promotion.mjs).
+  // assetSources / promotionLibrary are overridden only by tests (temporary registries and library).
+  const promo = createPromotion({db, quarantine: gen.quarantine, workspace: storage.root, sources: assetSources, ...(promotionLibrary ? {libraryRoot: promotionLibrary} : {})});
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
 
   // ---------- data helpers
@@ -133,7 +137,12 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
     ['POST', /^\/api\/generation\/reference-packs$/, async (m, body) => ({status: 201, body: await gen.createPack({kind: body.kind, id: body.id, note: body.note ?? null, createdBy: body.createdBy ?? 'owner'})})],
     ['GET', /^\/api\/generation\/reference-packs\/(\d{1,9})$/, m => { const p = gen.packDetail(m[1]); if (!p) throw fail(404, 'reference pack not found'); return p; }],
     ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/validate$/, async m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return {status: 201, body: await gen.validateJob(m[1], 'manual')}; }],
-    ['GET', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); const d = gen.detail(m[1]); if (!d) throw fail(404, 'generation job not found'); return d; }],
+    ['GET', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); const d = gen.detail(m[1]); if (!d) throw fail(404, 'generation job not found'); return {...d, promotions: promo.forJob(m[1])}; }],
+    // ---------- registry promotion: checks (read-only), owner promotion with a note, history
+    ['GET', /^\/api\/generation\/proposals\/(\d{1,9})\/promotion-check$/, async m => promo.check(m[1])],
+    ['POST', /^\/api\/generation\/proposals\/(\d{1,9})\/promote$/, async (m, body) => ({status: 201, body: await promo.promote(m[1], {note: body.note, promotedBy: body.promotedBy ?? 'owner',
+      approval: body.approval, feet: body.feet, figureHeight: body.figureHeight, confirm: body.confirm})})],
+    ['GET', /^\/api\/generation\/promotions$/, () => promo.list()],
     ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/cancel$/, m => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return gen.cancel(m[1]); }],
     ['POST', /^\/api\/generation\/jobs\/(g-[0-9a-f-]+)\/reviews$/, (m, body) => { if (!gen.isJobId(m[1])) throw fail(400, 'invalid generation job id'); return {status: 201, body: gen.review(m[1], {decision: body.decision, candidateId: body.candidateId, note: body.note, reviewer: body.reviewer ?? 'owner'})}; }],
     ['POST', /^\/api\/runs\/(r-[0-9a-f-]+)\/reviews$/, (m, body) => {
@@ -225,7 +234,7 @@ export function createStudio({workspace, port = 4317, command, pollMs = 1000, se
       return send(res, 404, {error: 'not found'});
     } catch (e) {
       const status = e.status || 500;
-      send(res, status, {error: status === 500 ? 'internal error' : e.message, ...(e.runId ? {runId: e.runId} : {})});
+      send(res, status, {error: status === 500 ? 'internal error' : e.message, ...(e.runId ? {runId: e.runId} : {}), ...(e.details && status !== 500 ? {details: e.details} : {})});
       if (status === 500) console.error(e);
     }
   });

@@ -88,7 +88,7 @@ A local, zero-cost foundation for future GPU-generated assets. It has no GPU, no
   - Every file is hashed with SHA-256, and its provenance (job, adapter, request, seed, hash) is recorded in `gen_candidates`, which cannot be modified.
 - **Review:** approve (a candidate must be named), reject, or request regeneration (a new job with attempt + 1). A note is always required. Decisions go to `gen_reviews`, which the database makes append-only.
 - **Approval never changes registries or artwork.** It creates a **registry proposal** (`gen_registry_proposals`) with the next version for that entry; an existing registry entry counts as version 1, so a new pose 02 is proposed as `02@v2`. Approval refuses a candidate whose file changed since it was recorded. Synthetic fixtures are recorded as **not promotable**.
-- **Not built yet:** promoting an approved proposal into `production/characters/*.json` or `environments.json` (a new version entry with feet anchor, figure height and approval class) is a later milestone.
+- **Promotion** of an approved proposal into a character registry is a separate owner decision (see "Registry promotion" below).
 - **Restart:** queued jobs resume. Jobs left running are marked `failed` (interrupted, retryable), because in-process work cannot survive a restart.
 - **API:** `GET /api/generation`, `GET|POST /api/generation/jobs`, `GET /api/generation/jobs/:id`, `POST /api/generation/jobs/:id/cancel`, `POST /api/generation/jobs/:id/reviews`, and `GET /media/generation/:id/<name>` (whitelisted, served as data).
 - **Dashboard:** `#/generation` (jobs and a new-job form) and `#/generation/<job-id>` (candidates with previews, hash and provenance, review, history, proposals).
@@ -154,7 +154,47 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
   - **Story requirements:** one table per story with a "Request generation" button for any requirement that is not available. The button pre-fills the job form.
   - **Reference packs:** a list, a new-pack form, and pack detail showing the "now" verification for each item.
   - **Job page:** shows the latest validation report for each candidate, with a "Validate again" button.
-- **Registry promotion** is designed in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` and is **not implemented**.
+- **Registry promotion:** see the next section.
+
+## Registry promotion (owner decisions of 2026-11-13)
+
+`lib/promotion.mjs` implements `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` for **generated character poses**.
+
+- **What promotion does:** an approved, promotable proposal becomes a **new version** of a pose in the character registry. That version is **never current**:
+  - It is recorded under a top-level `promotions` map (`promotions["02"]["2"] = {…}`), not inside `poses`.
+  - The production engine reads only `poses`, so no story can pick up a promoted version by accident.
+  - The engine's registry validation is unaffected; every pose still needs `file`, `feet` and `figureHeight`.
+- **Making a version current** needs a successful preview render with it **and** a separate owner approval. The render is a prerequisite, never an approval. This is not built yet.
+- **Checks before promoting** (`GET /api/generation/proposals/:id/promotion-check`, read-only). All must pass:
+  1. The proposal is still `proposed`, promotable, and not promoted before.
+  2. The asset is a character pose.
+  3. A person approved this candidate.
+  4. The quarantined file still matches the approved hash, and it is not a synthetic fixture.
+  5. Its latest validation report is for this file and is not `fail`.
+  6. The job's reference pack still verifies.
+  7. The registry is readable and the version number is still free.
+  8. The destination file does not exist yet.
+  9. The feet anchor and figure height can be measured.
+- **The owner's decision** (`POST /api/generation/proposals/:id/promote`):
+  - It requires `{confirm: true, note}`.
+  - The approval class is fixed to `APPROVED_WORKING_TEST_ASSET` (decision 2).
+  - Feet anchor and figure height default to the measured values; the owner can correct them.
+- **What a promotion writes:**
+  1. **Asset:** a write-once copy, with its hash checked, to `bible/concepts/lookdev-richenv/generated/<character>/pose-<key>_v<N>.png` (decision 3).
+  2. **Registry edit:**
+     - Only the trailing `promotions` block is inserted or replaced, as text. Every byte before it is verified unchanged, so the hand-formatted registry is not reformatted.
+     - The new registry must still load in the production engine (`loadRegistry`) before it replaces the old one.
+     - It is written to a temporary file and then renamed into place.
+     - The registry's hash must not have changed since the checks ran.
+     - A backup of the previous registry goes to `<workspace>/registry-backups/`, outside the repository.
+  3. **Audit:** a `gen_promotions` row (append-only, enforced by database triggers), and the proposal is marked `promoted`.
+- **If it fails:** a failure before the registry swap removes the copied asset and leaves the registry untouched. A failure after the swap keeps the asset and points to the backup.
+- **Afterwards:** update `ASSET_REGISTER.md` and the project records, then commit after review. The studio does not commit.
+- **Version numbers:** new proposals count promoted versions, so a second take on pose 02 after v2 is proposed as v3.
+- **Not covered yet:** environments are refused, because the owner decisions cover poses only.
+- **Dashboard:** on a job page, "Check promotion" on a proposal shows every check, then the form. The form shows the measured feet and figure height (editable), a required note and an explicit confirmation.
+- **API:** `GET /api/generation/promotions` lists promotions. Job detail includes `promotions`.
+- **Tests** run only against temporary registries and a temporary library in the git-ignored `studio-work/studio-*/`. They assert that the real registries, stories, artwork and the real `generated/` folder are untouched.
 
 ## Security
 

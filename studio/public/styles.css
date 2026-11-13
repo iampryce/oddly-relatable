@@ -70,3 +70,7 @@ ul.checks { list-style: none; margin: 8px 0; padding: 0; }
 ul.checks li { padding: 6px 0; border-bottom: 1px solid var(--line); }
 ul.checks li:last-child { border-bottom: 0; }
 .s-na { color: var(--muted); }
+/* Registry proposals hold the promotion form: no height limit there */
+.feed.proposals { max-height: none; overflow: visible; }
+label.confirm { display: flex; gap: 8px; align-items: flex-start; color: var(--text); font-size: 13px; }
+label.confirm input { width: auto; margin-top: 2px; }

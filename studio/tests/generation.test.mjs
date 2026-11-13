@@ -15,7 +15,8 @@ const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('
 const protectedFiles = () => ['production/characters/character-01.json', 'production/environments/environments.json', 'production/stories/short-001-v2.story.json',
   'bible/concepts/lookdev-richenv/lookdev-scene-01.png', 'bible/concepts/lookdev-richenv/ap75-pose02-test/character-01_pose-02-worried-phone_skin-only_test.png']
   .map(f => [f, sha(path.join(REPO, f))]);
-let nextPort = 4900 + Math.floor(Math.random() * 300);
+// Stays below 5060/5061: fetch refuses those (blocked SIP ports), which made this test fail intermittently.
+let nextPort = 4910 + Math.floor(Math.random() * 120);
 
 async function start({adapter = 'fake', workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-'))} = {}) {
   const port = nextPort++;

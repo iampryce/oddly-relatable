@@ -1,6 +1,14 @@
-# Registry promotion: design (AP-84B2, documentation only)
+# Registry promotion: design (AP-84B2) and implementation status
 
-**Status:** design only. Nothing in this document is implemented. The studio does not write to `production/characters/*.json`, `production/environments/environments.json`, `bible/` or any artwork, and AP-84B2 changed no registry entry. Implementing promotion needs a separately approved milestone.
+**Status (2026-11-13):**
+- **Built:** promotion into the registry (steps 1–6 in §3) for **generated character poses**. The owner approved it after AP-84B2. It is in `studio/lib/promotion.mjs`; see `studio/README.md`, "Registry promotion".
+- **Not built:**
+  - making a promoted version `current` (§4), which needs a preview render and a separate owner approval;
+  - story version pinning;
+  - promotion of environments.
+- **Nothing promoted yet:** no real registry has been changed. Each promotion is an explicit owner action in the studio.
+
+**Refinement made while building it.** The production engine's `loadRegistry` requires every entry under `poses` to have `file`, `feet` and `figureHeight`. The §4 layout (a `versions` map and `current` inside pose entries, or a new pose key holding only versions) would therefore break production for every story using the character. Promoted versions are recorded instead in a separate top-level map, `promotions[<pose>][<version>]`. The engine ignores that map, and existing entries stay byte-identical. When "make current" is built, it will move or point a pose entry at a promoted version, as its own reviewed decision.
 
 ## 1. Purpose
 

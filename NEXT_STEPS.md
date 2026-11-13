@@ -1,9 +1,10 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-13 (AP-84B2 accepted; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-13 (registry promotion built; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
+0e. **REGISTRY PROMOTION BUILT — review:** `studio/lib/promotion.mjs`, job page "Check promotion". Nothing has been promoted; real promotions need real (non-synthetic) candidates, so they wait for generation (AP-84B3, needs its brief and a GPU budget). Still to build when wanted: "make current" (preview render + separate owner approval) and story version pinning.
 0d. **AP-84B2 accepted; OWNER DECISIONS 2026-11-13 (post AP-84B2) recorded** (see DECISIONS.md). Next scope needs explicit owner approval: registry promotion implementation (local, $0) or AP-84B3 (needs its brief and a GPU budget).
 0c. **AP-84B2 review:** Generation > Story requirements / Reference packs tabs and the validation report on each job page. Answer the open questions in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` §7 before any promotion work. AP-84B3 is not authorised; GPU budget stays $0.
 0b. **AP-84B1 review:** generation foundation (`#/generation` in the studio; `STUDIO_GEN_ADAPTER=fake` shows labelled synthetic fixtures). AP-84B2 (asset requests from stories, reference pack, validators, registry promotion design) needs your approval; GPU work stays at $0 until you approve a budget.
