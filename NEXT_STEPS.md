@@ -1,10 +1,10 @@
 # Next Steps — Oddly Relatable (Stickman Comedy Studio)
 
-**Last updated:** 2026-11-13 (after AP-84B2, asset intelligence). Work stops at each gate; nothing starts without the owner's approval.
+**Last updated:** 2026-11-13 (AP-84B2 accepted; stopped at the gate). Work stops at each gate; nothing starts without the owner's approval.
 
 ## 1. Current (active)
 
-0d. **AP-84B2 correction review:** confirm the four review issues are closed (no paths in API responses, full validator with n/a where not measurable, approved-only reference packs, renderer suite recorded). Decide whether to set an expected pose canvas size (`studio/config/canonical-references.json` → `validation.expectedCanvas`).
+0d. **AP-84B2 ACCEPTED. Owner decisions before any promotion work:** Open owner decisions (not adopted; ChatGPT recommendations in brackets): (1) expected canvas for newly generated poses [1024×1536, matching master v3; future constraint only, existing artwork unchanged]; (2) initial approval class for promoted generated poses [APPROVED_WORKING_TEST_ASSET]; (3) location of promoted files [bible/concepts/lookdev-richenv/generated/]; (4) require a successful preview render before a promoted asset becomes current [yes]. None of these authorises promotion, generation or AP-84B3. Next scope (AP-84B3 or other) needs your explicit approval.
 0c. **AP-84B2 review:** Generation > Story requirements / Reference packs tabs and the validation report on each job page. Answer the open questions in `docs/oddly-relatable/REGISTRY-PROMOTION-DESIGN.md` §7 before any promotion work. AP-84B3 is not authorised; GPU budget stays $0.
 0b. **AP-84B1 review:** generation foundation (`#/generation` in the studio; `STUDIO_GEN_ADAPTER=fake` shows labelled synthetic fixtures). AP-84B2 (asset requests from stories, reference pack, validators, registry promotion design) needs your approval; GPU work stays at $0 until you approve a budget.
 0a. **Studio available (AP-83):** `node studio/server.mjs` (with FFMPEG/FFPROBE set), open http://127.0.0.1:4317/. Review Short 001 there: play the video, read QA, record a decision (approve for next step / request changes / reject). Please confirm the MP4 plays in your browser.

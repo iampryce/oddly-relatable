@@ -1,6 +1,6 @@
 # Project Status — Stickman Comedy Studio
 
-**Last updated:** 2026-11-13 (after AP-84B2, asset intelligence) · **Updated by:** Claude Code
+**Last updated:** 2026-11-13 (AP-84B2 ACCEPTED, stopped at the gate) · **Updated by:** Claude Code
 **Repository:** private GitHub repository `iampryce/oddly-relatable`, default branch `main` (local working copy `C:\Users\PC\Desktop\Works\stickman-video-director`). Commits are signed and pushed with normal pushes. Latest verified milestone commit: `db1bfd3746322c6db46502935ce1add822035611` (AP-79). Earlier: AP-80 `a0245d6bbbc76a511ad4b2c5a56de57f46b67890`, AP-78 `a0c044f2bbc1ca3eb2f9eb7b3fb4cdc6bea7b1e5`.
 **Roles:** Claude Code = technical and creative production agent. ChatGPT = creative and architectural decision partner. Project owner = final approval.
 
