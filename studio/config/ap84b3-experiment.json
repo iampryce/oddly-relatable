@@ -1,7 +1,7 @@
 {
   "schema": "ap84b3-experiment-lock/1",
   "experiment": "AP-84B3",
-  "note": "Approved values for the AP-84B3 three-candidate experiment (owner decisions D1-1 to D1-5, 2026-11-13). Tools refuse to run unless the canonical SHA-256 of this file is recorded as approved in DECISIONS.md. Decimal values are strings on purpose.",
+  "note": "Experiment values for the AP-84B3 three-candidate experiment: owner decisions D1-1 to D1-5 (2026-11-13) and the lock amendment L1 to L12 with cumulative limits (2026-11-14). This file carries no approval status of its own. It is approved only if its canonical SHA-256 is recorded on an approval line in DECISIONS.md after the owner's explicit review; until then every tool refuses to run. The Qwen latent node is an unverified compatibility gate, and the graph constraints are not a pre-approved API export. Decimal values are strings on purpose.",
   "target": {
     "assetType": "character-pose",
     "assetKey": "character-01/02",

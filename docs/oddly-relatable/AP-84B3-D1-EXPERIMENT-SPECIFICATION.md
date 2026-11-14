@@ -1,10 +1,12 @@
 # AP-84B3-D1: experiment specification and cost validation
 
-**Status (2026-11-13):** research only, authorised by the owner on 2026-11-13 ("Proceed with AP-84B3-D1").
-- Nothing here has been run. No account, payment method, instance, API call, model download or image generation.
-- Spend to date: **$0**. D1-5 sets the limits for a future run (§5.5). No money may be spent until execution is authorised (D1-7).
-- **Owner decisions (2026-11-13):** D1-1 to D1-5 are approved (§8). **D1-6 (implementation) and D1-7 (execution) are not authorised.** `DECISIONS.md` is the authoritative record.
-- No approval so far authorises implementation, account creation, funding, provisioning, model downloads or image generation.
+**Status (2026-11-14):** specification approved in parts; nothing has been run.
+- No account, payment method, instance, API call, model download or image generation. Spend to date: **$0**.
+- **Approved by the owner:** D1-1 to D1-5 (2026-11-13), D1-6 implementation (2026-11-13), and the lock amendment L1 to L12 with cumulative limits (2026-11-14). See §8 and §10.
+- **Implemented locally ($0):** the tooling in §7.1, the experiment lock `studio/config/ap84b3-experiment.json` and the runbook `AP-84B3-RUNBOOK.md`.
+- **Not approved:** the experiment lock itself. Every tool refuses to run until the owner approves its hash (gate A4).
+- **Not authorised:** the environment proposal (A5) and execution (D1-7). No approval so far authorises account creation, funding, provisioning, model downloads or image generation.
+- `DECISIONS.md` is the authoritative record. Where this document and the lock differ, the lock holds the exact values.
 
 **How the facts were gathered (all free, read-only, no login):**
 - Model files, sizes, SHA-256 hashes and revisions: Hugging Face public metadata API, 2026-11-13.
@@ -98,9 +100,19 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 | Batch size | 1 |
 
 - Steps, CFG and the negative prompt are the values on the 2511 model card.
-- **Graph:** ComfyUI's built-in "Qwen Image Edit 2511" template, changed only as the table says (model file, size, seed, prompt, Lightning LoRA off).
-  - Expected nodes: Load Diffusion Model, Load CLIP (type `qwen_image`), Load VAE, Load Image, the Qwen edit text-encode node, model-sampling shift, KSampler, VAE Decode, Save Image.
-  - The exact node list and the shift value are **unverified** here; the ComfyUI documentation page does not list them. They are frozen at execution by exporting the workflow in API format and recording its SHA-256 before the first candidate.
+- **Graph (amended 2026-11-14, owner decisions L5, L6, L12):** ComfyUI's built-in "Qwen Image Edit 2511" template, changed to meet the constraints in the experiment lock.
+
+  | Setting | Value | Status |
+  |---|---|---|
+  | Denoise | 1.0 | Approved (L5) |
+  | Input scaling | None: the template's input-scaling node is removed, and master v3 goes to both text encoders as the only reference image | Approved (L6) |
+  | Latent | `EmptySD3LatentImage`, 1024×1536, batch 1, connected directly to the sampler | **Unverified compatibility gate** (see below) |
+  | Model chain | Loader → model-sampling shift → CFGNorm (strength 1.0) → sampler; no LoRA, switch or primitive nodes | Approved (L12) |
+  | Reference-latent method | `index_timestep_zero` on both conditionings | Approved (L12), from the pinned template |
+  | Shift | Recorded from the export, not pinned. The pinned template uses 3.1 | D1-2 caveat |
+
+  - **Latent compatibility gate.** `EmptySD3LatentImage` is not verified with Qwen-Image-Edit-2511. It is tested in the Qwen smoke run during authorised execution. If it is incompatible, the run stops and returns to the owner. No other node is substituted.
+  - **Graph validation.** The lock holds the constraints (node types, counts, settings and connections). An extra node, missing node, changed setting or rewired connection fails. A setting the constraints do not list stops the run for owner review. The actual API export is not pre-approved: it is inspected and frozen during execution, and every later export must match the frozen graph apart from the seed (and, for a smoke run, the latent size and steps).
 - **Prompt (approved by the owner, D1-3, 2026-11-13):**
 
   > Keep exactly the same character: the same round bald head, large round eyes, ears, skin colour, rust-orange turtleneck with a ribbed collar and ribbed hem, thin black limbs, black mitten hands, brown shoes, thick black outlines and flat colours. Change only the pose and expression. He stands, full body, turned slightly toward the right of the image, holding a dark smartphone up in the hand on the right of the image and looking at its screen. His other hand is raised to his chest. He looks worried: eyebrows slanted up in the middle, mouth open and turned down. Keep the plain flat light-grey background. Show the whole figure from head to shoes with space around it. No shadows, no text, no extra objects.
@@ -109,17 +121,21 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
   - The three-quarter turn is intentional: the experiment tests whether the model can change the pose without changing Character 01's identity.
 
 **Known uncertainties to observe, not fix in advance:**
-- The template scales the reference to about 1 megapixel for the encoder. Output at 1024×1536 (1.57 MP) is within the model's range, but sharpness at that size is **unverified**.
+- The text encoder resizes its own copy of the reference to about 1 megapixel internally (fixed by the pinned code). Output at 1024×1536 (1.57 MP) is within the model's range, but sharpness at that size is **unverified**.
 - Whether the model keeps the background flat enough for the cut-out tool (it expects grey with low saturation near the border level).
 
 ## 4. Workflow S specification (SDXL 1.0 + IP-Adapter Plus)
 
 | Setting | Value |
 |---|---|
-| Reference image | master v3, padded to a square (grey) so the whole figure reaches the image encoder |
+| Reference image | master v3, padded **locally** to a 1536×1536 square with RGB (203, 203, 203), so the whole figure reaches the image encoder (L10). The node's own padding fills with black and is not used |
 | IP-Adapter | Plus (ViT-H), weight 0.8, weight type linear, start 0.0, end 1.0 |
+| IP-Adapter options | combine embeds `concat`, embeds scaling `V only`, no negative image, no attention mask (L9) |
+| Loaders | Explicit `IPAdapterModelLoader` and `CLIPVisionLoader`, naming the pinned files (L8) |
+| Prompt encoder | `CLIPTextEncode` for both prompts (L7) |
+| Denoise | 1.0 (L5) |
 | Generation size | 832×1248 (exactly 2:3, about 1.04 MP, close to SDXL's training size) |
-| Final size | 1024×1536 by Lanczos resize (factor 1.2308), no upscaler model |
+| Final size | 1024×1536 by Lanczos resize (factor 1.2308) in the workflow, crop disabled, no upscaler model; the 832×1248 raw output is also saved (L11) |
 | Steps | 30 |
 | CFG | 6.0 |
 | Sampler / scheduler | dpmpp_2m / karras |
@@ -213,6 +229,7 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 - The watchdog and the scripts that apply these safeguards are implementation (§7.1) and are not authorised.
 - **Why this configuration:** the L40S costs about $0.75 more than the A40 over the planned run and is markedly faster, which shortens the window in which something can go wrong. Secure Cloud is used because the artwork is uploaded to the machine and Community hosts are third parties.
 - D1-5 sets limits only. The deposit may be made only as part of authorised execution (D1-7).
+- **The limits are cumulative (owner decision A2, 2026-11-14).** The $5.00 ceiling, the 3-hour runtime and the single $10 deposit cover the entire experiment, including any additional Pod sessions. A failed session does not reset them. No additional deposit or funding is authorised.
 
 ## 6. Three-candidate experiment protocol
 
@@ -243,28 +260,33 @@ Target: `character-01`, pose 02 (worried, looking at phone), proposed as **versi
 
 ### 6.3 On the Pod
 
-1. Install ComfyUI and the custom node at the pinned commits.
+The step-by-step procedure is in `AP-84B3-RUNBOOK.md`. In outline:
+
+1. Install ComfyUI and the custom node at the pinned commits (needs the approved environment, gate A5).
 2. Download the six files; hash each; stop on any mismatch.
-3. Export both workflows in API format; record their SHA-256.
-4. **Smoke run:** at most **one** per workflow, 512×768, 8 steps, a fixed seed not used by any candidate. It only proves the pipeline runs. It is saved, hashed and labelled `smoke`; it is never a candidate.
-5. Generate A, B, then C. **One generation each. No retries for quality.**
-6. A retry is allowed only for a technical failure (crash, out of memory, corrupt file), with identical settings, and is recorded.
-7. Copy every output to durable storage off the Pod as it is produced. Hash on the Pod and again after copying; the two must match (safeguard S4).
-8. Only after every output is copied and its checksum verified, stop and terminate the Pod. Confirm in the console that no Pod, volume or network storage remains.
+3. **Freeze each workflow.** Export it in API format for its first candidate (A for Qwen, C for SDXL) and check it against the lock's constraints. If it passes with nothing unlisted, it is frozen and its hashes and the shift value are recorded. Every later export must match the frozen graph.
+4. **Smoke run:** at most **one** per workflow, 512×768, 8 steps, seed **8403900** (not used by any candidate). It only proves the pipeline runs. It is saved, hashed, verified into its own folder and recorded; it is never a candidate and cannot be imported as one.
+5. **Qwen latent compatibility gate:** the Qwen smoke run must complete without error and return a decodable image. If not, stop and return to the owner; no other latent node is substituted.
+6. Generate A, B, then C. **One generation each. No retries for quality.**
+7. A retry is allowed only for a technical failure (crash, out of memory, corrupt file), with identical settings, and is recorded.
+8. Copy every output to durable storage off the Pod as it is produced. Hash on the Pod and again after copying; the two must match (safeguard S4).
+9. Only after every output is copied and its checksum verified, stop and terminate the Pod. Confirm in the console that no Pod, volume or network storage remains.
 
 **Every image generated is kept and recorded.** Nothing is discarded, so nothing is cherry-picked.
 
 ### 6.4 Stop rules
 
 Stop the Pod if any of these happens:
-- 3 hours of Pod runtime (D1-5);
-- $5.00 consumed (D1-5);
+- 3 hours of Pod runtime in total across all sessions (D1-5, A2);
+- $5.00 consumed in total across all sessions (D1-5, A2);
 - a hash mismatch on any model file;
-- the pinned software will not run without changing a pin (record it and return to the owner).
+- the pinned software will not run without changing a pin (record it and return to the owner);
+- a workflow export contains a setting the lock's constraints do not list (owner review);
+- the Qwen latent compatibility gate fails.
 
-- The runtime watchdog enforces the 3-hour limit; the manual stop is the backup (safeguard S3).
-- Because outputs are copied and verified as they are produced (§6.3, step 7), a forced stop loses nothing already generated. The limits are not extended to finish a run.
-- A run stopped at a limit is not restarted, and no funds are added, without fresh owner approval.
+- The runtime watchdog enforces the runtime limit and the estimated-consumption threshold; the manual stop is the backup (safeguard S3).
+- An output is safely retained only once it has been transferred and its checksum verified locally. An output still on the Pod, or part-way through transfer, when the Pod stops is lost. The limits are not extended to finish a run.
+- A run stopped at a limit or a gate is not restarted, and no funds are added, without fresh owner approval. A later session uses only what remains of the cumulative limits.
 
 ### 6.5 After the Pod (local, $0)
 
@@ -307,18 +329,24 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 
 ## 7. Implementation dependencies and risks
 
-### 7.1 Implementation needed before execution (not authorised, not part of D1)
+### 7.1 Implementation before execution (D1-6: approved and built, 2026-11-13; amended 2026-11-14)
 
-| # | Item | Why |
+| # | Item | Built as |
 |---|---|---|
-| I1 | **Quarantine import adapter** in `studio/lib/gen-adapters.mjs` | Only `none` and `fake` exist. Real outputs need a narrow adapter that imports files, marks them non-synthetic and stores the §6.6 provenance |
-| I2 | **Parameterised cut-out** | `ap72-cutout.cjs` has its input path hard-coded |
-| I3 | **Run sheet and provenance schema** | A fixed JSON shape for §6.6 so the three records are comparable |
-| I4 | **Pod setup script** | Pinned installs, downloads and hash checks as one reviewed script, so paid time is not spent typing |
-| I5 | **Comparison sheet script** | Same-scale sheet for the review |
+| I1 | Quarantine import adapter | `import` adapter in `studio/lib/gen-adapters.mjs`; the default adapter stays `none` |
+| I2 | Parameterised cut-out | `studio/tools/ap84b3/cutout.cjs` |
+| I3 | Run sheet and provenance schema | `studio/lib/experiment-spec.mjs` and the lock `studio/config/ap84b3-experiment.json` |
+| I4 | Pod setup script | `studio/tools/ap84b3/pod-setup.sh` and `build-pod-bundle.mjs`. Never executed; refuses to run without the approved environment (A5) |
+| I5 | Comparison sheet script | `studio/tools/ap84b3/compare-sheet.mjs` |
+| A1 | Runtime watchdog and local stop timer (required by D1-5) | `watchdog.sh`, `stop-timer.mjs` |
+| A2 | Output checksums and atomic transfer verifier (required by D1-5) | `collect-outputs.sh`, `verify-transfer.mjs` |
+| A3 | Runbook (required by D1-5) | `docs/oddly-relatable/AP-84B3-RUNBOOK.md` |
+| A4 | Workflow graph checker (required by the D1-2 caveat; two-layer since the amendment) | `check-workflow.mjs` |
+| — | Local reference padding (lock amendment, L10) | `pad-reference.mjs` |
 
-- An import adapter (I1) is much smaller than a live RunPod/ComfyUI adapter and is all this experiment needs. A live adapter would be a later milestone, if the experiment succeeds.
-- All five are local, $0 work with tests. They need their own approval.
+- All of it is local, $0 work with tests. Nothing has been run on a Pod.
+- Every tool refuses to run until the owner approves the experiment lock's hash.
+- A live RunPod/ComfyUI adapter is not built. It would be a later milestone, if the experiment succeeds.
 
 ### 7.2 Risks
 
@@ -338,7 +366,7 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 
 ## 8. Owner decisions
 
-Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authoritative record.
+Status on 2026-11-14. Each decision is separate. `DECISIONS.md` is the authoritative record.
 
 | # | Decision | Outcome | Status |
 |---|---|---|---|
@@ -347,7 +375,11 @@ Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authorita
 | D1-3 | Prompts (§3, §4) | Revised prompts Q and S | **APPROVED with revised prompts**; wording only |
 | D1-4 | Provider and GPU for the experiment | RunPod Secure Cloud; L40S 48 GB primary, A40 48 GB fallback; 80 GB container disk only | **APPROVED**; selection only |
 | D1-5 | Cost ceiling and funding | One $10 deposit; $5.00 consumption ceiling; 3-hour Pod runtime limit; four safeguards (§5.5) | **APPROVED**; limits only |
-| D1-6 | Implementation work in §7.1 | A separate local, $0 milestone before any spend | **Not authorised** |
+| D1-6 | Implementation work in §7.1 | Built and tested locally, $0; 30-minute console checkpoints; $0.25 reconciliation tolerance; every D1-7 approval must name the approved lock hash | **APPROVED and implemented** |
+| Lock amendment | L1 to L12, the Qwen latent compatibility gate and two-layer graph validation (§10) | Implemented locally, $0 | **APPROVED** (2026-11-14) |
+| A2 | Cumulative limits across all sessions | $5.00, 3 hours and one $10 deposit for the whole experiment | **APPROVED** (2026-11-14) |
+| A4 | Experiment lock review | The owner reviews the lock and its canonical hash; only then is an approval line written | **Not approved** |
+| A5 | Environment proposal | PyTorch version and Pod base image, reviewed and reproducible | **Not approved** |
 | D1-7 | Execution | Only after D1-1 to D1-6 and after §7.1 is accepted | **Not authorised** |
 
 **D1-1.** The 2511 consistency improvements are publisher claims; the experiment exists to test them.
@@ -383,7 +415,7 @@ Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authorita
   - outputs copied to durable storage and checksums verified before the Pod is stopped.
 - The deposit may be made only as part of authorised execution.
 
-**Not authorised:** D1-6 (implementation) and D1-7 (execution). Until they are approved, there is no account creation, funding, provisioning, model download, image generation or cost.
+**Not authorised:** the lock approval (A4), the environment proposal (A5) and D1-7 (execution). Until they are approved, there is no account creation, funding, provisioning, model download, image generation or cost.
 
 ## 9. Sources
 
@@ -394,3 +426,26 @@ Status on 2026-11-13. Each decision is separate. `DECISIONS.md` is the authorita
 - https://www.runpod.io/pricing (dated 2026-11-12) and https://docs.runpod.io/pods/pricing (billing, storage, no transfer fees).
 - https://modal.com/pricing (GPU, CPU, memory, volume and egress rates; Starter credits).
 - https://vast.ai/pricing (market-set pricing; rates not readable).
+
+## 10. Lock amendment (owner decisions, 2026-11-14)
+
+These decisions were made after the lock review. The exact values are in the experiment lock.
+
+| # | Decision |
+|---|---|
+| L1 | The seven model and node save paths are accepted as documented by the pinned ComfyUI source and the pinned IP-Adapter README |
+| L2 | Smoke runs: 512×768, 8 steps, at most one per workflow, seed 8403900 |
+| L3 | The smoke seed is validated, and smoke outputs can never enter candidate selection |
+| L4 | The 672-hour month is retained for the disk estimate (conservative: about $0.0119 per hour for the 80 GB disk) |
+| L5 | Denoise is pinned to 1.0 in both workflows |
+| L6 | The Qwen input-scaling node must be absent |
+| L7 | SDXL uses `CLIPTextEncode` |
+| L8 | Explicit IP-Adapter and CLIP Vision loaders |
+| L9 | IP-Adapter options: `concat`, `V only`, no negative image, no attention mask |
+| L10 | The reference is padded locally to 1536×1536 with RGB (203, 203, 203) |
+| L11 | SDXL final resize is Lanczos, with the raw output retained |
+| L12 | Complete workflow graph validation in two layers: constraints in the lock, and a mandatory freeze of the real export at execution |
+| Gate | The Qwen latent node is an unverified compatibility gate: tested in the smoke run; on failure stop; no substitution |
+| A2 | The limits are cumulative across all Pod sessions; no additional funding |
+
+**Still unresolved until execution:** the Qwen latent node, the shift value, the real API export, how the on-Pod stop command authenticates, SSH file copy, and whether the pinned ComfyUI and IP-Adapter node run together.

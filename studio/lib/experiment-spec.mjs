@@ -318,6 +318,35 @@ export function remainingLimits(lock, priorSessions = []) {
   return out;
 }
 
+// Local pre-session check: would these watchdog settings silently reset the cumulative limits?
+// The watchdog's own defaults are the FULL approved limits. After an earlier session those defaults are too
+// generous, so every limit must be set explicitly and must not exceed what remains. `env` is the set of WD_*
+// settings the operator intends to start the watchdog with. This check runs on the local machine before a
+// session; it cannot force the watchdog on the Pod to use the values (see the open proposal in NEXT_STEPS.md).
+export function checkSessionSettings(lock, priorSessions = [], env = {}) {
+  const r = remainingLimits(lock, priorSessions), problems = [];
+  const required = {WD_STOP_SECONDS: String(Math.max(r.watchdogStopSeconds, 0)), WD_NO_NEW_GENERATION_SECONDS: String(Math.max(r.noNewGenerationSeconds, 0)), WD_ESTIMATE_STOP_USD: r.estimateStopUSD};
+  if (!r.sessionAllowed) problems.push('no further session is allowed: the cumulative runtime or the estimate margin is used up. Return to the owner');
+  if (env.WD_TEST_MODE !== undefined && env.WD_TEST_MODE !== '') problems.push('WD_TEST_MODE must not be set for a real session');
+  const M = lock.limits.milestoneSeconds;
+  const given = {
+    WD_STOP_SECONDS: [env.WD_STOP_SECONDS, M.watchdogStop, r.watchdogStopSeconds, v => /^\d+$/.test(v) ? Number(v) : null],
+    WD_NO_NEW_GENERATION_SECONDS: [env.WD_NO_NEW_GENERATION_SECONDS, M.noNewGeneration, r.noNewGenerationSeconds, v => /^\d+$/.test(v) ? Number(v) : null],
+    WD_ESTIMATE_STOP_USD: [env.WD_ESTIMATE_STOP_USD, usdToMicro(lock.limits.watchdogEstimateStopUSD), r.estimateStopMicro, v => { try { return usdToMicro(v); } catch { return null; } }],
+  };
+  for (const [name, [value, fullLimit, remaining, parse]] of Object.entries(given)) {
+    if (value === undefined || value === '') {
+      // Not set: the watchdog would use the full approved limit. That is only right when nothing has been used yet.
+      if (priorSessions.length > 0 || fullLimit > remaining) problems.push(`${name} is not set, so the watchdog would use the full limit and the earlier sessions would not count. Set it to ${required[name]}`);
+      continue;
+    }
+    const n = parse(String(value));
+    if (n === null) problems.push(`${name} is not a valid value`);
+    else if (n > remaining) problems.push(`${name} is ${value}, above what remains after the earlier sessions (${required[name]})`);
+  }
+  return {ok: problems.length === 0, problems, required, remaining: r};
+}
+
 // Load the lock. With requireApproved (the default for every tool) an unapproved lock is refused.
 // lockFile and decisionsFile are overridden only by tests (fixture lock and fixture decision record).
 export function loadLock({lockFile = LOCK_FILE, decisionsFile = DECISIONS_FILE, requireApproved = true} = {}) {

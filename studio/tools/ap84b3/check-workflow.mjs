@@ -22,9 +22,17 @@
 //     result is STOP, and the export goes to the owner for review. Nothing may be generated.
 // Node numbering is ignored: nodes are matched to their roles by type, settings and connections.
 //
-//   node studio/tools/ap84b3/check-workflow.mjs --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json>
-//        [--write-frozen <frozen.json>]   freeze this export (first export only; write outside the repository)
-//        [--frozen <frozen.json>]         compare with the frozen graph
+//   node studio/tools/ap84b3/check-workflow.mjs --run <run folder> --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json>
+//
+// THE FREEZE IS MANDATORY AND FAILS CLOSED. The frozen graph lives in the run folder as frozen-q.json or
+// frozen-s.json; there is no option to skip it or to point at another file.
+//   - Only the first candidate of each workflow may create it: candidate A for workflow Q, candidate C for
+//     workflow S, and only when no frozen graph exists yet. It is written once and never overwritten.
+//   - Every other export (candidate B, every smoke run, and any later export of A or C) must be compared with
+//     it. If the frozen graph is missing, unreadable, altered or made under a different lock, the check fails.
+//   - A smoke export can never create a frozen graph.
+//   - Apart from the seed (and, for a smoke run, the latent size and the steps), everything frozen must be
+//     identical: the shift, output slot numbers, connections, node settings and file names.
 //
 // Sources for Layer 1: ComfyUI at the pinned commit (node input names), the pinned IP-Adapter node source, and
 // comfyui-workflow-templates==0.11.107, templates/image_qwen_image_edit_2511.json
@@ -130,8 +138,13 @@ export function checkWorkflow({graph, workflow, lock, candidate = null, smoke = 
 }
 
 // Layer 2. The frozen record of the first export that passed Layer 1.
+// The candidate whose export creates each workflow's frozen graph: the first candidate that uses the workflow.
+export const FREEZING_CANDIDATE = Object.freeze({Q: 'A', S: 'C'});
+export const frozenFileName = workflow => `frozen-${workflow.toLowerCase()}.json`;
+
 export function freeze({result, workflow, candidate, lockSha256, apiSha256}) {
   if (!result.ok) throw new Error('only an export that passes every constraint, with nothing unlisted, can be frozen');
+  if (FREEZING_CANDIDATE[workflow] !== candidate) throw new Error(`only candidate ${FREEZING_CANDIDATE[workflow]} may freeze workflow ${workflow}`);
   return {schema: FROZEN_SCHEMA, workflow, frozenFrom: `candidate ${candidate}`, lockSha256, apiSha256, graphSha256: result.graphSha256, recorded: result.recorded, free: result.free, normalForm: result.normalForm, frozenAt: new Date().toISOString()};
 }
 // Compare a later export with the frozen graph. Only the listed values may differ: the seed, and for a smoke run
@@ -145,35 +158,79 @@ export function compareToFrozen({frozen, result, lock, workflow, smoke = false})
   const a = mask(frozen.normalForm), b = mask(result.normalForm), diffs = [];
   for (const role of new Set([...Object.keys(a), ...Object.keys(b)])) {
     if (!a[role] || !b[role]) { diffs.push(`${role}: present in only one of the two graphs`); continue; }
+    if (a[role].class_type !== b[role].class_type) diffs.push(`${role}: node type ${b[role].class_type} differs from the frozen ${a[role].class_type}`);
     for (const k of new Set([...Object.keys(a[role].inputs), ...Object.keys(b[role].inputs)])) if (stable(a[role].inputs[k]) !== stable(b[role].inputs[k])) diffs.push(`${role}.${k}: ${stable(b[role].inputs[k])} differs from the frozen ${stable(a[role].inputs[k])}`);
   }
   return diffs;
 }
 
+// Is a frozen record usable? It must be complete, self-consistent (its hash matches its content), made from the
+// workflow's freezing candidate, and made under the same experiment lock. Returns a list of problems.
+export function frozenProblems({frozen, workflow, lockSha256}) {
+  if (!frozen || typeof frozen !== 'object' || frozen.schema !== FROZEN_SCHEMA) return ['the frozen graph is not a valid frozen record'];
+  const p = [];
+  if (frozen.workflow !== workflow) p.push(`the frozen graph is for workflow ${frozen.workflow}, not ${workflow}`);
+  if (frozen.frozenFrom !== `candidate ${FREEZING_CANDIDATE[workflow]}`) p.push(`the frozen graph was not made from candidate ${FREEZING_CANDIDATE[workflow]}`);
+  if (frozen.lockSha256 !== lockSha256) p.push('the frozen graph was made under a different experiment lock');
+  if (!frozen.normalForm || typeof frozen.normalForm !== 'object' || graphHash(frozen.normalForm) !== frozen.graphSha256) p.push('the frozen graph has been altered (its hash does not match its content)');
+  return p;
+}
+
+// The complete, fail-closed decision for one export. `frozen` is the workflow's frozen record, or null if none exists.
+//   - No frozen record: only the freezing candidate's export may pass, and it becomes the frozen record (toFreeze).
+//     Any other export, and every smoke export, FAILS: there is nothing to compare it with.
+//   - A frozen record exists: the export must equal it apart from the permitted differences.
+// Returns the Layer 1 result plus {ok, frozenRequired, toFreeze, differencesFromFrozen}.
+export function validateExport({graph, workflow, lock, lockSha256, candidate = null, smoke = false, frozen = null, apiSha256 = null}) {
+  const result = checkWorkflow({graph, workflow, lock, candidate, smoke});
+  const out = {...result, toFreeze: null, differencesFromFrozen: null, frozenRequired: true};
+  if (!result.ok) return out;                                     // Layer 1 failed or stopped: nothing else is considered
+  if (frozen === null) {
+    if (!smoke && candidate === FREEZING_CANDIDATE[workflow]) return {...out, frozenRequired: false, toFreeze: freeze({result, workflow, candidate, lockSha256, apiSha256})};
+    return {...out, ok: false, graphSha256: null, problems: [smoke
+      ? `no frozen graph exists for workflow ${workflow}. A smoke export cannot create one: freeze candidate ${FREEZING_CANDIDATE[workflow]}'s export first`
+      : `no frozen graph exists for workflow ${workflow}. Only candidate ${FREEZING_CANDIDATE[workflow]}'s export may create it; this export cannot be accepted without one`]};
+  }
+  const bad = frozenProblems({frozen, workflow, lockSha256});
+  if (bad.length) return {...out, ok: false, graphSha256: null, problems: bad};
+  const diffs = compareToFrozen({frozen, result, lock, workflow, smoke});
+  return {...out, ok: diffs.length === 0, graphSha256: diffs.length ? null : result.graphSha256, differencesFromFrozen: diffs, problems: diffs.length ? ['the export differs from the frozen graph'] : []};
+}
+
+// The same decision against a run folder: reads frozen-q.json / frozen-s.json, and writes it (once) when the
+// freezing candidate's first export passes. There is no way to name another file or to skip the comparison.
+export function checkExportInRun({runDir, graph, workflow, lock, lockSha256, candidate = null, smoke = false, apiSha256 = null}) {
+  const run = path.resolve(runDir);
+  if (!fs.existsSync(run) || fs.lstatSync(run).isSymbolicLink() || !fs.statSync(run).isDirectory()) throw new Error('the run folder does not exist');
+  if (isInside(run, REPO_ROOT)) throw new Error('the run folder must be outside the repository');
+  if (!['Q', 'S'].includes(workflow)) throw new Error('workflow must be Q or S');
+  const file = path.join(run, frozenFileName(workflow));
+  let frozen = null;
+  if (fs.existsSync(file)) {
+    if (fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) frozen = {};                       // unusable: fails closed below
+    else { try { frozen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { frozen = {}; } }
+    if (frozen === null || typeof frozen !== 'object') frozen = {};
+  }
+  const out = validateExport({graph, workflow, lock, lockSha256, candidate, smoke, frozen, apiSha256});
+  if (out.ok && out.toFreeze) {
+    fs.writeFileSync(file, JSON.stringify(out.toFreeze, null, 1), {flag: 'wx'});                               // written once, never overwritten
+    out.frozenWritten = file;
+  }
+  return out;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const arg = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
-    const workflow = arg('--workflow'), candidate = arg('--candidate') ?? null, smoke = process.argv.includes('--smoke'), file = arg('--file');
-    if (!workflow || !file || (smoke ? candidate !== null : !candidate)) throw new Error('usage: check-workflow.mjs --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json> [--write-frozen <file> | --frozen <file>]');
+    const runDir = arg('--run'), workflow = arg('--workflow'), candidate = arg('--candidate') ?? null, smoke = process.argv.includes('--smoke'), file = arg('--file');
+    if (process.argv.includes('--frozen') || process.argv.includes('--write-frozen')) throw new Error('--frozen and --write-frozen are not accepted: the frozen graph is always the one in the run folder');
+    if (!runDir || !workflow || !file || (smoke ? candidate !== null : !candidate)) throw new Error('usage: check-workflow.mjs --run <run folder> --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json>');
     const {lock, sha256: lockSha256} = loadLock();                              // refuses unless the lock is owner-approved
     const bytes = fs.readFileSync(file), apiSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
-    const result = checkWorkflow({graph: JSON.parse(bytes.toString('utf8')), workflow, lock, candidate, smoke});
-    const out = {workflow, candidate, smoke, lockSha256, apiSha256, ok: result.ok, stop: result.stop, problems: result.problems, unlisted: result.unlisted, recorded: result.recorded, free: result.free, graphSha256: result.graphSha256};
-    if (result.ok && arg('--frozen')) {
-      const frozen = JSON.parse(fs.readFileSync(arg('--frozen'), 'utf8'));
-      if (frozen.lockSha256 !== lockSha256) throw new Error('the frozen graph was made under a different experiment lock');
-      out.differencesFromFrozen = compareToFrozen({frozen, result, lock, workflow, smoke});
-      if (out.differencesFromFrozen.length) out.ok = false;
-    }
-    if (result.ok && arg('--write-frozen')) {
-      if (smoke) throw new Error('a smoke export cannot be frozen; freeze the first candidate export');
-      const target = path.resolve(arg('--write-frozen'));
-      if (isInside(path.dirname(target), REPO_ROOT)) throw new Error('the frozen graph must be written outside the repository');
-      fs.writeFileSync(target, JSON.stringify(freeze({result, workflow, candidate, lockSha256, apiSha256}), null, 1), {flag: 'wx'});
-      out.frozenWritten = target;
-    }
-    console.log(JSON.stringify(out, null, 1));
-    if (result.stop) console.error('check-workflow: STOP. The export contains settings that are not in the approved constraints. Do not generate anything; send this report to the owner for review.');
-    if (!out.ok) process.exit(result.stop ? 3 : 1);
+    const r = checkExportInRun({runDir, graph: JSON.parse(bytes.toString('utf8')), workflow, lock, lockSha256, candidate, smoke, apiSha256});
+    console.log(JSON.stringify({workflow, candidate, smoke, lockSha256, apiSha256, ok: r.ok, stop: r.stop, problems: r.problems, unlisted: r.unlisted, recorded: r.recorded, free: r.free,
+      graphSha256: r.graphSha256, differencesFromFrozen: r.differencesFromFrozen, frozenWritten: r.frozenWritten ?? null}, null, 1));
+    if (r.stop) console.error('check-workflow: STOP. The export contains settings that are not in the approved constraints. Do not generate anything; send this report to the owner for review.');
+    if (!r.ok) process.exit(r.stop ? 3 : 1);
   } catch (e) { console.error(`check-workflow: ${e.message}`); process.exit(1); }
 }

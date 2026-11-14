@@ -185,27 +185,31 @@ The watchdog's consumption figure is an **estimate**: elapsed time × (GPU + con
   - leave the shift value as the template has it. It is recorded, not chosen.
 - **SDXL + IP-Adapter (workflow S).** Build it from these nodes only: checkpoint loader, `IPAdapterModelLoader`, `CLIPVisionLoader`, `IPAdapterAdvanced` (weight 0.8, linear, concat, 0.0 to 1.0, V only, no negative image, no mask), two `CLIPTextEncode`, `EmptyLatentImage` 832×1248, sampler (30 steps, CFG 6.0, dpmpp_2m / karras, denoise 1.0), decode, `ImageScale` (lanczos, 1024×1536, crop disabled) and **two** save nodes: one for the raw 832×1248 image and one for the resized image. The reference is the locally padded image.
 
-**Freeze each workflow before anything is generated.**
+**Freeze each workflow before anything is generated.** The freeze is mandatory and fails closed. The frozen graph is always `frozen-q.json` or `frozen-s.json` in the run folder; the checker has no option to skip it or to use another file.
 
-1. Export the workflow in API format (candidate A for Q, candidate C for S). Copy the export to the local machine.
-2. Check it and freeze it:
+1. Export the workflow in API format for its first candidate: **candidate A for workflow Q, candidate C for workflow S**. Copy the export to the local machine.
+2. Check it. If it passes, the checker freezes it:
    ```
-   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --candidate A --file <export.json> --write-frozen <run folder>/frozen-q.json
+   node studio/tools/ap84b3/check-workflow.mjs --run <run folder> --workflow Q --candidate A --file <export.json>
    ```
 3. Read the result:
 
    | Result | Meaning | Action |
    |---|---|---|
-   | `ok: true` | Every constraint holds and nothing is unlisted | The graph is frozen. Record `apiSha256`, `graphSha256` and the recorded shift in the run sheet |
+   | `ok: true` with `frozenWritten` | Every constraint holds and nothing is unlisted | The graph is frozen. Record `apiSha256`, `graphSha256` and the recorded shift in the run sheet |
    | `stop: true` | The export contains a setting the constraints do not list | **Stop. Terminate the Pod. Send the report to the owner.** The operator does not decide that an unlisted setting is harmless |
    | Any `problems` | A node, setting or connection is wrong, missing or extra | Fix the workflow to match the lock and export again. If it cannot be made to match, stop and return to the owner |
 
-4. Every later export is checked against the frozen graph and may differ only in the seed (and, for a smoke run, the latent size and steps):
+4. Every later export uses the same command and is compared with the frozen graph automatically: candidate B, every smoke run, and any later export of A or C.
    ```
-   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --candidate B --file <export.json> --frozen <run folder>/frozen-q.json
-   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --smoke --file <export.json> --frozen <run folder>/frozen-q.json
+   node studio/tools/ap84b3/check-workflow.mjs --run <run folder> --workflow Q --candidate B --file <export.json>
+   node studio/tools/ap84b3/check-workflow.mjs --run <run folder> --workflow Q --smoke --file <export.json>
    ```
-5. No workflow change after the freeze. A change means a new freeze and the owner's approval.
+   - It may differ from the frozen graph only in the seed, and for a smoke run also the latent size and the steps.
+   - The shift, output slot numbers, connections, node settings and file names must be identical.
+   - If the frozen graph is missing, unreadable, altered or made under a different lock, the check fails. Do not generate.
+   - A smoke export never creates a frozen graph. Only candidate A (Q) and candidate C (S) can, and only once.
+5. Never delete or edit a frozen graph. No workflow change after the freeze: a change needs the owner's approval.
 
 **Evidence:** `pod-setup.sh` output; for each workflow the export hash, the frozen graph hash and the checker's report; the shift value; installed software versions.
 
@@ -215,7 +219,7 @@ Before each smoke run, generation or retry, run `./watchdog.sh gate`. If the gat
 
 **Smoke runs.** At most one per workflow: 512×768, 8 steps, seed **8403900**, otherwise identical to the frozen graph.
 
-1. Export the smoke version of the workflow and check it with `--smoke --frozen` (§10). Do not run it unless the check passes.
+1. Export the smoke version of the workflow and check it with `--smoke` (§10). The workflow must already be frozen. Do not run the smoke unless the check passes.
 2. Save the output as `smoke-q.png` or `smoke-s.png`. Collect it into its own outbox and verify it into its own folder:
    ```
    AP84B3_OUTBOX=/workspace/outbox/smoke ./collect-outputs.sh add <output file> smoke-q.png
@@ -342,6 +346,12 @@ A stop at the workflow freeze (§10), the latent gate (§11) or any other stop c
    node -e "import('./studio/lib/experiment-spec.mjs').then(m=>console.log(m.remainingLimits(m.loadLock().lock, <priorSessions>)))"
    ```
 4. Start the watchdog with the **reduced** settings it reports: `WD_STOP_SECONDS`, `WD_NO_NEW_GENERATION_SECONDS` and `WD_ESTIMATE_STOP_USD`. The watchdog accepts only values at or below the approved maxima, so the limits can be tightened but never loosened.
+   - **Check the settings before the session starts.** The watchdog's defaults are the full limits, so leaving a value unset would silently reset the limits:
+     ```
+     node -e "import('./studio/lib/experiment-spec.mjs').then(m=>console.log(m.checkSessionSettings(m.loadLock().lock, <priorSessions>, {WD_STOP_SECONDS:'...', WD_NO_NEW_GENERATION_SECONDS:'...', WD_ESTIMATE_STOP_USD:'...'})))"
+     ```
+     Do not start unless it reports `ok: true`. Record its output.
+   - **Known limit of this control.** The check runs locally. Nothing on the Pod verifies that the watchdog was started with these values: that still depends on the operator. Confirm it with `./watchdog.sh status` (`stop_seconds` and `threshold_micro_usd`) and record the output. A proposal to enforce the cumulative limits inside the watchdog is open and not approved.
 5. Start the local timer with the Pod start time moved earlier by the runtime already used, so its alerts fall at the cumulative times.
 6. If `sessionAllowed` is false, no further session may start.
 7. **No additional deposit.** The single $10 deposit is the only funding. If the balance cannot cover a further session within the ceiling, the experiment ends.

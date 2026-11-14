@@ -19,7 +19,7 @@ import {ADAPTERS, adapterFor, createImportAdapter, importAdapter} from '../lib/g
 import * as spec from '../lib/experiment-spec.mjs';
 import {bundleFiles, buildBundle} from '../tools/ap84b3/build-pod-bundle.mjs';
 import {verifyTransfer, checkStaging, isRetained, parseManifest, TransferRejected} from '../tools/ap84b3/verify-transfer.mjs';
-import {checkWorkflow, freeze, compareToFrozen, graphHash} from '../tools/ap84b3/check-workflow.mjs';
+import {checkWorkflow, freeze, compareToFrozen, graphHash, validateExport, checkExportInRun, frozenFileName, FREEZING_CANDIDATE} from '../tools/ap84b3/check-workflow.mjs';
 import {padReference, padFromLock} from '../tools/ap84b3/pad-reference.mjs';
 import {schedule, due} from '../tools/ap84b3/stop-timer.mjs';
 import {buildSheet, layout} from '../tools/ap84b3/compare-sheet.mjs';
@@ -1049,4 +1049,138 @@ test('smoke outputs: verified into their own folder, recorded in the run sheet, 
   writeSheet(s);
   const [out] = await adapter.generate(REQ);
   assert.equal(out.provenance.candidate, 'A');
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The freeze is mandatory. There is no way to accept a later export without comparing it with the frozen graph.
+test('workflow freeze is mandatory and fails closed: only A (Qwen) and C (SDXL) may create it; everything else must match it', () => {
+  const lock = REAL.lock, lockSha256 = REAL.sha256, run = tmp('ap84b3-freeze-');
+  const A = {candidate: 'A'}, B = {candidate: 'B'}, C = {candidate: 'C'}, SMOKE = {smoke: true};
+  const check = (w, mode, change = null, dir = run) => {
+    const g = graph(w, lock, mode); if (change) change(g);
+    return checkExportInRun({runDir: dir, graph: g, workflow: w, lock, lockSha256, candidate: mode.candidate ?? null, smoke: !!mode.smoke, apiSha256: 'a'.repeat(64)});
+  };
+  const fileQ = path.join(run, frozenFileName('Q')), fileS = path.join(run, frozenFileName('S'));
+  assert.deepEqual([frozenFileName('Q'), frozenFileName('S'), FREEZING_CANDIDATE.Q, FREEZING_CANDIDATE.S], ['frozen-q.json', 'frozen-s.json', 'A', 'C']);
+
+  // 1. Nothing is frozen yet: a later candidate and every smoke export fail closed, and create nothing.
+  for (const [w, mode, pattern] of [['Q', B, /Only candidate A's export may create it/], ['Q', SMOKE, /A smoke export cannot create one: freeze candidate A's export first/], ['S', SMOKE, /A smoke export cannot create one: freeze candidate C's export first/]]) {
+    const r = check(w, mode);
+    assert.equal(r.ok, false, 'fails closed without a frozen graph'); assert.equal(r.graphSha256, null); assert.equal(r.toFreeze, null); assert.equal(r.frozenRequired, true);
+    assert.match(r.problems[0], /no frozen graph exists/); assert.match(r.problems[0], pattern);
+  }
+  assert.ok(!fs.existsSync(fileQ) && !fs.existsSync(fileS), 'nothing was frozen by a smoke or later-candidate export');
+  // 2. A faulty or unreviewed export of the freezing candidate creates nothing either.
+  assert.equal(check('Q', A, g => { g['10'].inputs.steps = 20; }).ok, false);
+  const stopped = check('Q', A, g => { g['10'].inputs.control_after_generate = 'fixed'; });
+  assert.deepEqual([stopped.ok, stopped.stop, stopped.toFreeze], [false, true, null]);
+  assert.ok(!fs.existsSync(fileQ));
+  // 3. The first valid export of A freezes workflow Q; the first valid export of C freezes workflow S. Written once.
+  const a = check('Q', A), c = check('S', C);
+  for (const [r, file, from, w] of [[a, fileQ, 'candidate A', 'Q'], [c, fileS, 'candidate C', 'S']]) {
+    assert.equal(r.ok, true); assert.equal(r.frozenRequired, false); assert.equal(r.frozenWritten, file);
+    const f = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual([f.workflow, f.frozenFrom, f.lockSha256, f.graphSha256], [w, from, lockSha256, r.graphSha256]); assert.equal(graphHash(f.normalForm), f.graphSha256);
+  }
+  const frozenBytes = sha(fileQ);
+  // 4. From now on every export is compared. The permitted differences pass: seed (B), and seed, size and steps (smoke).
+  for (const [w, mode] of [['Q', A], ['Q', B], ['Q', SMOKE], ['S', C], ['S', SMOKE]]) {
+    const r = check(w, mode);
+    assert.equal(r.ok, true, `${w} ${JSON.stringify(mode)} equals the frozen graph apart from the permitted values`);
+    assert.deepEqual(r.differencesFromFrozen, []); assert.equal(r.toFreeze, null); assert.equal(r.frozenWritten, undefined);
+  }
+  // 5. Nothing frozen may change silently: the shift, an output slot, a file name. None of these is caught by layer 1.
+  const differs = (w, mode, change, pattern) => {
+    const g = graph(w, lock, mode); change(g);
+    assert.equal(checkWorkflow({graph: g, workflow: w, lock, candidate: mode.candidate ?? null, smoke: !!mode.smoke}).ok, true, 'layer 1 alone would pass this export');
+    const r = check(w, mode, change);
+    assert.equal(r.ok, false); assert.equal(r.graphSha256, null); assert.deepEqual(r.problems, ['the export differs from the frozen graph']);
+    assert.ok(r.differencesFromFrozen.some(d => pattern.test(d)), `${pattern} in ${JSON.stringify(r.differencesFromFrozen)}`);
+  };
+  for (const mode of [A, B, SMOKE]) {
+    differs('Q', mode, g => { g['5'].inputs.shift = 3.0; }, /^shift\.shift: 3 differs from the frozen 3\.1$/);                         // changed shift
+    differs('Q', mode, g => { g['11'].inputs.vae = ['3', 1]; }, /^decode\.vae: \["@vae",1\] differs from the frozen \["@vae",0\]$/);   // changed output slot
+    differs('Q', mode, g => { g['10'].inputs.model = ['6', 1]; }, /^sampler\.model: \["@cfgnorm",1\]/);                                // changed output slot on the model chain
+    differs('Q', mode, g => { g['4'].inputs.image = 'other.png'; }, /^image\.image:/);                                                 // changed input file name
+  }
+  differs('S', C, g => { g['9'].inputs.vae = ['1', 0]; }, /^decode\.vae: \["@checkpoint",0\] differs from the frozen \["@checkpoint",2\]$/);
+  differs('S', SMOKE, g => { g['5'].inputs.clip = ['1', 0]; }, /^positive\.clip:/);
+  // A changed connection or node setting fails as well (at layer 1, before the comparison is even reached).
+  for (const change of [g => { g['10'].inputs.model = ['5', 0]; }, g => { g['7'].inputs.image2 = ['4', 0]; }, g => { g['6'].inputs.strength = 0.5; }, g => { g['10'].inputs.cfg = 3.5; }]) {
+    for (const mode of [B, SMOKE]) { const r = check('Q', mode, change); assert.equal(r.ok, false); assert.ok(r.problems.length > 0); assert.equal(r.differencesFromFrozen, null); }
+  }
+  // And a connection difference is detected by the comparison itself.
+  const frozenQ = JSON.parse(fs.readFileSync(fileQ, 'utf8')), layer1 = checkWorkflow({graph: graph('Q', lock, B), workflow: 'Q', lock, candidate: 'B'});
+  const rewired = structuredClone(layer1); rewired.normalForm.sampler.inputs.positive = ['@refneg', 0];
+  assert.deepEqual(compareToFrozen({frozen: frozenQ, result: rewired, lock, workflow: 'Q'}), ['sampler.positive: ["@refneg",0] differs from the frozen ["@refpos",0]']);
+  const retyped = structuredClone(layer1); retyped.normalForm.latent.class_type = 'EmptyLatentImage';
+  assert.deepEqual(compareToFrozen({frozen: frozenQ, result: retyped, lock, workflow: 'Q'}), ['latent: node type EmptyLatentImage differs from the frozen EmptySD3LatentImage']);
+  // The permitted differences are exactly these, and no others: a candidate's size and steps may not differ.
+  assert.deepEqual(compareToFrozen({frozen: frozenQ, result: checkWorkflow({graph: graph('Q', lock, SMOKE), workflow: 'Q', lock, smoke: true}), lock, workflow: 'Q', smoke: false}).map(d => d.split(':')[0]).sort(), ['latent.height', 'latent.width', 'sampler.steps']);
+  // 6. The frozen graph is never replaced: a different "first" export of A is compared, not re-frozen.
+  assert.equal(check('Q', A, g => { g['5'].inputs.shift = 2.9; }).ok, false);
+  assert.equal(sha(fileQ), frozenBytes, 'the frozen graph is unchanged');
+  // 7. An unusable frozen graph fails closed: altered, unreadable, made under another lock, for another workflow, or not from the freezing candidate.
+  const withFrozen = (content, w = 'Q', mode = B) => { const dir = tmp('ap84b3-frz-'); fs.writeFileSync(path.join(dir, frozenFileName(w)), typeof content === 'string' ? content : JSON.stringify(content)); return check(w, mode, null, dir); };
+  const altered = structuredClone(frozenQ); altered.normalForm.shift.inputs.shift = 3.0;                       // edited to match a changed export
+  for (const [content, pattern] of [[altered, /has been altered/], ['{not json', /not a valid frozen record/], ['[]', /not a valid frozen record/], ['null', /not a valid frozen record/],
+    [{...frozenQ, lockSha256: 'c'.repeat(64)}, /different experiment lock/], [{...frozenQ, frozenFrom: 'candidate B'}, /not made from candidate A/], [{...frozenQ, schema: 'something-else'}, /not a valid frozen record/]]) {
+    const r = withFrozen(content);
+    assert.equal(r.ok, false); assert.equal(r.graphSha256, null); assert.ok(r.problems.some(x => pattern.test(x)), `${pattern} in ${JSON.stringify(r.problems)}`);
+  }
+  assert.ok(withFrozen(JSON.parse(fs.readFileSync(fileS, 'utf8'))).problems.some(x => /is for workflow S, not Q/.test(x)));
+  assert.equal(withFrozen(altered, 'Q', SMOKE).ok, false); assert.equal(withFrozen('{not json', 'Q', A).ok, false, 'even candidate A cannot overwrite an unusable frozen graph');
+  // 8. Remove the frozen graph and the later exports fail closed again.
+  const gone = tmp('ap84b3-gone-');
+  for (const mode of [B, SMOKE]) assert.match(check('Q', mode, null, gone).problems[0], /no frozen graph exists/);
+  // 9. The decision function itself fails closed with no frozen record, and a smoke export can never be frozen.
+  const direct = m => validateExport({graph: graph('Q', lock, m), workflow: 'Q', lock, lockSha256, candidate: m.candidate ?? null, smoke: !!m.smoke, frozen: null});
+  assert.deepEqual([direct(B).ok, direct(SMOKE).ok, direct(A).ok], [false, false, true]); assert.equal(direct(SMOKE).toFreeze, null); assert.ok(direct(A).toFreeze);
+  assert.throws(() => freeze({result: layer1, workflow: 'Q', candidate: 'B', lockSha256, apiSha256: 'a'.repeat(64)}), /only candidate A may freeze workflow Q/);
+  assert.throws(() => freeze({result: checkWorkflow({graph: graph('S', lock, C), workflow: 'S', lock, candidate: 'C'}), workflow: 'S', candidate: 'A', lockSha256, apiSha256: 'a'.repeat(64)}), /only candidate C may freeze workflow S/);
+  // 10. The run folder must exist and be outside the repository; the command line has no way to skip or redirect the freeze.
+  assert.throws(() => check('Q', A, null, path.join(REPO, 'studio')), /outside the repository/);
+  assert.throws(() => check('Q', A, null, path.join(os.tmpdir(), 'ap84b3-no-such-run')), /run folder does not exist/);
+  const cli = (...args) => spawnSync(process.execPath, [path.join(TOOLS, 'check-workflow.mjs'), ...args], {encoding: 'utf8'});
+  const exportFile = path.join(run, 'export-b.json'); fs.writeFileSync(exportFile, JSON.stringify(graph('Q', lock, B)));
+  for (const flag of ['--frozen', '--write-frozen']) { const r = cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--file', exportFile, flag, fileQ); assert.equal(r.status, 1); assert.match(r.stderr, /not accepted: the frozen graph is always the one in the run folder/); }
+  assert.match(cli('--workflow', 'Q', '--candidate', 'B', '--file', exportFile).stderr, /usage: check-workflow\.mjs --run <run folder>/);
+  assert.match(cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--smoke', '--file', exportFile).stderr, /usage:/);
+  if (!REAL.approved) assert.match(cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--file', exportFile).stderr, /not recorded as owner-approved/);
+});
+
+test('cumulative limits cannot silently reset: a later session with default or over-generous watchdog settings is refused before it starts', () => {
+  const L = REAL.lock;
+  const prior = [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:30:00Z', consumedUSD: '0.60'}];
+  // First session: the watchdog's defaults are the full limits, which is correct.
+  assert.deepEqual(spec.checkSessionSettings(L, [], {}).problems, []);
+  assert.deepEqual(spec.checkSessionSettings(L, [], {}).required, {WD_STOP_SECONDS: '10200', WD_NO_NEW_GENERATION_SECONDS: '8400', WD_ESTIMATE_STOP_USD: '4.750000'});
+  // Later session with nothing set: every limit would silently reset to the full value. Refused, with the values to use.
+  const reset = spec.checkSessionSettings(L, prior, {});
+  assert.equal(reset.ok, false); assert.equal(reset.problems.length, 3);
+  for (const name of ['WD_STOP_SECONDS', 'WD_NO_NEW_GENERATION_SECONDS', 'WD_ESTIMATE_STOP_USD']) assert.ok(reset.problems.some(p => p.startsWith(`${name} is not set, so the watchdog would use the full limit`)));
+  assert.deepEqual(reset.required, {WD_STOP_SECONDS: '8400', WD_NO_NEW_GENERATION_SECONDS: '6600', WD_ESTIMATE_STOP_USD: '4.150000'});
+  // The full limits passed explicitly are refused too; so is any one value left too high.
+  assert.equal(spec.checkSessionSettings(L, prior, {WD_STOP_SECONDS: '10200', WD_NO_NEW_GENERATION_SECONDS: '8400', WD_ESTIMATE_STOP_USD: '4.75'}).problems.length, 3);
+  assert.match(spec.checkSessionSettings(L, prior, {WD_STOP_SECONDS: '8401', WD_NO_NEW_GENERATION_SECONDS: '6600', WD_ESTIMATE_STOP_USD: '4.15'}).problems[0], /^WD_STOP_SECONDS is 8401, above what remains/);
+  assert.match(spec.checkSessionSettings(L, prior, {WD_STOP_SECONDS: '8400', WD_NO_NEW_GENERATION_SECONDS: '6600', WD_ESTIMATE_STOP_USD: '4.16'}).problems[0], /^WD_ESTIMATE_STOP_USD is 4\.16, above what remains/);
+  assert.match(spec.checkSessionSettings(L, prior, {WD_STOP_SECONDS: '8400', WD_NO_NEW_GENERATION_SECONDS: 'soon', WD_ESTIMATE_STOP_USD: '4.15'}).problems[0], /WD_NO_NEW_GENERATION_SECONDS is not a valid value/);
+  // The reduced values, or tighter ones, are accepted.
+  assert.equal(spec.checkSessionSettings(L, prior, reset.required).ok, true);
+  assert.equal(spec.checkSessionSettings(L, prior, {WD_STOP_SECONDS: '6000', WD_NO_NEW_GENERATION_SECONDS: '5000', WD_ESTIMATE_STOP_USD: '3.00'}).ok, true);
+  // Test mode is never acceptable for a real session, and an exhausted budget allows no session at all.
+  assert.match(spec.checkSessionSettings(L, prior, {...reset.required, WD_TEST_MODE: '1'}).problems[0], /WD_TEST_MODE must not be set/);
+  const spent = spec.checkSessionSettings(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T16:30:00Z', consumedUSD: '2.80'}], {WD_STOP_SECONDS: '1200', WD_NO_NEW_GENERATION_SECONDS: '0', WD_ESTIMATE_STOP_USD: '1.95'});
+  assert.equal(spent.ok, false); assert.match(spent.problems[0], /no further session is allowed/);
+  // The run record enforces the same totals after the fact: a sheet that omits earlier sessions' field is invalid,
+  // and sessions that together exceed the runtime or the ceiling make it invalid (so nothing can be imported).
+  const fx = fixture(), sheet = sheetFor(fx, {});
+  const noField = structuredClone(sheet); delete noField.priorSessions;
+  assert.ok(spec.validateRunSheet(noField, fx.lock, fx.sha256).some(p => /priorSessions must be a list/.test(p)));
+  const over = structuredClone(sheet); over.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T11:40:00Z', gpu: sheet.pod.gpu, consumedUSD: '3.50', reason: 'earlier session'}];
+  const overProblems = spec.validateRunSheet(over, fx.lock, fx.sha256);
+  assert.ok(overProblems.some(p => /total Pod runtime across all sessions exceeds/.test(p)) && overProblems.some(p => /total consumption across all sessions exceeds/.test(p)));
+  // The watchdog accepts the reduced values as they are: they are always at or below its fixed maxima.
+  const wdSrc = fs.readFileSync(path.join(TOOLS, 'watchdog.sh'), 'utf8');
+  assert.match(wdSrc, /MAX_STOP_SECONDS=10200/); assert.match(wdSrc, /MAX_ESTIMATE_STOP_MICRO=4750000/); assert.match(wdSrc, /MAX_NO_NEW_GENERATION=8400/);
 });

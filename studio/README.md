@@ -231,12 +231,13 @@ Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a 
   - **Layer 1, in the lock:** one entry per node (type and literal settings) and the connections between them. The world is closed: an extra node, a missing node, a changed setting or a rewired connection fails. Node numbers are ignored. Settings are not duplicated: each constraint points at the lock field that holds the approved value.
   - **Unlisted settings stop the run.** A literal setting the constraints do not list is not judged harmless by the tool or the operator: the result is "stop", for the owner's review.
   - **Layer 2, at execution:** the first export that passes is frozen. Later exports may differ only in the seed, and for a smoke run also the latent size and the step count. The real API export has not been seen and is not pre-approved.
+  - **The freeze is mandatory and fails closed.** The frozen graph is `frozen-q.json` or `frozen-s.json` in the run folder. Only candidate A (Qwen) and candidate C (SDXL) can create it, once. Every other export, including every smoke export, is compared with it; a missing, altered or mismatched frozen graph fails the check. A smoke export never creates one.
   - **Qwen latent node:** `EmptySD3LatentImage` is an **unverified compatibility gate**, tested in the smoke run. If it is incompatible the run stops; no other node is substituted.
   - **Qwen shift:** recorded from the export, not pinned.
 - **Smoke runs:** 512×768, 8 steps, seed 8403900, at most one per workflow. The lock is invalid if the smoke seed equals a candidate seed. Smoke outputs are verified into their own folder, recorded in the run sheet and can never be imported as a candidate.
-- **Cumulative limits:** the $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session of the experiment. `remainingLimits` in `lib/experiment-spec.mjs` gives the reduced watchdog settings for a later session; a run sheet whose sessions exceed the limits in total is invalid.
+- **Cumulative limits:** the $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session of the experiment. `remainingLimits` in `lib/experiment-spec.mjs` gives the reduced watchdog settings for a later session, and `checkSessionSettings` refuses settings that would reset the limits (the watchdog's defaults are the full limits). A run sheet whose sessions exceed the limits in total is invalid. These are local checks: the watchdog on the Pod is not yet told about earlier sessions by anything except the operator's settings.
 - **Run folders, bundles and outputs live outside the repository** and are never committed.
-- **Tests:** `tests/ap84b3.test.mjs` (29 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
+- **Tests:** `tests/ap84b3.test.mjs` (31 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
 
 ## Security
 
