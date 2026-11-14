@@ -1,11 +1,11 @@
 # AP-84B3-D1: experiment specification and cost validation
 
-**Status (2026-11-14):** specification approved in parts; engineering complete; nothing has been run.
+**Status (2026-11-15):** specification approved in parts; engineering complete; both locks approved; nothing has been run.
 - No account, payment method, instance, API call, model download or image generation. Spend to date: **$0**.
 - **Approved by the owner:** D1-1 to D1-5 (2026-11-13), D1-6 implementation (2026-11-13), the lock amendment L1 to L12 with cumulative limits (2026-11-14), and on 2026-11-14: A4 (the experiment lock hash `e50d74c8…`), A5 (Option A environment, two tiers) and the implementation of environment setup, cumulative watchdog enforcement and stronger frozen-graph protection. See §8 and §11.
-- **Approval lines not yet written.** The machine-readable lines in `DECISIONS.md` that let the tools run are not written: the engineering task that built §11 was instructed not to create approval records. Until they are written, every tool refuses to run. The environment lock (hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee`) is a new file and needs the owner's confirmation of that exact hash.
+- **Both locks approved and recorded (2026-11-14).** The owner approved the experiment lock `e50d74c8eddf7e920948e5d69aef72542e0524d2bb19c7ba6c1e7ff1b2c0878c` (A4) and the environment lock `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee` (A5). The approval records are in `DECISIONS.md` ("AP-84B3 lock approvals", commit `e25c2ee`) and the tools recognise both locks as approved. The approvals cover those exact hashes only: any change to either lock file changes its hash and is not approved. (The engineering commit `f35e76e` did not write the records; they were written later the same day.)
 - **Implemented locally ($0):** the tooling in §7.1, the experiment lock, the environment lock `studio/config/ap84b3-environment.json`, the session ledger and the runbook `AP-84B3-RUNBOOK.md`.
-- **Not authorised:** execution (D1-7). No approval so far authorises account creation, funding, provisioning, model downloads or image generation.
+- **Not authorised:** execution (D1-7). The lock approvals do not authorise account creation, funding, auto-pay changes, Pod provisioning, model downloads, running the setup script on a Pod or image generation.
 - `DECISIONS.md` is the authoritative record. Where this document and a lock differ, the lock holds the exact values.
 
 **How the facts were gathered (all free, read-only, no login):**
@@ -350,7 +350,7 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 | — | Local preflight report | `preflight.mjs` (reads only) |
 
 - All of it is local, $0 work with tests. Nothing has been run on a Pod.
-- Every tool refuses to run until the owner's approval line for the experiment lock is in `DECISIONS.md`; the Pod bundle also needs the environment lock's line.
+- Every tool requires the experiment lock's approval record in `DECISIONS.md`, and the Pod bundle also requires the environment lock's. Both are recorded (2026-11-14), so these gates are now satisfied; every other gate still applies (session ledger, bundle checksums, watchdog, environment checks on the Pod, frozen-graph checks).
 - A live RunPod/ComfyUI adapter is not built. It would be a later milestone, if the experiment succeeds.
 
 ### 7.2 Risks
@@ -387,8 +387,8 @@ Status on 2026-11-14. Each decision is separate. `DECISIONS.md` is the authorita
 | D1-6 | Implementation work in §7.1 | Built and tested locally, $0; 30-minute console checkpoints; $0.25 reconciliation tolerance; every D1-7 approval must name the approved lock hash | **APPROVED and implemented** |
 | Lock amendment | L1 to L12, the Qwen latent compatibility gate and two-layer graph validation (§10) | Implemented locally, $0 | **APPROVED** (2026-11-14) |
 | A2 | Cumulative limits across all sessions | $5.00, 3 hours and one $10 deposit for the whole experiment | **APPROVED** (2026-11-14) |
-| A4 | Experiment lock review | Hash `e50d74c8eddf7e920948e5d69aef72542e0524d2bb19c7ba6c1e7ff1b2c0878c` | **APPROVED** by the owner (2026-11-14); approval line **not yet written** |
-| A5 | Environment | Option A: RunPod's PyTorch image pinned by digest; two-tier environment lock (§11) | **APPROVED** by the owner (2026-11-14); the environment lock file (hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee`) needs the owner's confirmation and its approval line |
+| A4 | Experiment lock review | Hash `e50d74c8eddf7e920948e5d69aef72542e0524d2bb19c7ba6c1e7ff1b2c0878c` | **APPROVED** (2026-11-14); approval record written in `DECISIONS.md`; exact hash only |
+| A5 | Environment | Option A: RunPod's PyTorch image pinned by digest; two-tier environment lock (§11), hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee` | **APPROVED** (2026-11-14); approval record written in `DECISIONS.md`; exact hash only |
 | D1-7 | Execution | Only after D1-1 to D1-6 and after §7.1 is accepted | **Not authorised** |
 
 **D1-1.** The 2511 consistency improvements are publisher claims; the experiment exists to test them.
@@ -424,7 +424,7 @@ Status on 2026-11-14. Each decision is separate. `DECISIONS.md` is the authorita
   - outputs copied to durable storage and checksums verified before the Pod is stopped.
 - The deposit may be made only as part of authorised execution.
 
-**Not authorised:** D1-7 (execution). Until it is approved, and the approval lines for both locks are written, there is no account creation, funding, provisioning, model download, image generation or cost.
+**Not authorised:** D1-7 (execution). The approval records for both locks are written, but until D1-7 is approved there is no account creation, funding, auto-pay change, Pod provisioning, model download, setup execution, image generation or cost.
 
 ## 9. Sources
 
@@ -461,7 +461,7 @@ These decisions were made after the lock review. The exact values are in the exp
 
 ## 11. Environment lock, cumulative enforcement and frozen-graph protection (2026-11-14)
 
-Engineering approved by the owner on 2026-11-14 (A5 and the implementation decisions). All of it is local, $0, and tested; nothing has been run on a Pod.
+Engineering approved by the owner on 2026-11-14 (A5 and the implementation decisions). All of it is local, $0, and tested; nothing has been run on a Pod. The environment lock described here is approved at hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee` (recorded 2026-11-14).
 
 **Environment lock (A5: Option A, two tiers).** `studio/config/ap84b3-environment.json`, a separate file so the experiment lock hash is unchanged.
 

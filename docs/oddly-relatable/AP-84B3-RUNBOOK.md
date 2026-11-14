@@ -1,10 +1,11 @@
 # AP-84B3 runbook: three-candidate experiment
 
-**Status (2026-11-14): NOT AUTHORISED TO EXECUTE.**
-- Execution is owner decision **D1-7**, which has not been given. No account, funding, Pod, download or image generation is authorised.
-- Two approval lines must be in `DECISIONS.md` before any tool will run, each written only on the owner's confirmation:
-  1. `AP-84B3-LOCK-APPROVED-SHA256=<hash>` for the experiment lock `studio/config/ap84b3-experiment.json`.
-  2. `AP-84B3-ENVIRONMENT-APPROVED-SHA256=<hash>` for the environment lock `studio/config/ap84b3-environment.json` (owner decision A5: Option A, two tiers).
+**Status (2026-11-15): NOT AUTHORISED TO EXECUTE.**
+- Execution is owner decision **D1-7**, which has not been given. The lock approvals below do not authorise account creation, funding, auto-pay changes, Pod provisioning, downloads, running the setup script on a Pod or image generation.
+- Both lock approval records are in `DECISIONS.md` (recorded 2026-11-14, "AP-84B3 lock approvals") and the tools recognise both locks as approved. They cover these exact hashes only:
+  1. Experiment lock `studio/config/ap84b3-experiment.json` (A4): `e50d74c8eddf7e920948e5d69aef72542e0524d2bb19c7ba6c1e7ff1b2c0878c`.
+  2. Environment lock `studio/config/ap84b3-environment.json` (A5: Option A, two tiers): `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee`.
+- If either lock file changes, its hash changes and it is no longer approved: every tool refuses again until the owner approves the new hash.
 - Every D1-7 approval must name the approved lock hash.
 - Run the local preflight at any time; it only reads:
   ```
