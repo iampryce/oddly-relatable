@@ -81,7 +81,8 @@ A local, zero-cost foundation for future GPU-generated assets. It has no GPU, no
 - **Adapters** are set by server configuration only (`STUDIO_GEN_ADAPTER`, never by API clients):
   - `none` (the default) always fails a job with "No generation worker is configured" and never produces anything.
   - `fake` produces a deterministic, striped **SYNTHETIC TEST FIXTURE / NOT ARTWORK** card. Identical requests give byte-identical files.
-  - RunPod and ComfyUI adapters are future milestones.
+  - `import` (AP-84B3) imports transfer-verified candidates from a local run folder set by `STUDIO_GEN_IMPORT_DIR`. It generates nothing. See "AP-84B3 experiment tooling" below.
+  - Live RunPod and ComfyUI adapters are not implemented.
 - **Quarantine:** `<workspace>/quarantine/<job-id>/` only, never inside `production/`, `bible/` or `skills/`.
   - File names are whitelisted (`[a-z0-9-].png|json`).
   - Files are write-once (never overwritten) and capped at 20 MB.
@@ -195,6 +196,38 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
 - **Dashboard:** on a job page, "Check promotion" on a proposal shows every check, then the form. The form shows the measured feet and figure height (editable), a required note and an explicit confirmation.
 - **API:** `GET /api/generation/promotions` lists promotions. Job detail includes `promotions`.
 - **Tests** run only against temporary registries and a temporary library in the git-ignored `studio-work/studio-*/`. They assert that the real registries, stories, artwork and the real `generated/` folder are untouched.
+
+## AP-84B3 experiment tooling (D1-6)
+
+Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a GPU, creates an account or spends money, and execution (D1-7) is not authorised.** The procedure is in `docs/oddly-relatable/AP-84B3-RUNBOOK.md`.
+
+- **Experiment lock:** `config/ap84b3-experiment.json` holds every owner-approved value once: model files with revisions and hashes, software pins, prompts, seeds, workflow settings, the provider configuration and the cost and time limits. Decimals are stored as strings.
+  - **Canonical hash:** parse strictly (duplicate keys and non-integer numbers are errors), write back with keys sorted by Unicode code point and no whitespace, then SHA-256. Line endings, indentation and key order do not change it.
+  - **Approval:** a lock is approved only when its canonical hash appears in `DECISIONS.md` on an approval line, written after the owner's explicit review. Every tool below refuses to run otherwise.
+  - **Tests do not approve anything.** They contain no approved hash; they build a temporary decision record from the current file.
+- **Import adapter** (`lib/gen-adapters.mjs`, `STUDIO_GEN_ADAPTER=import`): one job per candidate, described as `AP-84B3 candidate A` (or B, C).
+  - It imports the local cut-out as a non-synthetic candidate with the full provenance from the lock and the run sheet.
+  - It refuses: an unapproved lock, a run sheet that differs from the lock, an unverified transfer, a file whose hash is not recorded, a non-PNG, an oversize file, a symbolic link, a path outside the run folder, a smoke image, a repeat import, and a run folder inside the repository.
+  - The default adapter is still `none`.
+- **Tools** (`tools/ap84b3/`):
+
+  | Tool | Where it runs | Purpose |
+  |---|---|---|
+  | `cutout.cjs` | Local | The AP-72 cut-out with input and output as arguments; full-canvas or cropped |
+  | `build-pod-bundle.mjs` | Local | Generates download lists, checksums, software pins and watchdog settings from the lock |
+  | `pod-setup.sh` | Pod | Pinned checkouts, revision-pinned downloads and hash checks. Refuses to run without an approved `environment.lock` |
+  | `watchdog.sh` | Pod | Stops the Pod at 2 h 50 min or at a $4.75 estimate; gates new generations |
+  | `collect-outputs.sh` | Pod | Copies each finished output into an outbox and lists it in a checksum manifest |
+  | `verify-transfer.mjs` | Local | Verifies a pulled folder against the manifest; writes the success record last |
+  | `check-workflow.mjs` | Local | Checks an exported ComfyUI workflow against the lock and prints its hash |
+  | `compare-sheet.mjs` | Local | One-scale comparison sheet for review |
+  | `stop-timer.mjs` | Local | Alerts for the manual stop and the 30-minute console checkpoints |
+
+- **Watchdog estimate:** GPU compute at the higher of the recorded rate and the approved cap, plus the container disk, plus every other listed resource. Each rate is normalised to dollars per hour with its billing period and conversion stated; rates with different billing periods are never added directly. It is an estimate, not a billing measurement. $5.00 and 3 hours remain absolute.
+- **Watchdog authentication is unresolved until D1-7.** The script holds no credential and assumes none is injected; it calls the stop command it is given. No account-level API key may be placed in the repository or the Pod bundle. The manual stop in the web console is independent of it.
+- **Transfers:** an output is safely retained only when it has been transferred and its checksum verified locally. A failed or interrupted verification leaves no success record.
+- **Run folders, bundles and outputs live outside the repository** and are never committed.
+- **Tests:** `tests/ap84b3.test.mjs` (23 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
 
 ## Security
 
