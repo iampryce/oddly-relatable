@@ -20,6 +20,8 @@ export const TRANSFER_SCHEMA = 'ap84b3-transfer-verified/1';
 export const MANIFEST_HEADER = '# ap84b3-manifest/1';
 export const RESOURCES_HEADER = '# ap84b3-resources/1';
 export const CANDIDATE_IDS = Object.freeze(['A', 'B', 'C']);
+export const TRANSFER_IDS = Object.freeze(['A', 'B', 'C', 'smoke']);     // smoke outputs travel separately and are never candidates
+export const SMOKE_NAME_RE = /^smoke-([qs])\.png$/;
 export const SHA256_RE = /^[0-9a-f]{64}$/;
 export const COMMIT_RE = /^[0-9a-f]{40}$/;
 export const OUTPUT_NAME_RE = /^[a-z0-9][a-z0-9-]{0,80}\.(png|json)$/;
@@ -207,6 +209,22 @@ export function validateLockShape(lock) {
   }
   for (const id of CANDIDATE_IDS) need(['Q', 'S'].includes(lock.candidates?.[id]?.workflow) && Number.isSafeInteger(lock.candidates[id].seed), `candidates.${id} needs workflow and seed`);
   need(Object.keys(lock.candidates).length === CANDIDATE_IDS.length, 'exactly three candidates (A, B, C)');
+  // Smoke run: fixed settings and a seed that no candidate uses.
+  const sm = lock.smoke;
+  need(sm && sm.maxPerWorkflow === 1 && sm.neverACandidate === true && [sm.width, sm.height, sm.steps].every(v => Number.isInteger(v) && v > 0), 'smoke needs width, height, steps, maxPerWorkflow 1 and neverACandidate');
+  need(Number.isSafeInteger(sm.seed) && sm.seed >= 0, 'smoke.seed must be a non-negative integer');
+  need(!Object.values(lock.candidates).some(c => c.seed === sm.seed), 'the smoke seed must differ from every candidate seed');
+  // Pinned sampling and node settings (lock amendment).
+  for (const k of ['Q', 'S']) need(/^\d+\.\d+$/.test(lock.workflows[k].denoise || '') && isStr(lock.workflows[k].latentNode), `workflows.${k}: denoise and latentNode are required`);
+  const WQ = lock.workflows.Q, WS = lock.workflows.S;
+  need(WQ.inputScaling === 'none' && WQ.shift === 'recorded-at-export', 'workflows.Q: inputScaling must be "none" and shift "recorded-at-export"');
+  need(/^compatibility-gate: unverified/.test(WQ.latentNodeStatus || ''), 'workflows.Q.latentNodeStatus must record the latent node as an unverified compatibility gate');
+  need(WS.promptEncoder === 'CLIPTextEncode' && isStr(WS.ipAdapter?.loader) && isStr(WS.ipAdapter.imageEncoderLoader) && isStr(WS.ipAdapter.combineEmbeds) && isStr(WS.ipAdapter.embedsScaling), 'workflows.S: prompt encoder, loaders and IP-Adapter options are required');
+  need(WS.ipAdapter.imageNegative === 'none' && WS.ipAdapter.attnMask === 'none' && WS.rawOutputRetained === true, 'workflows.S: no negative image, no attention mask, raw output retained');
+  const R = WS.reference;
+  need(R && R.source === lock.inputs.editInput.id && R.preparedLocally === true && R.placement === 'centred' && Number.isInteger(R.canvasWidth) && Number.isInteger(R.canvasHeight) && SHA256_RE.test(R.sha256 || ''), 'workflows.S.reference is incomplete');
+  need(Array.isArray(R.padColourRGB) && R.padColourRGB.length === 3 && R.padColourRGB.every(v => Number.isInteger(v) && v >= 0 && v <= 255), 'workflows.S.reference.padColourRGB must be three integers from 0 to 255');
+  for (const k of ['Q', 'S']) validateGraphConstraints(lock, k);
   const P = lock.provider, L = lock.limits;
   need(isStr(P?.name) && isStr(P.cloud) && isStr(P.gpuPrimary) && isStr(P.gpuFallback) && Number.isInteger(P.containerDiskGB), 'provider is incomplete');
   need(L && [L.depositUSD, L.consumptionCeilingUSD, L.watchdogEstimateStopUSD, L.containerDiskUSDPerGBMonth, L.reconciliationToleranceUSD].every(v => { usdToMicro(v); return true; }), 'limits: dollar values must be decimal strings');
@@ -216,7 +234,88 @@ export function validateLockShape(lock) {
   need(M && M.noNewGeneration < M.transfersComplete && M.transfersComplete < M.timerAlert && M.timerAlert < M.watchdogStop && M.watchdogStop < M.manualStop && M.manualStop < M.absoluteLimit, 'limits: milestones must be strictly increasing');
   need(M.absoluteLimit === L.maxRuntimeSeconds, 'limits: the absolute milestone must equal maxRuntimeSeconds');
   need(Number.isInteger(L.hoursPerMonthAssumption) && Number.isInteger(L.consoleCheckpointSeconds), 'limits: hoursPerMonthAssumption and consoleCheckpointSeconds are required');
+  need(L.cumulativeAcrossSessions === true, 'limits: the ceiling, runtime and deposit must be cumulative across sessions');
   return lock;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Workflow graph constraints (Layer 1). The lock lists one entry per node (role, type, literal settings) and the
+// connections between roles. Literal settings are not duplicated: each points at the lock field that holds the
+// approved value. This is NOT the API export graph; that is inspected and frozen during authorised execution.
+export function lockValue(lock, dotPath) {
+  let v = lock;
+  for (const k of dotPath.split('.')) { if (v === null || typeof v !== 'object' || !(k in v)) throw new LockError(`experiment lock: no value at ${dotPath}`, 'LOCK_VALUE'); v = v[k]; }
+  return v;
+}
+// What a literal setting must be. ctx: {seed, smoke}. Returns {kind: 'value', value, optional} | {kind: 'record', name} | {kind: 'free'}.
+export function resolveLiteral(lock, workflow, s, ctx = {}) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) throw new LockError('graph constraint: a literal setting must be an object', 'LOCK_VALUE');
+  if (isStr(s.free)) return {kind: 'free', reason: s.free};
+  if (isStr(s.record)) return {kind: 'record', name: s.record};
+  if (s.seed === true) return {kind: 'value', value: ctx.seed, optional: false};
+  if (isStr(s.model)) {
+    const m = lock.models.find(x => x.workflow === workflow && x.role === s.model);
+    if (!m) throw new LockError(`graph constraint: no model with role ${s.model} in workflow ${workflow}`, 'LOCK_VALUE');
+    return {kind: 'value', value: m.saveAs.split('/').pop(), optional: false};
+  }
+  if (isStr(s.ref)) {
+    const raw = lockValue(lock, ctx.smoke && isStr(s.smoke) ? s.smoke : s.ref);
+    let value;
+    if (s.type === 'string') { if (typeof raw !== 'string') throw new LockError(`graph constraint: ${s.ref} is not a string`, 'LOCK_VALUE'); value = raw; }
+    else if (s.type === 'integer') { if (!Number.isSafeInteger(raw)) throw new LockError(`graph constraint: ${s.ref} is not an integer`, 'LOCK_VALUE'); value = raw; }
+    else if (s.type === 'number') { if (typeof raw !== 'string' || !/^\d+(\.\d+)?$/.test(raw)) throw new LockError(`graph constraint: ${s.ref} is not a decimal string`, 'LOCK_VALUE'); value = Number(raw); }
+    else if (s.type === 'boolean') { if (raw !== 'true' && raw !== 'false') throw new LockError(`graph constraint: ${s.ref} is not "true" or "false"`, 'LOCK_VALUE'); value = raw === 'true'; }
+    else throw new LockError(`graph constraint: unknown type for ${s.ref}`, 'LOCK_VALUE');
+    return {kind: 'value', value, optional: s.optional === true};
+  }
+  throw new LockError('graph constraint: unrecognised literal setting', 'LOCK_VALUE');
+}
+export function validateGraphConstraints(lock, workflow) {
+  const G = lock.workflows[workflow].graphConstraints, where = `workflows.${workflow}.graphConstraints`;
+  need(G && G.closedWorld === true && Array.isArray(G.nodes) && G.nodes.length > 0 && Array.isArray(G.connections), `${where} needs closedWorld, nodes and connections`);
+  const roles = new Map();
+  for (const n of G.nodes) {
+    need(isStr(n.role) && isStr(n.type) && n.literals && typeof n.literals === 'object' && !roles.has(n.role), `${where}: every node needs a unique role, a type and literals`);
+    roles.set(n.role, n);
+    for (const s of Object.values(n.literals)) for (const smoke of [false, true]) resolveLiteral(lock, workflow, s, {seed: 0, smoke});
+  }
+  const targets = new Set();
+  for (const c of G.connections) {
+    need(roles.has(c.from) && roles.has(c.to) && isStr(c.input), `${where}: a connection names an unknown role`);
+    need(!targets.has(`${c.to}.${c.input}`) && !(c.input in roles.get(c.to).literals), `${where}: input ${c.to}.${c.input} is defined twice`);
+    targets.add(`${c.to}.${c.input}`);
+  }
+  need(G.nodes.filter(n => n.type === lock.workflows[workflow].latentNode).length === 1, `${where}: exactly one latent node of the pinned type`);
+  need(G.nodes.filter(n => n.type === 'KSampler').length === 1, `${where}: exactly one sampler`);
+  need(!G.nodes.some(n => /lora|controlnet|FluxKontextImageScale|VAEEncode|UnifiedLoader|PrepImageForClipVision/i.test(n.type)), `${where}: a forbidden node type is listed`);
+  return G;
+}
+
+// Limits that remain after earlier Pod sessions. The ceiling, the runtime and the deposit are cumulative across
+// the whole experiment: a failed session does not reset them, and no further funding is authorised.
+// priorSessions: [{startedAt, endedAt, consumedUSD}]. consumedUSD is the higher of the balance and usage methods.
+export function remainingLimits(lock, priorSessions = []) {
+  const L = lock.limits, M = L.milestoneSeconds;
+  let seconds = 0, consumed = 0;
+  for (const p of priorSessions) {
+    const a = Date.parse(p?.startedAt), b = Date.parse(p?.endedAt);
+    if (Number.isNaN(a) || Number.isNaN(b) || b < a) throw new LockError('prior session needs valid startedAt and endedAt', 'LOCK_VALUE');
+    seconds += Math.ceil((b - a) / 1000);
+    consumed += usdToMicro(p.consumedUSD);
+  }
+  const out = {
+    priorRuntimeSeconds: seconds, priorConsumedUSD: microToUsd(consumed),
+    remainingRuntimeSeconds: M.absoluteLimit - seconds,
+    watchdogStopSeconds: M.watchdogStop - seconds,
+    noNewGenerationSeconds: M.noNewGeneration - seconds,
+    estimateStopMicro: usdToMicro(L.watchdogEstimateStopUSD) - consumed,
+    remainingCeilingMicro: usdToMicro(L.consumptionCeilingUSD) - consumed,
+    additionalFunding: 'none',
+  };
+  // A new session needs room for at least one generation before the cut-off and a positive estimate margin.
+  out.sessionAllowed = out.noNewGenerationSeconds > 0 && out.watchdogStopSeconds > out.noNewGenerationSeconds && out.estimateStopMicro > 0;
+  out.estimateStopUSD = out.estimateStopMicro > 0 ? microToUsd(out.estimateStopMicro) : '0.000000';
+  return out;
 }
 
 // Load the lock. With requireApproved (the default for every tool) an unapproved lock is refused.
@@ -255,7 +354,20 @@ export function validateRunSheet(sheet, lock, lockSha256) {
     catch { bad('pod.gpuRateUSDPerHour must be a decimal string'); }
   }
   for (const k of ['startedAt', 'endedAt']) if (!isStr(pod[k]) || Number.isNaN(Date.parse(pod[k]))) bad(`pod.${k} must be a timestamp`);
-  if (!p.some(x => x.startsWith('pod.startedAt') || x.startsWith('pod.endedAt')) && Date.parse(pod.endedAt) - Date.parse(pod.startedAt) > lock.limits.maxRuntimeSeconds * 1000) bad('pod runtime exceeds the approved limit');
+  // Cumulative limits: every Pod session of the experiment counts, including failed ones.
+  const micro = v => { try { return usdToMicro(v); } catch { return null; } };
+  let runtimeMs = 0, consumed = 0, sessionsOk = !p.some(x => x.startsWith('pod.startedAt') || x.startsWith('pod.endedAt'));
+  if (sessionsOk) { runtimeMs = Date.parse(pod.endedAt) - Date.parse(pod.startedAt); if (runtimeMs < 0) { bad('pod.endedAt is before pod.startedAt'); sessionsOk = false; } }
+  if (micro(pod.consumedUSD) === null) { bad('pod.consumedUSD must be a decimal string (the higher of the balance and usage methods)'); sessionsOk = false; } else consumed += micro(pod.consumedUSD);
+  if (!Array.isArray(sheet.priorSessions)) { bad('priorSessions must be a list (empty if this was the only Pod session)'); sessionsOk = false; }
+  else for (const s of sheet.priorSessions) {
+    const a = Date.parse(s?.startedAt), b = Date.parse(s?.endedAt);
+    if (Number.isNaN(a) || Number.isNaN(b) || b < a || micro(s?.consumedUSD) === null || !isStr(s?.reason)) { bad('each prior session needs startedAt, endedAt, consumedUSD and reason'); sessionsOk = false; continue; }
+    if (![lock.provider.gpuPrimary, lock.provider.gpuFallback].includes(s.gpu)) bad('a prior session used a GPU that is not approved');
+    runtimeMs += b - a; consumed += micro(s.consumedUSD);
+  }
+  if (sessionsOk && runtimeMs > lock.limits.maxRuntimeSeconds * 1000) bad('total Pod runtime across all sessions exceeds the approved limit');
+  if (sessionsOk && consumed > usdToMicro(lock.limits.consumptionCeilingUSD)) bad('total consumption across all sessions exceeds the approved ceiling');
   if (sheet.software?.comfyuiCommit !== lock.software.comfyui.commit) bad('software.comfyuiCommit does not match the pin');
   if (sheet.software?.ipadapterCommit !== lock.software.ipadapterPlus.commit) bad('software.ipadapterCommit does not match the pin');
   for (const w of ['Q', 'S']) if (!SHA256_RE.test(sheet.workflows?.[w]?.apiSha256 || '')) bad(`workflows.${w}.apiSha256 must be recorded before any candidate`);
@@ -269,12 +381,21 @@ export function validateRunSheet(sheet, lock, lockSha256) {
     if (c.status === 'retained') for (const f of ['raw', 'cutout']) {
       const x = c[f] || {};
       if (!OUTPUT_NAME_RE.test(x.name || '') || !x.name.endsWith('.png') || !SHA256_RE.test(x.sha256 || '') || !Number.isInteger(x.bytes) || x.bytes < 1) bad(`candidate ${id}: ${f} needs a safe .png name, sha256 and bytes`);
+      else if (/smoke/.test(x.name)) bad(`candidate ${id}: ${f} is named as a smoke image; smoke images are never candidates`);
     }
   }
+  // Smoke runs: fixed seed, size and steps from the lock; at most one per workflow; never a candidate.
   if (!Array.isArray(sheet.smoke)) bad('smoke must be a list (empty if no smoke run was made)');
   else {
-    for (const s of sheet.smoke) if (!['Q', 'S'].includes(s?.workflow) || !SHA256_RE.test(s?.sha256 || '')) bad('each smoke entry needs workflow and sha256');
-    for (const w of ['Q', 'S']) if (sheet.smoke.filter(s => s?.workflow === w).length > lock.smoke.maxPerWorkflow) bad(`more than ${lock.smoke.maxPerWorkflow} smoke run for workflow ${w}`);
+    const S = lock.smoke;
+    for (const s of sheet.smoke) {
+      const m = SMOKE_NAME_RE.exec(s?.name || '');
+      if (!['Q', 'S'].includes(s?.workflow) || !SHA256_RE.test(s?.sha256 || '') || !m || m[1] !== String(s.workflow).toLowerCase()) { bad('each smoke entry needs workflow, sha256 and the name smoke-q.png or smoke-s.png'); continue; }
+      if (s.seed !== S.seed) bad(`smoke ${s.workflow}: seed differs from the lock's smoke seed`);
+      if (s.width !== S.width || s.height !== S.height || s.steps !== S.steps) bad(`smoke ${s.workflow}: size or steps differ from the lock`);
+      for (const id of CANDIDATE_IDS) for (const f of ['raw', 'cutout']) if (cands[id]?.[f]?.sha256 === s.sha256) bad(`candidate ${id}: ${f} is a smoke image; smoke images are never candidates`);
+    }
+    for (const w of ['Q', 'S']) if (sheet.smoke.filter(s => s?.workflow === w).length > S.maxPerWorkflow) bad(`more than ${S.maxPerWorkflow} smoke run for workflow ${w}`);
   }
   return p;
 }

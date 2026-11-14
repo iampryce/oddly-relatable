@@ -4,8 +4,8 @@
 - This runbook was written under owner decision D1-6 (implementation). It describes a future run.
 - Execution is owner decision **D1-7**, which has not been given. No account, funding, Pod, download or image generation is authorised.
 - Two further gates sit before D1-7:
-  1. **Experiment lock approval.** The owner reviews `studio/config/ap84b3-experiment.json` and its canonical hash. Only then is the hash recorded in `DECISIONS.md`. Until then every tool refuses to run.
-  2. **Environment proposal.** A separately reviewed, reproducible proposal for the PyTorch version and the Pod base image. `pod-setup.sh` refuses to run without the `environment.lock` that proposal would add.
+  1. **Experiment lock approval (A4).** The owner reviews `studio/config/ap84b3-experiment.json` and its canonical hash. Only then is the hash recorded in `DECISIONS.md`. Until then every tool refuses to run. The lock was amended on 2026-11-14 (owner decisions L1 to L12); the amended lock is **not approved**.
+  2. **Environment proposal (A5).** A separately reviewed, reproducible proposal for the PyTorch version and the Pod base image. `pod-setup.sh` refuses to run without the `environment.lock` that proposal would add.
 - Every D1-7 approval must name the approved lock hash.
 
 Related: `AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` (what is being tested) and `DECISIONS.md` (the authoritative record).
@@ -22,6 +22,7 @@ Related: `AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` (what is being tested) and `DE
 
 - The $0.25 between $4.75 and $5.00 is a margin for estimate error and stopping delay. **It is not permission to continue.**
 - Nothing in this runbook extends a limit. A transfer, retry or shutdown step in progress is cut off.
+- **The limits are cumulative across the whole experiment** (owner decision A2). The $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session, including a failed one. A failed session does not reset them. No additional deposit or funding is authorised. See §17.
 
 ## 2. Milestones
 
@@ -48,7 +49,8 @@ These cannot be verified without a Pod. Each is checked in the live test (§8) b
 | U4 | Whether the pinned ComfyUI and IP-Adapter node run together | Execution risk. No substitution and no pin change |
 | U5 | PyTorch version and Pod base image | Decided by the separate environment proposal |
 | U6 | How RunPod converts monthly prices to per-second billing | Unverified. The estimate uses a 672-hour month, which errs high |
-| U7 | The exact Qwen node graph and shift value as exported | Exported, checked, hashed and recorded on the Pod (§10) |
+| U7 | The exact API export of each workflow, including the Qwen shift value | Not pre-approved. Inspected, checked against the lock's constraints and frozen on the Pod (§10) |
+| U8 | Whether the Qwen latent node `EmptySD3LatentImage` works with Qwen-Image-Edit-2511 | **Unverified compatibility gate.** Tested in the Qwen smoke run (§11). If it is incompatible, stop and return to the owner. No other node is substituted |
 
 ## 4. Step 0: confirm the lock hash
 
@@ -92,9 +94,14 @@ These cannot be verified without a Pod. Each is checked in the live test (§8) b
    node studio/tools/ap84b3/build-pod-bundle.mjs --out <folder outside the repository>
    ```
 5. Add the approved `environment.lock` to the bundle (from the environment proposal).
-6. Start a run sheet (`run-sheet.json`, schema `ap84b3-run-sheet/1`) with the lock hash.
+6. Build the padded reference for the SDXL baseline, outside the repository:
+   ```
+   node studio/tools/ap84b3/pad-reference.mjs --out <run folder>/master-v3-square.png
+   ```
+   It centres master v3 on a 1536×1536 canvas with RGB (203, 203, 203) borders, copies every original pixel unchanged, and fails unless the result's SHA-256 equals the one in the lock. The IP-Adapter node's own "pad" mode fills with black and must not be used.
+7. Start a run sheet (`run-sheet.json`, schema `ap84b3-run-sheet/1`) with the lock hash, an empty `priorSessions` list and an empty `smoke` list.
 
-**Evidence:** reference pack ID and hash; bundle `BUNDLE.SHA256SUMS`.
+**Evidence:** reference pack ID and hash; bundle `BUNDLE.SHA256SUMS`; padded reference SHA-256.
 
 ## 6. Step 2: account and funding
 
@@ -157,34 +164,80 @@ The watchdog's consumption figure is an **estimate**: elapsed time × (GPU + con
 2. Add the public key to the account for this run only.
 3. Read the Pod's SSH host key fingerprint through the RunPod web terminal. Pin it in a dedicated known-hosts file and connect with strict host key checking.
 4. **Pull only:** the local machine fetches from the Pod. The Pod holds no credential for the local machine. Agent forwarding stays off.
-5. Upload master v3 over the same channel. Check its SHA-256 on the Pod against the lock.
+5. Upload master v3 and the padded reference over the same channel. Check both SHA-256 values on the Pod against the lock.
 6. If file copy over SSH is not available (U3), **stop and return to the owner**.
 7. After the run, remove the public key from the account and delete the private key.
 
-**Evidence:** host key fingerprint; master v3 hash on the Pod.
+**Evidence:** host key fingerprint; master v3 and padded reference hashes on the Pod.
 
-## 10. Step 6: setup and workflows
+## 10. Step 6: setup and workflow freeze
 
 1. `./pod-setup.sh check`, then `software`, then `models`. Each stops on any mismatch. `models` verifies every file against the approved hashes.
 2. If the pinned ComfyUI and IP-Adapter node will not run together (U4), **stop and return to the owner**. Do not change a pin or substitute an implementation.
-3. Load the built-in "Qwen Image Edit 2511" template. Apply only the approved differences: the pinned model files, the approved prompt and a single-space negative prompt, the candidate's seed, 40 steps, CFG 4.0, euler / simple, **no LoRA node**, and an explicit empty-latent node at 1024×1536 connected to the sampler.
-4. Build the SDXL + IP-Adapter Plus workflow to the approved settings.
-5. Export each workflow in API format. Copy the exports to the local machine and check them:
+
+**Build the two workflows.** The lock holds the constraints: one entry per node, its settings, and the connections. Nothing outside them is allowed.
+
+- **Qwen (workflow Q).** Start from the built-in "Qwen Image Edit 2511" template and make it match the lock:
+  - remove the Lightning LoRA node and the switch and primitive nodes around it, so the model goes loader → shift → CFGNorm → sampler;
+  - remove the input-scaling node (`FluxKontextImageScale`): master v3 goes into both text encoders unmodified, as `image1` only;
+  - replace the image-derived latent (`VAEEncode`) with an `EmptySD3LatentImage` at 1024×1536, batch 1, connected directly to the sampler;
+  - set the approved prompt, a single-space negative prompt, the candidate's seed, 40 steps, CFG 4.0, euler / simple, denoise 1.0;
+  - leave the shift value as the template has it. It is recorded, not chosen.
+- **SDXL + IP-Adapter (workflow S).** Build it from these nodes only: checkpoint loader, `IPAdapterModelLoader`, `CLIPVisionLoader`, `IPAdapterAdvanced` (weight 0.8, linear, concat, 0.0 to 1.0, V only, no negative image, no mask), two `CLIPTextEncode`, `EmptyLatentImage` 832×1248, sampler (30 steps, CFG 6.0, dpmpp_2m / karras, denoise 1.0), decode, `ImageScale` (lanczos, 1024×1536, crop disabled) and **two** save nodes: one for the raw 832×1248 image and one for the resized image. The reference is the locally padded image.
+
+**Freeze each workflow before anything is generated.**
+
+1. Export the workflow in API format (candidate A for Q, candidate C for S). Copy the export to the local machine.
+2. Check it and freeze it:
    ```
-   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --candidate A --file <export.json>
+   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --candidate A --file <export.json> --write-frozen <run folder>/frozen-q.json
    ```
-6. Record each export's SHA-256 and the reported shift value in the run sheet **before any candidate is generated**. No workflow change after this point.
+3. Read the result:
 
-**Evidence:** `pod-setup.sh` output; both workflow hashes; the shift value; installed software versions.
+   | Result | Meaning | Action |
+   |---|---|---|
+   | `ok: true` | Every constraint holds and nothing is unlisted | The graph is frozen. Record `apiSha256`, `graphSha256` and the recorded shift in the run sheet |
+   | `stop: true` | The export contains a setting the constraints do not list | **Stop. Terminate the Pod. Send the report to the owner.** The operator does not decide that an unlisted setting is harmless |
+   | Any `problems` | A node, setting or connection is wrong, missing or extra | Fix the workflow to match the lock and export again. If it cannot be made to match, stop and return to the owner |
 
-## 11. Step 7: generation and copying
+4. Every later export is checked against the frozen graph and may differ only in the seed (and, for a smoke run, the latent size and steps):
+   ```
+   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --candidate B --file <export.json> --frozen <run folder>/frozen-q.json
+   node studio/tools/ap84b3/check-workflow.mjs --workflow Q --smoke --file <export.json> --frozen <run folder>/frozen-q.json
+   ```
+5. No workflow change after the freeze. A change means a new freeze and the owner's approval.
 
-Before each generation or retry, run `./watchdog.sh gate`. If the gate is closed, do not start.
+**Evidence:** `pod-setup.sh` output; for each workflow the export hash, the frozen graph hash and the checker's report; the shift value; installed software versions.
 
-1. **Smoke run:** at most one per workflow, 512×768, 8 steps, a seed not used by any candidate. It is saved and hashed, labelled `smoke`, and is never a candidate.
-2. Generate A, then B, then C. One generation each. No retries for quality.
-3. A retry is allowed only for a technical failure, with identical settings, and is recorded.
-4. **After each output, before the next generation:**
+## 11. Step 7: smoke runs, the latent gate, generation and copying
+
+Before each smoke run, generation or retry, run `./watchdog.sh gate`. If the gate is closed, do not start.
+
+**Smoke runs.** At most one per workflow: 512×768, 8 steps, seed **8403900**, otherwise identical to the frozen graph.
+
+1. Export the smoke version of the workflow and check it with `--smoke --frozen` (§10). Do not run it unless the check passes.
+2. Save the output as `smoke-q.png` or `smoke-s.png`. Collect it into its own outbox and verify it into its own folder:
+   ```
+   AP84B3_OUTBOX=/workspace/outbox/smoke ./collect-outputs.sh add <output file> smoke-q.png
+   node studio/tools/ap84b3/verify-transfer.mjs --run <run folder> --candidate smoke --staging <staging folder>
+   ```
+3. Record it in the run sheet's `smoke` list: workflow, name, SHA-256, seed, width, height and steps.
+4. A smoke image is never a candidate. The import adapter only reads candidates A, B and C, refuses any file named or hashed as a smoke image, and the run sheet is invalid if a smoke image is listed as a candidate.
+
+**Qwen latent compatibility gate (U8).** The Qwen smoke run is the test of `EmptySD3LatentImage`.
+
+| Outcome | Action |
+|---|---|
+| The run completes without error and returns a decodable 512×768 image | The gate passes. Record it. Continue |
+| An error, or an output that is plainly corrupt | **Stop. Terminate the Pod. Request owner approval.** Do not substitute another latent node, and do not fall back to the template's image-derived latent |
+
+The gate shows only that the node works technically.
+
+**Candidates.**
+
+1. Generate A, then B, then C. One generation each. No retries for quality.
+2. A retry is allowed only for a technical failure, with identical settings, and is recorded.
+3. **After each output, before the next generation:**
    ```
    AP84B3_OUTBOX=/workspace/outbox/A ./collect-outputs.sh add <output file> candidate-a-raw.png
    ```
@@ -192,10 +245,11 @@ Before each generation or retry, run `./watchdog.sh gate`. If the gate is closed
    ```
    node studio/tools/ap84b3/verify-transfer.mjs --run <run folder> --candidate A --staging <staging folder>
    ```
+   For candidate C, collect the resized 1024×1536 image as `candidate-c-raw.png` and also the 832×1248 image as `candidate-c-raw-832.png`.
 
 **Output-retention rule.** An output is safely retained only when it has been transferred to local storage and its checksum verified there. An output still on the Pod, or part-way through transfer, when the Pod stops is lost. A lost output is recorded as `lost` in the run sheet and is not regenerated without fresh owner approval. The limits take priority over completing a transfer.
 
-**Evidence:** every output's SHA-256 on the Pod and locally; each `transfers/<candidate>.verified.json`.
+**Evidence:** every output's SHA-256 on the Pod and locally; each `transfers/<candidate>.verified.json`; the smoke records; the latent gate result.
 
 ## 12. Console checkpoints (every 30 minutes)
 
@@ -240,7 +294,7 @@ Use it at 2 h 55 min if the Pod is still running, at any stop condition in §12,
    node studio/tools/ap84b3/cutout.cjs --in <raw.png> --out <run folder>/cutouts/candidate-a-cutout.png --meta <file.json>
    ```
    Raw and cut-out stay separate, each with its own hash. Report the cut-out's thresholds; do not change them.
-2. Complete the run sheet: Pod times and rate, software commits, workflow hashes, and for each candidate its status (`retained`, `lost` or `not-generated`) and file hashes.
+2. Complete the run sheet: Pod times, rate and consumption (`pod.consumedUSD`, the higher of the two methods), every earlier session in `priorSessions`, software commits, workflow hashes, the smoke records, and for each candidate its status (`retained`, `lost` or `not-generated`) and file hashes. The sheet is invalid if total runtime or total consumption across all sessions exceeds the limits.
 3. Start the studio with the import adapter and the run folder:
    ```
    STUDIO_GEN_ADAPTER=import STUDIO_GEN_IMPORT_DIR=<absolute run folder> node studio/server.mjs
@@ -266,9 +320,28 @@ Use it at 2 h 55 min if the Pod is still running, at any stop condition in §12,
 - [ ] SSH host key fingerprint
 - [ ] Master v3 hash on the Pod
 - [ ] `pod-setup.sh` verification output; installed versions
-- [ ] Both workflow export hashes and the shift value, recorded before any candidate
+- [ ] Padded reference SHA-256, equal to the lock
+- [ ] For each workflow: export hash, frozen graph hash and checker report, recorded before any candidate
+- [ ] The shift value, as recorded from the export
+- [ ] Smoke records (seed 8403900, 512×768, 8 steps) and their verification record
+- [ ] Qwen latent compatibility gate result
 - [ ] Each output's hash on the Pod and locally; each verification record
 - [ ] Checkpoint records every 30 minutes
 - [ ] Pod start and end times; final balance; consumption by both methods
 - [ ] Console confirmation that nothing remains
-- [ ] Run sheet, including any output recorded as lost
+- [ ] Run sheet, including any output recorded as lost, every earlier session and total consumption
+
+## 17. If a session ends early: cumulative limits
+
+A stop at the workflow freeze (§10), the latent gate (§11) or any other stop condition ends the Pod session. The limits do not reset.
+
+1. Terminate the Pod. Record the session in the run sheet's `priorSessions`: start and end time, GPU, consumption (the higher of the balance and usage methods) and the reason.
+2. Return to the owner. A further session needs the owner's decision on the reason for the stop.
+3. For a further session, work out what remains:
+   ```
+   node -e "import('./studio/lib/experiment-spec.mjs').then(m=>console.log(m.remainingLimits(m.loadLock().lock, <priorSessions>)))"
+   ```
+4. Start the watchdog with the **reduced** settings it reports: `WD_STOP_SECONDS`, `WD_NO_NEW_GENERATION_SECONDS` and `WD_ESTIMATE_STOP_USD`. The watchdog accepts only values at or below the approved maxima, so the limits can be tightened but never loosened.
+5. Start the local timer with the Pod start time moved earlier by the runtime already used, so its alerts fall at the cumulative times.
+6. If `sessionAllowed` is false, no further session may start.
+7. **No additional deposit.** The single $10 deposit is the only funding. If the balance cannot cover a further session within the ceiling, the experiment ends.

@@ -219,15 +219,24 @@ Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a 
   | `watchdog.sh` | Pod | Stops the Pod at 2 h 50 min or at a $4.75 estimate; gates new generations |
   | `collect-outputs.sh` | Pod | Copies each finished output into an outbox and lists it in a checksum manifest |
   | `verify-transfer.mjs` | Local | Verifies a pulled folder against the manifest; writes the success record last |
-  | `check-workflow.mjs` | Local | Checks an exported ComfyUI workflow against the lock and prints its hash |
+  | `check-workflow.mjs` | Local | Two-layer graph check of an exported ComfyUI workflow: constraints from the lock, then a freeze of the first export |
+  | `pad-reference.mjs` | Local | Pads master v3 to 1536×1536 with RGB (203, 203, 203) for the SDXL baseline's reference |
   | `compare-sheet.mjs` | Local | One-scale comparison sheet for review |
   | `stop-timer.mjs` | Local | Alerts for the manual stop and the 30-minute console checkpoints |
 
 - **Watchdog estimate:** GPU compute at the higher of the recorded rate and the approved cap, plus the container disk, plus every other listed resource. Each rate is normalised to dollars per hour with its billing period and conversion stated; rates with different billing periods are never added directly. It is an estimate, not a billing measurement. $5.00 and 3 hours remain absolute.
 - **Watchdog authentication is unresolved until D1-7.** The script holds no credential and assumes none is injected; it calls the stop command it is given. No account-level API key may be placed in the repository or the Pod bundle. The manual stop in the web console is independent of it.
 - **Transfers:** an output is safely retained only when it has been transferred and its checksum verified locally. A failed or interrupted verification leaves no success record.
+- **Workflow graph check (lock amendment, 2026-11-14):**
+  - **Layer 1, in the lock:** one entry per node (type and literal settings) and the connections between them. The world is closed: an extra node, a missing node, a changed setting or a rewired connection fails. Node numbers are ignored. Settings are not duplicated: each constraint points at the lock field that holds the approved value.
+  - **Unlisted settings stop the run.** A literal setting the constraints do not list is not judged harmless by the tool or the operator: the result is "stop", for the owner's review.
+  - **Layer 2, at execution:** the first export that passes is frozen. Later exports may differ only in the seed, and for a smoke run also the latent size and the step count. The real API export has not been seen and is not pre-approved.
+  - **Qwen latent node:** `EmptySD3LatentImage` is an **unverified compatibility gate**, tested in the smoke run. If it is incompatible the run stops; no other node is substituted.
+  - **Qwen shift:** recorded from the export, not pinned.
+- **Smoke runs:** 512×768, 8 steps, seed 8403900, at most one per workflow. The lock is invalid if the smoke seed equals a candidate seed. Smoke outputs are verified into their own folder, recorded in the run sheet and can never be imported as a candidate.
+- **Cumulative limits:** the $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session of the experiment. `remainingLimits` in `lib/experiment-spec.mjs` gives the reduced watchdog settings for a later session; a run sheet whose sessions exceed the limits in total is invalid.
 - **Run folders, bundles and outputs live outside the repository** and are never committed.
-- **Tests:** `tests/ap84b3.test.mjs` (23 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
+- **Tests:** `tests/ap84b3.test.mjs` (29 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
 
 ## Security
 

@@ -19,7 +19,8 @@ import {ADAPTERS, adapterFor, createImportAdapter, importAdapter} from '../lib/g
 import * as spec from '../lib/experiment-spec.mjs';
 import {bundleFiles, buildBundle} from '../tools/ap84b3/build-pod-bundle.mjs';
 import {verifyTransfer, checkStaging, isRetained, parseManifest, TransferRejected} from '../tools/ap84b3/verify-transfer.mjs';
-import {checkWorkflow} from '../tools/ap84b3/check-workflow.mjs';
+import {checkWorkflow, freeze, compareToFrozen, graphHash} from '../tools/ap84b3/check-workflow.mjs';
+import {padReference, padFromLock} from '../tools/ap84b3/pad-reference.mjs';
 import {schedule, due} from '../tools/ap84b3/stop-timer.mjs';
 import {buildSheet, layout} from '../tools/ap84b3/compare-sheet.mjs';
 import {canvas} from '../../production/lib/runtime.mjs';
@@ -77,13 +78,14 @@ function stage(run, id, files) {
   return dir;
 }
 const entry = (name, buf) => ({name, sha256: shaBuf(buf), bytes: buf.length});
+const smokeEntry = (fx, workflow, sha256) => ({workflow, name: `smoke-${workflow.toLowerCase()}.png`, sha256, seed: fx.lock.smoke.seed, width: fx.lock.smoke.width, height: fx.lock.smoke.height, steps: fx.lock.smoke.steps});
 function sheetFor(fx, cands, extra = {}) {
   const L = fx.lock;
   const candidates = Object.fromEntries(spec.CANDIDATE_IDS.map(id => [id, {workflow: L.candidates[id].workflow, seed: L.candidates[id].seed, status: 'not-generated', ...(cands[id] || {})}]));
   return {schema: spec.RUN_SHEET_SCHEMA, runId: 'r-20261120-140500', lockSha256: fx.sha256,
-    pod: {provider: L.provider.name, cloud: L.provider.cloud, gpu: L.provider.gpuPrimary, region: 'test-region', startedAt: '2026-11-20T14:05:00Z', endedAt: '2026-11-20T15:35:00Z', gpuRateUSDPerHour: L.limits.gpuRateCapUSDPerHour[L.provider.gpuPrimary]},
+    pod: {provider: L.provider.name, cloud: L.provider.cloud, gpu: L.provider.gpuPrimary, region: 'test-region', startedAt: '2026-11-20T14:05:00Z', endedAt: '2026-11-20T15:35:00Z', gpuRateUSDPerHour: L.limits.gpuRateCapUSDPerHour[L.provider.gpuPrimary], consumedUSD: '1.66'},
     software: {comfyuiCommit: L.software.comfyui.commit, ipadapterCommit: L.software.ipadapterPlus.commit},
-    workflows: {Q: {apiSha256: 'a'.repeat(64)}, S: {apiSha256: 'b'.repeat(64)}}, candidates, smoke: [], ...extra};
+    workflows: {Q: {apiSha256: 'a'.repeat(64)}, S: {apiSha256: 'b'.repeat(64)}}, candidates, priorSessions: [], smoke: [], ...extra};
 }
 // A complete, verified run folder holding candidate A (small synthetic images unless raw/cut are given).
 function buildRun(fx, {raw = png('raw A'), cut = png('cutout A', 96, 144, true), sheetExtra = {}} = {}) {
@@ -224,13 +226,26 @@ test('run sheet: a complete sheet is valid; every frozen value is checked agains
   const fx = fixture(), raw = png('r'), cut = png('c');
   const good = () => sheetFor(fx, {A: {status: 'retained', raw: entry('candidate-a-raw.png', raw), cutout: entry('candidate-a-cutout.png', cut)}});
   assert.deepEqual(spec.validateRunSheet(good(), fx.lock, fx.sha256), []);
+  // a sheet with an earlier (failed) session and both smoke runs is still valid while the cumulative totals stay inside the limits
+  const multi = good(); multi.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:25:00Z', gpu: multi.pod.gpu, consumedUSD: '0.50', reason: 'stopped at the freeze step for owner review'}];
+  multi.smoke = [smokeEntry(fx, 'Q', 'd'.repeat(64)), smokeEntry(fx, 'S', 'e'.repeat(64))];
+  assert.deepEqual(spec.validateRunSheet(multi, fx.lock, fx.sha256), []);
   const cases = [
     [s => { s.lockSha256 = 'c'.repeat(64); }, /lockSha256/], [s => { s.candidates.A.seed = 1; }, /seed differs/], [s => { s.candidates.B.workflow = 'S'; }, /workflow or seed/],
     [s => { s.software.comfyuiCommit = '1'.repeat(40); }, /comfyuiCommit/], [s => { s.software.ipadapterCommit = '1'.repeat(40); }, /ipadapterCommit/],
     [s => { s.pod.gpu = 'NVIDIA RTX 4090 24 GB'; }, /approved primary or fallback/], [s => { s.pod.gpuRateUSDPerHour = '1.10'; }, /rate cap/], [s => { s.pod.cloud = 'Community Cloud'; }, /approved provider/],
-    [s => { s.pod.endedAt = '2026-11-20T17:05:01Z'; }, /runtime exceeds/], [s => { delete s.workflows.Q.apiSha256; }, /apiSha256/], [s => { delete s.candidates.C; }, /exactly A, B and C/],
+    [s => { s.pod.endedAt = '2026-11-20T17:05:01Z'; }, /total Pod runtime across all sessions exceeds/], [s => { delete s.workflows.Q.apiSha256; }, /apiSha256/], [s => { delete s.candidates.C; }, /exactly A, B and C/],
     [s => { s.candidates.A.cutout.name = '../escape.png'; }, /safe \.png name/], [s => { s.candidates.A.raw.sha256 = 'xyz'; }, /sha256/], [s => { s.candidates.A.status = 'kept'; }, /status must be/],
-    [s => { s.smoke = [{workflow: 'Q', sha256: 'd'.repeat(64)}, {workflow: 'Q', sha256: 'e'.repeat(64)}]; }, /more than 1 smoke run/], [s => { delete s.smoke; }, /smoke must be a list/],
+    [s => { s.smoke = [smokeEntry(fx, 'Q', 'd'.repeat(64)), smokeEntry(fx, 'Q', 'e'.repeat(64))]; }, /more than 1 smoke run/], [s => { delete s.smoke; }, /smoke must be a list/],
+    [s => { s.smoke = [{...smokeEntry(fx, 'Q', 'd'.repeat(64)), seed: s.candidates.A.seed}]; }, /seed differs from the lock's smoke seed/],
+    [s => { s.smoke = [{...smokeEntry(fx, 'Q', 'd'.repeat(64)), steps: 40}]; }, /size or steps differ/], [s => { s.smoke = [{...smokeEntry(fx, 'S', 'd'.repeat(64)), width: 1024}]; }, /size or steps differ/],
+    [s => { s.smoke = [{...smokeEntry(fx, 'Q', 'd'.repeat(64)), name: 'candidate-a-raw.png'}]; }, /name smoke-q\.png or smoke-s\.png/], [s => { s.smoke = [{...smokeEntry(fx, 'Q', 'd'.repeat(64)), name: 'smoke-s.png'}]; }, /name smoke-q\.png or smoke-s\.png/],
+    [s => { s.smoke = [smokeEntry(fx, 'Q', s.candidates.A.raw.sha256)]; }, /candidate A: raw is a smoke image/], [s => { s.candidates.A.cutout.name = 'smoke-q.png'; }, /named as a smoke image/],
+    [s => { delete s.priorSessions; }, /priorSessions must be a list/], [s => { delete s.pod.consumedUSD; }, /pod\.consumedUSD/],
+    [s => { s.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T11:31:00Z', gpu: s.pod.gpu, consumedUSD: '1.70', reason: 'stopped at the freeze step'}]; }, /total Pod runtime across all sessions exceeds/],
+    [s => { s.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:20:00Z', gpu: s.pod.gpu, consumedUSD: '3.40', reason: 'stopped at the latent gate'}]; }, /total consumption across all sessions exceeds/],
+    [s => { s.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:20:00Z', gpu: s.pod.gpu, consumedUSD: '0.40'}]; }, /each prior session needs/],
+    [s => { s.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:20:00Z', gpu: 'NVIDIA RTX 4090 24 GB', consumedUSD: '0.40', reason: 'x'}]; }, /prior session used a GPU that is not approved/],
   ];
   for (const [mutate, pattern] of cases) { const s = good(); mutate(s); assert.ok(spec.validateRunSheet(s, fx.lock, fx.sha256).some(p => pattern.test(p)), `caught: ${pattern}`); }
 });
@@ -299,7 +314,8 @@ test('import adapter: every unsafe or unverified bundle is refused and nothing i
     const real = path.join(r.run, 'cutouts-real'); fs.renameSync(path.join(r.run, 'cutouts'), real);
     fs.symlinkSync(real, path.join(r.run, 'cutouts'), process.platform === 'win32' ? 'junction' : 'dir');
   });
-  await refuse(/smoke images are never candidates/, r => reSheet(r, s => { s.smoke = [{workflow: 'Q', name: 'smoke-q.png', sha256: s.candidates.A.cutout.sha256}]; }));
+  await refuse(/smoke images are never candidates/, r => reSheet(r, s => { s.smoke = [smokeEntry(fx, 'Q', s.candidates.A.cutout.sha256)]; }));
+  await refuse(/description must start with/, null, {...REQ, description: 'AP-84B3 candidate smoke'});
   await refuse(/recorded as lost/, r => reSheet(r, s => { s.candidates.A = {workflow: s.candidates.A.workflow, seed: s.candidates.A.seed, status: 'lost'}; }));
   await refuse(/run sheet is missing/, r => { fs.rmSync(path.join(r.run, 'run-sheet.json')); });
   await refuse(/run sheet is not valid/, r => { fs.writeFileSync(path.join(r.run, 'run-sheet.json'), '{"schema": "x", "schema": "y"}'); });
@@ -629,61 +645,172 @@ test('transfer: an incomplete, mismatched or interrupted transfer never receives
 });
 
 // ---------------------------------------------------------------------------------------------------
-function graph(workflow, lock, candidate) {
+// Build an export-shaped graph from a hand-written fixture template. The fixtures are synthetic: the real API export
+// has not been seen, and these do not pre-approve it. mode: {candidate} or {smoke: true}.
+function graph(workflow, lock, mode) {
   const W = lock.workflows[workflow], models = Object.fromEntries(lock.models.filter(m => m.workflow === workflow).map(m => [m.role, path.posix.basename(m.saveAs)]));
-  const values = {__PROMPT__: W.prompt, __NEGATIVE__: W.negativePrompt, __SEED__: lock.candidates[candidate].seed, __STEPS__: W.steps, __CFG__: Number(W.cfg), __SAMPLER__: W.sampler, __SCHEDULER__: W.scheduler,
-    __WIDTH__: W.width, __HEIGHT__: W.height, __UNET__: models['diffusion-model'], __CLIP__: models['text-encoder'], __VAE__: models.vae, __CHECKPOINT__: models.checkpoint,
+  const sm = mode.smoke ? lock.smoke : null;
+  const values = {__PROMPT__: W.prompt, __NEGATIVE__: W.negativePrompt, __SEED__: sm ? sm.seed : lock.candidates[mode.candidate].seed, __STEPS__: sm ? sm.steps : W.steps, __CFG__: Number(W.cfg), __SAMPLER__: W.sampler, __SCHEDULER__: W.scheduler,
+    __WIDTH__: sm ? sm.width : W.width, __HEIGHT__: sm ? sm.height : W.height, __UNET__: models['diffusion-model'], __CLIP__: models['text-encoder'], __VAE__: models.vae, __CHECKPOINT__: models.checkpoint,
+    __IPA__: models['ip-adapter'], __CLIPVISION__: models['image-encoder'],
     __IPA_WEIGHT__: Number(W.ipAdapter?.weight), __IPA_WEIGHT_TYPE__: W.ipAdapter?.weightType, __IPA_START__: Number(W.ipAdapter?.startAt), __IPA_END__: Number(W.ipAdapter?.endAt),
     __RESIZE__: W.finalResize, __FINAL_WIDTH__: W.finalWidth, __FINAL_HEIGHT__: W.finalHeight};
   const g = JSON.parse(fs.readFileSync(path.join(FIX, `${workflow.toLowerCase()}.api.template.json`), 'utf8'));
   for (const n of Object.values(g)) for (const [k, v] of Object.entries(n.inputs)) if (typeof v === 'string' && v in values) n.inputs[k] = values[v];
   return g;
 }
-test('workflow checker: matching exports pass; any changed setting, model, prompt or an added LoRA is refused', () => {
+// The same graph with different node numbers, in a different order.
+function renumber(g) {
+  const ids = Object.keys(g), map = Object.fromEntries(ids.map((id, i) => [id, String(900 - i * 7)]));
+  return Object.fromEntries(ids.slice().reverse().map(id => [map[id], {class_type: g[id].class_type, inputs: Object.fromEntries(Object.entries(g[id].inputs).map(([k, v]) => [k, Array.isArray(v) ? [map[v[0]], v[1]] : v]))}]));
+}
+test('workflow checker, layer 1: exports that meet every constraint pass, whatever their node numbers', () => {
   const lock = REAL.lock;
-  for (const [w, c] of [['Q', 'A'], ['Q', 'B'], ['S', 'C']]) {
-    const res = checkWorkflow({graph: graph(w, lock, c), workflow: w, candidate: c, lock});
-    assert.deepEqual(res.problems, [], `${w}/${c} matches the lock`); assert.equal(res.ok, true);
+  const hashes = {};
+  for (const [w, mode] of [['Q', {candidate: 'A'}], ['Q', {candidate: 'B'}], ['S', {candidate: 'C'}], ['Q', {smoke: true}], ['S', {smoke: true}]]) {
+    const args = {workflow: w, lock, candidate: mode.candidate ?? null, smoke: !!mode.smoke};
+    const res = checkWorkflow({graph: graph(w, lock, mode), ...args});
+    assert.deepEqual([res.problems, res.unlisted], [[], []], `${w} ${JSON.stringify(mode)} meets the constraints`);
+    assert.equal(res.ok, true); assert.equal(res.stop, false); assert.match(res.graphSha256, /^[0-9a-f]{64}$/);
+    const again = checkWorkflow({graph: renumber(graph(w, lock, mode)), ...args});
+    assert.equal(again.ok, true); assert.equal(again.graphSha256, res.graphSha256, 'node numbers and order do not matter');
+    hashes[`${w}${mode.candidate ?? 'smoke'}`] = res.graphSha256;
   }
-  assert.equal(checkWorkflow({graph: graph('Q', lock, 'A'), workflow: 'Q', candidate: 'A', lock}).recorded.shift, 3.1, 'the shift value is reported for the run sheet, not judged');
-  assert.equal(checkWorkflow({graph: graph('S', lock, 'C'), workflow: 'S', candidate: 'C', lock}).recorded.resizeInWorkflow, true);
-  const refuse = (w, c, pattern, change) => {
-    const g = graph(w, lock, c); change(g);
-    const res = checkWorkflow({graph: g, workflow: w, candidate: c, lock});
-    assert.equal(res.ok, false); assert.ok(res.problems.some(p => pattern.test(p)), `${w}: ${pattern} in ${JSON.stringify(res.problems)}`);
+  assert.notEqual(hashes.QA, hashes.QB, 'a different seed is a different graph');
+  const q = checkWorkflow({graph: graph('Q', lock, {candidate: 'A'}), workflow: 'Q', lock, candidate: 'A'});
+  assert.deepEqual(q.recorded, {shift: 3.1}, 'the shift value is recorded for the run sheet, not judged');
+  assert.deepEqual(q.free, {'image.image': 'master-v3.png', 'save.filename_prefix': 'ap84b3'}, 'free values are reported');
+  // The lock names the Qwen latent node as an unverified compatibility gate, never as confirmed.
+  assert.match(lock.workflows.Q.latentNodeStatus, /^compatibility-gate: unverified; test in the smoke run; on failure stop, no substitution$/);
+  assert.equal(lock.workflows.Q.shift, 'recorded-at-export');
+});
+
+test('workflow checker, layer 1: any extra node, missing node, changed setting or rewired connection fails', () => {
+  const lock = REAL.lock;
+  const refuse = (w, mode, pattern, change) => {
+    const g = graph(w, lock, mode); change(g);
+    const res = checkWorkflow({graph: g, workflow: w, lock, candidate: mode.candidate ?? null, smoke: !!mode.smoke});
+    assert.equal(res.ok, false, `${pattern} must not pass`); assert.equal(res.graphSha256, null);
+    assert.ok(res.problems.some(p => pattern.test(p)), `${w}: ${pattern} in ${JSON.stringify(res.problems)}`);
   };
-  refuse('Q', 'A', /seed is/, g => { g['10'].inputs.seed = 8403002; });                       // candidate B's seed in candidate A's export
-  refuse('Q', 'A', /steps is 20/, g => { g['10'].inputs.steps = 20; });
-  refuse('Q', 'A', /cfg is 2\.5/, g => { g['10'].inputs.cfg = 2.5; });
-  refuse('Q', 'A', /sampler is/, g => { g['10'].inputs.sampler_name = 'dpmpp_2m'; });
-  refuse('Q', 'A', /scheduler is/, g => { g['10'].inputs.scheduler = 'karras'; });
-  refuse('Q', 'A', /denoise/, g => { g['10'].inputs.denoise = 0.8; });
-  refuse('Q', 'A', /diffusion model is/, g => { g['1'].inputs.unet_name = 'qwen_image_edit_2509_fp8_e4m3fn.safetensors'; });
-  refuse('Q', 'A', /diffusion model is/, g => { g['1'].inputs.unet_name = 'qwen_image_edit_2511_bf16.safetensors'; });
-  refuse('Q', 'A', /text encoder is/, g => { g['2'].inputs.clip_name = 'qwen_2.5_vl_7b.safetensors'; });
-  refuse('Q', 'A', /VAE is/, g => { g['3'].inputs.vae_name = 'other_vae.safetensors'; });
-  refuse('Q', 'A', /positive prompt differs/, g => { g['7'].inputs.prompt += ' Add a hat.'; });
-  refuse('Q', 'A', /positive prompt differs/, g => { g['7'].inputs.prompt = g['7'].inputs.prompt.replace('ribbed collar and ribbed hem', 'ribbed turtleneck'); });
-  refuse('Q', 'A', /negative prompt differs/, g => { g['8'].inputs.prompt = ''; });           // the template's empty string is not the approved single space
-  refuse('Q', 'A', /LoRA node present/, g => { g['20'] = {class_type: 'LoraLoaderModelOnly', inputs: {lora_name: 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors', strength_model: 1, model: ['1', 0]}}; });
-  refuse('Q', 'A', /latent size is 1024x1024/, g => { g['9'].inputs.height = 1024; });
-  refuse('Q', 'A', /batch size is 2/, g => { g['9'].inputs.batch_size = 2; });
-  refuse('Q', 'A', /latent size must be set explicitly/, g => { g['9'] = {class_type: 'VAEEncode', inputs: {pixels: ['4', 0], vae: ['3', 0]}}; });   // the template's image-derived latent
-  refuse('Q', 'A', /exactly one KSampler/, g => { g['30'] = structuredClone(g['10']); });
-  refuse('Q', 'A', /ModelSamplingAuraFlow/, g => { delete g['5']; g['6'].inputs.model = ['1', 0]; });
-  refuse('Q', 'A', /must not load a checkpoint/, g => { g['31'] = {class_type: 'CheckpointLoaderSimple', inputs: {ckpt_name: 'sd_xl_base_1.0.safetensors'}}; });
-  refuse('S', 'C', /checkpoint is/, g => { g['1'].inputs.ckpt_name = 'sd_xl_base_1.0_0.9vae.safetensors'; });
-  refuse('S', 'C', /IP-Adapter weight is 1/, g => { g['4'].inputs.weight = 1; });
-  refuse('S', 'C', /weight type/, g => { g['4'].inputs.weight_type = 'style transfer'; });
-  refuse('S', 'C', /IP-Adapter range/, g => { g['4'].inputs.end_at = 0.8; });
-  refuse('S', 'C', /latent size is 1024x1536/, g => { g['7'].inputs.width = 1024; g['7'].inputs.height = 1536; });
-  refuse('S', 'C', /resize is bicubic/, g => { g['10'].inputs.upscale_method = 'bicubic'; });
-  refuse('S', 'C', /ControlNet node present/, g => { g['21'] = {class_type: 'ControlNetApplyAdvanced', inputs: {strength: 1}}; });
-  refuse('S', 'C', /negative prompt differs/, g => { g['6'].inputs.text += ', blurry'; });
-  refuse('S', 'C', /steps is/, g => { g['8'].inputs.steps = 40; });
+  const A = {candidate: 'A'}, C = {candidate: 'C'};
+  // changed settings
+  refuse('Q', A, /"seed" is 8403002, approved 8403001/, g => { g['10'].inputs.seed = 8403002; });
+  refuse('Q', A, /"seed" is 8403900/, g => { g['10'].inputs.seed = lock.smoke.seed; });                 // the smoke seed in a candidate export
+  refuse('Q', {smoke: true}, /"seed" is 8403001, approved 8403900/, g => { g['10'].inputs.seed = 8403001; });   // a candidate seed in a smoke export
+  refuse('Q', {smoke: true}, /"steps" is 40, approved 8/, g => { g['10'].inputs.steps = 40; });
+  refuse('Q', {smoke: true}, /"width" is 1024, approved 512/, g => { g['9'].inputs.width = 1024; });
+  refuse('Q', A, /"steps" is 20, approved 40/, g => { g['10'].inputs.steps = 20; });
+  refuse('Q', A, /"cfg" is 2\.5, approved 4/, g => { g['10'].inputs.cfg = 2.5; });
+  refuse('Q', A, /"sampler_name"/, g => { g['10'].inputs.sampler_name = 'dpmpp_2m'; });
+  refuse('Q', A, /"scheduler"/, g => { g['10'].inputs.scheduler = 'karras'; });
+  refuse('Q', A, /"denoise" is 0\.8, approved 1/, g => { g['10'].inputs.denoise = 0.8; });
+  refuse('Q', A, /"denoise" is missing/, g => { delete g['10'].inputs.denoise; });
+  refuse('Q', A, /"unet_name"/, g => { g['1'].inputs.unet_name = 'qwen_image_edit_2509_fp8_e4m3fn.safetensors'; });
+  refuse('Q', A, /"unet_name"/, g => { g['1'].inputs.unet_name = 'qwen_image_edit_2511_bf16.safetensors'; });
+  refuse('Q', A, /"weight_dtype"/, g => { g['1'].inputs.weight_dtype = 'fp8_e4m3fn_fast'; });
+  refuse('Q', A, /"clip_name"/, g => { g['2'].inputs.clip_name = 'qwen_2.5_vl_7b.safetensors'; });
+  refuse('Q', A, /"type" is "flux2"/, g => { g['2'].inputs.type = 'flux2'; });
+  refuse('Q', A, /"vae_name"/, g => { g['3'].inputs.vae_name = 'other_vae.safetensors'; });
+  refuse('Q', A, /"prompt"/, g => { g['7'].inputs.prompt += ' Add a hat.'; });
+  refuse('Q', A, /"prompt"/, g => { g['7'].inputs.prompt = g['7'].inputs.prompt.replace('a ribbed collar and ribbed hem', 'ribbing'); });
+  refuse('Q', A, /"prompt"/, g => { g['8'].inputs.prompt = ''; });                                       // the template's empty string is not the approved single space
+  refuse('Q', A, /"reference_latents_method"/, g => { g['13'].inputs.reference_latents_method = 'offset'; });
+  refuse('Q', A, /"strength" is 0\.5/, g => { g['6'].inputs.strength = 0.5; });
+  refuse('Q', A, /"pre_cfg" is true/, g => { g['6'].inputs.pre_cfg = true; });
+  refuse('Q', A, /"height" is 1024, approved 1536/, g => { g['9'].inputs.height = 1024; });
+  refuse('Q', A, /"batch_size" is 2/, g => { g['9'].inputs.batch_size = 2; });
+  refuse('Q', A, /"shift" must be a number/, g => { g['5'].inputs.shift = 'auto'; });
+  // extra and missing nodes; the unmodified template's nodes are not accepted
+  refuse('Q', A, /node type LoraLoaderModelOnly is not part of the approved workflow/, g => { g['20'] = {class_type: 'LoraLoaderModelOnly', inputs: {lora_name: 'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors', strength_model: 1, model: ['6', 0]}}; });
+  refuse('Q', A, /node type FluxKontextImageScale is not part of the approved workflow/, g => { g['21'] = {class_type: 'FluxKontextImageScale', inputs: {image: ['4', 0]}}; g['7'].inputs.image1 = ['21', 0]; });
+  refuse('Q', A, /expected 1 node\(s\) of type EmptySD3LatentImage, found 0/, g => { g['9'] = {class_type: 'VAEEncode', inputs: {pixels: ['4', 0], vae: ['3', 0]}}; });
+  refuse('Q', A, /expected 1 node\(s\) of type EmptySD3LatentImage, found 0/, g => { g['9'].class_type = 'EmptyLatentImage'; });   // no substitute latent node
+  refuse('Q', A, /expected 1 node\(s\) of type KSampler, found 2/, g => { g['30'] = structuredClone(g['10']); });
+  refuse('Q', A, /expected 1 node\(s\) of type CFGNorm, found 0/, g => { delete g['6']; g['10'].inputs.model = ['5', 0]; });
+  refuse('Q', A, /expected 2 node\(s\) of type FluxKontextMultiReferenceLatentMethod, found 1/, g => { delete g['14']; g['10'].inputs.negative = ['8', 0]; });
+  refuse('Q', A, /node type CheckpointLoaderSimple is not part/, g => { g['31'] = {class_type: 'CheckpointLoaderSimple', inputs: {ckpt_name: 'sd_xl_base_1.0.safetensors'}}; });
+  refuse('Q', A, /node type PrimitiveFloat is not part/, g => { g['32'] = {class_type: 'PrimitiveFloat', inputs: {value: 4}}; });
+  // rewired connections
+  refuse('Q', A, /"model" is connected to shift, expected cfgnorm/, g => { g['10'].inputs.model = ['5', 0]; });                          // CFGNorm bypassed
+  refuse('Q', A, /expected/, g => { [g['10'].inputs.positive, g['10'].inputs.negative] = [g['10'].inputs.negative, g['10'].inputs.positive]; });   // prompts swapped
+  refuse('Q', A, /unexpected connection on "image2"/, g => { g['7'].inputs.image2 = ['4', 0]; });                                         // a second reference image
+  refuse('Q', A, /required connection "image1" from image is missing/, g => { delete g['8'].inputs.image1; });                            // negative encoder without the image
+  refuse('Q', A, /required connection "vae" from vae is missing/, g => { delete g['7'].inputs.vae; });
+  refuse('Q', A, /"steps" must be a literal setting, but it is connected/, g => { g['10'].inputs.steps = ['9', 0]; });
+  refuse('Q', A, /"model" must be connected to unet, but it is a literal value/, g => { g['5'].inputs.model = 'x'; });
+  // SDXL + IP-Adapter
+  refuse('S', C, /"ckpt_name"/, g => { g['1'].inputs.ckpt_name = 'sd_xl_base_1.0_0.9vae.safetensors'; });
+  refuse('S', C, /"ipadapter_file"/, g => { g['3'].inputs.ipadapter_file = 'ip-adapter_sdxl_vit-h.safetensors'; });
+  refuse('S', C, /"clip_name"/, g => { g['12'].inputs.clip_name = 'CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors'; });
+  refuse('S', C, /"weight" is 1, approved 0\.8/, g => { g['4'].inputs.weight = 1; });
+  refuse('S', C, /"weight_type"/, g => { g['4'].inputs.weight_type = 'style transfer'; });
+  refuse('S', C, /"combine_embeds" is "average"/, g => { g['4'].inputs.combine_embeds = 'average'; });
+  refuse('S', C, /"embeds_scaling" is "K\+V"/, g => { g['4'].inputs.embeds_scaling = 'K+V'; });
+  refuse('S', C, /"end_at" is 0\.8/, g => { g['4'].inputs.end_at = 0.8; });
+  refuse('S', C, /unexpected connection on "image_negative"/, g => { g['4'].inputs.image_negative = ['2', 0]; });
+  refuse('S', C, /unexpected connection on "attn_mask"/, g => { g['4'].inputs.attn_mask = ['2', 1]; });
+  refuse('S', C, /required connection "clip_vision" from visionloader is missing/, g => { delete g['4'].inputs.clip_vision; });
+  refuse('S', C, /node type IPAdapterUnifiedLoader is not part/, g => { g['3'] = {class_type: 'IPAdapterUnifiedLoader', inputs: {preset: 'PLUS (high strength)', model: ['1', 0]}}; });
+  refuse('S', C, /node type PrepImageForClipVision is not part/, g => { g['40'] = {class_type: 'PrepImageForClipVision', inputs: {interpolation: 'LANCZOS', crop_position: 'pad', sharpening: 0, image: ['2', 0]}}; });
+  refuse('S', C, /expected 2 node\(s\) of type CLIPTextEncode, found 1/, g => { g['5'].class_type = 'CLIPTextEncodeSDXL'; });
+  refuse('S', C, /node type CLIPSetLastLayer is not part/, g => { g['41'] = {class_type: 'CLIPSetLastLayer', inputs: {stop_at_clip_layer: -2, clip: ['1', 1]}}; });
+  refuse('S', C, /node type ControlNetApplyAdvanced is not part/, g => { g['42'] = {class_type: 'ControlNetApplyAdvanced', inputs: {strength: 1}}; });
+  refuse('S', C, /node type VAELoader is not part/, g => { g['43'] = {class_type: 'VAELoader', inputs: {vae_name: 'sdxl_vae.safetensors'}}; });
+  refuse('S', C, /"width" is 1024, approved 832/, g => { g['7'].inputs.width = 1024; g['7'].inputs.height = 1536; });
+  refuse('S', C, /"upscale_method" is "bicubic"/, g => { g['10'].inputs.upscale_method = 'bicubic'; });
+  refuse('S', C, /"crop" is "center"/, g => { g['10'].inputs.crop = 'center'; });
+  refuse('S', C, /expected 2 node\(s\) of type SaveImage, found 1/, g => { delete g['13']; });            // the raw output must also be saved
+  refuse('S', C, /"text"/, g => { g['6'].inputs.text += ', blurry'; });
+  refuse('S', C, /"steps" is 40, approved 30/, g => { g['8'].inputs.steps = 40; });
+  refuse('S', C, /"denoise"/, g => { g['8'].inputs.denoise = 0.9; });
+  refuse('S', C, /"model" is connected to checkpoint, expected ipadapter/, g => { g['8'].inputs.model = ['1', 0]; });   // IP-Adapter bypassed
   // wrong pairing and wrong format
-  assert.match(checkWorkflow({graph: graph('S', lock, 'C'), workflow: 'S', candidate: 'A', lock}).problems[0], /candidate A does not use workflow S/);
-  assert.match(checkWorkflow({graph: {nodes: [], links: []}, workflow: 'Q', candidate: 'A', lock}).problems[0], /not an API-format export/);
+  const bad = (args, pattern) => { const r = checkWorkflow({lock, ...args}); assert.equal(r.ok, false); assert.match(r.problems[0], pattern); };
+  bad({graph: graph('S', lock, C), workflow: 'S', candidate: 'A'}, /candidate A does not use workflow S/);
+  bad({graph: graph('Q', lock, A), workflow: 'Q', candidate: 'A', smoke: true}, /either a candidate .* or a smoke run/);
+  bad({graph: graph('Q', lock, A), workflow: 'Q'}, /either a candidate .* or a smoke run/);
+  bad({graph: {nodes: [], links: []}, workflow: 'Q', candidate: 'A'}, /not an API-format export/);
+  bad({graph: {'1': {inputs: {}}}, workflow: 'Q', candidate: 'A'}, /every node needs a class_type/);
+});
+
+test('workflow checker: an unlisted setting stops for owner review; layer 2 freezes the first export and compares the rest', () => {
+  const lock = REAL.lock, A = {candidate: 'A'};
+  const run = (g, mode = A, w = 'Q') => checkWorkflow({graph: g, workflow: w, lock, candidate: mode.candidate ?? null, smoke: !!mode.smoke});
+  // A literal setting that the constraints do not list is never waved through: not ok, stop, nothing to freeze.
+  for (const [id, name, value] of [['10', 'control_after_generate', 'fixed'], ['4', 'upload', 'image'], ['1', 'some_new_option', true], ['9', 'channels', 16]]) {
+    const g = graph('Q', lock, A); g[id].inputs[name] = value;
+    const r = run(g);
+    assert.equal(r.ok, false); assert.equal(r.stop, true, `"${name}" needs the owner's review`); assert.deepEqual(r.problems, []);
+    assert.equal(r.unlisted.length, 1); assert.match(r.unlisted[0], new RegExp(`setting "${name}" = .* is not listed in the approved constraints`));
+    assert.equal(r.graphSha256, null);
+    assert.throws(() => freeze({result: r, workflow: 'Q', candidate: 'A', lockSha256: REAL.sha256, apiSha256: 'a'.repeat(64)}), /only an export that passes every constraint/);
+  }
+  const sG = graph('S', lock, {candidate: 'C'}); sG['4'].inputs.unfold_batch = false;
+  assert.equal(run(sG, {candidate: 'C'}, 'S').stop, true);
+  // A real defect together with an unlisted setting is a failure, not merely a stop.
+  const both = graph('Q', lock, A); both['10'].inputs.steps = 20; both['10'].inputs.extra = 1;
+  assert.deepEqual([run(both).ok, run(both).stop], [false, false]);
+
+  // Freeze candidate A's export. B and the smoke run must equal it apart from the values allowed to differ.
+  const first = run(graph('Q', lock, A));
+  const frozen = freeze({result: first, workflow: 'Q', candidate: 'A', lockSha256: REAL.sha256, apiSha256: 'a'.repeat(64)});
+  assert.equal(frozen.graphSha256, first.graphSha256); assert.equal(frozen.graphSha256, graphHash(frozen.normalForm)); assert.deepEqual(frozen.recorded, {shift: 3.1});
+  assert.deepEqual(Object.keys(frozen.normalForm).sort(), lock.workflows.Q.graphConstraints.nodes.map(n => n.role).sort(), 'the frozen form is keyed by role, not by node number');
+  const cmp = (g, mode) => compareToFrozen({frozen, result: run(g, mode), lock, workflow: 'Q', smoke: !!mode.smoke});
+  assert.deepEqual(cmp(graph('Q', lock, {candidate: 'B'}), {candidate: 'B'}), [], 'B differs from A only in its seed');
+  assert.deepEqual(cmp(renumber(graph('Q', lock, {candidate: 'B'})), {candidate: 'B'}), []);
+  assert.deepEqual(cmp(graph('Q', lock, {smoke: true}), {smoke: true}), [], 'the smoke run differs only in seed, latent size and steps');
+  // Things layer 1 cannot pin are pinned by the freeze: the shift, the output slots and the file names.
+  const d = (change, mode = {candidate: 'B'}) => { const g = graph('Q', lock, mode); change(g); return cmp(g, mode); };
+  assert.match(d(g => { g['5'].inputs.shift = 3.0; })[0], /^shift\.shift: 3 differs from the frozen 3\.1$/);
+  assert.match(d(g => { g['11'].inputs.vae = ['3', 1]; })[0], /^decode\.vae: \["@vae",1\] differs from the frozen \["@vae",0\]$/);
+  assert.match(d(g => { g['4'].inputs.image = 'another-image.png'; })[0], /^image\.image:/);
+  assert.match(d(g => { g['5'].inputs.shift = 3.0; }, {smoke: true})[0], /^shift\.shift:/, 'a smoke run may not change the shift either');
+  // B compared as if it were a smoke run still passes; but a candidate's steps may not differ from the frozen graph.
+  assert.deepEqual(compareToFrozen({frozen, result: run(graph('Q', lock, {smoke: true}), {smoke: true}), lock, workflow: 'Q', smoke: false}).map(x => x.split(':')[0]).sort(), ['latent.height', 'latent.width', 'sampler.steps']);
+  assert.deepEqual(compareToFrozen({frozen: {...frozen, workflow: 'S'}, result: first, lock, workflow: 'Q'}), ['the frozen graph is missing or is for a different workflow']);
+  assert.match(compareToFrozen({frozen, result: run(both), lock, workflow: 'Q'})[0], /did not pass the constraints/);
 });
 
 test('comparison sheet: one scale for every figure; labels and hashes recorded; inputs unchanged', async () => {
@@ -788,10 +915,138 @@ test('boundaries: protected files are byte-identical, no credential is in the D1
   for (const [f, h] of protectedBefore) assert.equal(sha(path.join(REPO, f)), h, `${f} is unchanged`);
   const files = ['studio/config/ap84b3-experiment.json', 'studio/lib/experiment-spec.mjs', 'studio/lib/gen-adapters.mjs', 'studio/server.mjs',
     ...fs.readdirSync(TOOLS).map(n => `studio/tools/ap84b3/${n}`), ...fs.readdirSync(FIX).map(n => `studio/tests/fixtures/ap84b3/${n}`), 'docs/oddly-relatable/AP-84B3-RUNBOOK.md'];
-  assert.deepEqual(fs.readdirSync(TOOLS).sort(), ['build-pod-bundle.mjs', 'check-workflow.mjs', 'collect-outputs.sh', 'compare-sheet.mjs', 'cutout.cjs', 'pod-setup.sh', 'stop-timer.mjs', 'verify-transfer.mjs', 'watchdog.sh']);
+  assert.deepEqual(fs.readdirSync(TOOLS).sort(), ['build-pod-bundle.mjs', 'check-workflow.mjs', 'collect-outputs.sh', 'compare-sheet.mjs', 'cutout.cjs', 'pad-reference.mjs', 'pod-setup.sh', 'stop-timer.mjs', 'verify-transfer.mjs', 'watchdog.sh']);
   assert.deepEqual(fs.readdirSync(FIX).sort(), ['q.api.template.json', 's.api.template.json']);
   const secret = /rpa_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(api[_-]?key|secret|password|token)\b\s*[:=]\s*['"][^'"\s]{8,}['"]|AKIA[0-9A-Z]{16}/i;
   for (const f of files) assert.ok(!secret.test(fs.readFileSync(path.join(REPO, f), 'utf8')), `${f} holds no credential`);
   // no run folder, bundle or output was written into the repository by these tests
   for (const d of ['studio/tools/ap84b3/transfers', 'studio/tools/ap84b3/rejected', 'studio/quarantine', 'studio/cutouts']) assert.ok(!fs.existsSync(path.join(REPO, d)));
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Lock amendment (owner decisions A1 to A3): smoke seed, pinned node settings, local reference padding,
+// cumulative limits.
+test('lock amendment: approved additions are present; the smoke seed and the latent gate are enforced by the lock itself', () => {
+  const L = REAL.lock;
+  assert.deepEqual({seed: L.smoke.seed, width: L.smoke.width, height: L.smoke.height, steps: L.smoke.steps, max: L.smoke.maxPerWorkflow}, {seed: 8403900, width: 512, height: 768, steps: 8, max: 1});
+  assert.ok(!Object.values(L.candidates).some(c => c.seed === L.smoke.seed));
+  assert.deepEqual([L.workflows.Q.denoise, L.workflows.S.denoise], ['1.0', '1.0']);
+  assert.deepEqual([L.workflows.Q.inputScaling, L.workflows.Q.latentNode, L.workflows.Q.referenceLatentsMethod], ['none', 'EmptySD3LatentImage', 'index_timestep_zero']);
+  assert.deepEqual(L.workflows.Q.referenceImages, {image1: 'master-v3', image2: 'none', image3: 'none'});
+  assert.deepEqual([L.workflows.S.promptEncoder, L.workflows.S.clipSkip, L.workflows.S.finalResize, L.workflows.S.finalResizeCrop, L.workflows.S.rawOutputRetained], ['CLIPTextEncode', 'none', 'lanczos', 'disabled', true]);
+  const I = L.workflows.S.ipAdapter;
+  assert.deepEqual([I.loader, I.imageEncoderLoader, I.combineEmbeds, I.embedsScaling, I.imageNegative, I.attnMask], ['IPAdapterModelLoader', 'CLIPVisionLoader', 'concat', 'V only', 'none', 'none']);
+  assert.deepEqual([I.weight, I.weightType, I.startAt, I.endAt], ['0.8', 'linear', '0.0', '1.0'], 'the previously approved IP-Adapter settings are unchanged');
+  assert.deepEqual({w: L.workflows.S.reference.canvasWidth, h: L.workflows.S.reference.canvasHeight, rgb: L.workflows.S.reference.padColourRGB, local: L.workflows.S.reference.preparedLocally}, {w: 1536, h: 1536, rgb: [203, 203, 203], local: true});
+  assert.equal(L.limits.cumulativeAcrossSessions, true);
+  // The seven save paths, as documented by the pinned sources.
+  assert.deepEqual(L.models.map(m => m.saveAs), ['models/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors', 'models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors', 'models/vae/qwen_image_vae.safetensors',
+    'models/checkpoints/sd_xl_base_1.0.safetensors', 'models/ipadapter/ip-adapter-plus_sdxl_vit-h.safetensors', 'models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors']);
+  assert.equal(L.software.ipadapterPlus.saveAs, 'custom_nodes/ComfyUI_IPAdapter_plus');
+  // The lock refuses to be valid if these safeguards are weakened.
+  const invalid = (mutate, pattern) => assert.throws(() => spec.loadLock(fixture({mutate})), pattern);
+  invalid(o => { o.smoke.seed = o.candidates.A.seed; }, /smoke seed must differ from every candidate seed/);
+  invalid(o => { o.smoke.seed = o.candidates.B.seed; }, /smoke seed must differ from every candidate seed/);
+  invalid(o => { delete o.smoke.seed; }, /smoke\.seed/);
+  invalid(o => { o.smoke.maxPerWorkflow = 2; }, /smoke needs/);
+  invalid(o => { o.workflows.Q.latentNodeStatus = 'verified'; }, /unverified compatibility gate/);
+  invalid(o => { delete o.workflows.Q.latentNodeStatus; }, /unverified compatibility gate/);
+  invalid(o => { o.workflows.Q.inputScaling = 'FluxKontextImageScale'; }, /inputScaling must be "none"/);
+  invalid(o => { o.workflows.Q.shift = '3.1'; }, /shift "recorded-at-export"/);
+  invalid(o => { delete o.workflows.S.denoise; }, /denoise and latentNode are required/);
+  invalid(o => { o.workflows.S.promptEncoder = 'CLIPTextEncodeSDXL'; }, /prompt encoder/);
+  invalid(o => { o.workflows.S.ipAdapter.attnMask = 'mask.png'; }, /no attention mask/);
+  invalid(o => { o.workflows.S.reference.padColourRGB = [0, 0, 0, 0]; }, /padColourRGB/);
+  invalid(o => { o.limits.cumulativeAcrossSessions = false; }, /cumulative across sessions/);
+  // Graph constraints must be well formed, closed, and free of forbidden nodes.
+  const G = o => o.workflows.Q.graphConstraints;
+  invalid(o => { G(o).closedWorld = false; }, /needs closedWorld/);
+  invalid(o => { G(o).connections.push({from: 'unet', to: 'nowhere', input: 'model'}); }, /unknown role/);
+  invalid(o => { G(o).connections.push({from: 'unet', to: 'sampler', input: 'model'}); }, /defined twice/);
+  invalid(o => { G(o).nodes.push({role: 'lora', type: 'LoraLoaderModelOnly', literals: {}}); }, /forbidden node type/);
+  invalid(o => { G(o).nodes.push({role: 'scale', type: 'FluxKontextImageScale', literals: {}}); }, /forbidden node type/);
+  invalid(o => { G(o).nodes.find(n => n.role === 'latent').type = 'EmptyLatentImage'; }, /exactly one latent node of the pinned type/);
+  invalid(o => { G(o).nodes.find(n => n.role === 'sampler').literals.steps = {ref: 'workflows.Q.nope', type: 'integer'}; }, /no value at workflows\.Q\.nope/);
+  invalid(o => { G(o).nodes.find(n => n.role === 'sampler').literals.cfg = {ref: 'workflows.Q.cfg', type: 'integer'}; }, /not an integer/);
+  invalid(o => { o.workflows.S.graphConstraints.nodes.push({role: 'x', type: 'IPAdapterUnifiedLoader', literals: {}}); }, /forbidden node type/);
+  // Settings are single-sourced: the constraints point at the lock's own fields, so changing an approved value changes what the checker expects.
+  const changed = fixture({mutate: o => { o.workflows.Q.steps = 20; }}).lock;
+  assert.equal(spec.resolveLiteral(changed, 'Q', G(changed).nodes.find(n => n.role === 'sampler').literals.steps, {seed: 1}).value, 20);
+  assert.equal(spec.resolveLiteral(L, 'Q', G(L).nodes.find(n => n.role === 'sampler').literals.steps, {seed: 1, smoke: true}).value, 8);
+  assert.equal(spec.resolveLiteral(L, 'Q', G(L).nodes.find(n => n.role === 'sampler').literals.cfg, {seed: 1}).value, 4);
+});
+
+test('reference padding: 1536x1536, grey (203,203,203) borders, original pixels copied unchanged, repeatable, input untouched', async () => {
+  const before = sha(MASTER), L = REAL.lock, ref = L.workflows.S.reference, dir = tmp('ap84b3-pad-');
+  const a = await padReference({input: MASTER, canvasWidth: ref.canvasWidth, canvasHeight: ref.canvasHeight, padColourRGB: ref.padColourRGB});
+  const b = await padReference({input: MASTER, canvasWidth: ref.canvasWidth, canvasHeight: ref.canvasHeight, padColourRGB: ref.padColourRGB});
+  assert.equal(a.meta.output_sha256, b.meta.output_sha256, 'the result is repeatable');
+  assert.equal(a.meta.output_sha256, ref.sha256, 'the lock records this exact file');
+  assert.deepEqual(spec.pngSize(a.buffer), {width: 1536, height: 1536});
+  assert.deepEqual(a.meta.placement, {left: 256, top: 0}); assert.equal(a.meta.source_sha256, L.inputs.editInput.sha256);
+  // Pixels: borders are exactly the pad colour; the centre is master v3, pixel for pixel.
+  fs.writeFileSync(path.join(dir, 'padded.png'), a.buffer);
+  const px = async (file) => { const img = await canvas.loadImage(file); const c = canvas.createCanvas(img.width, img.height), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0); return (x, y) => [...ctx.getImageData(x, y, 1, 1).data]; };
+  const padded = await px(path.join(dir, 'padded.png')), master = await px(MASTER);
+  for (const [x, y] of [[0, 0], [255, 768], [128, 1535], [1280, 0], [1535, 1535], [1400, 700]]) assert.deepEqual(padded(x, y), [203, 203, 203, 255], `border pixel ${x},${y}`);
+  for (const [x, y] of [[0, 0], [512, 300], [512, 700], [400, 1340], [1023, 1535], [300, 900], [700, 250]]) assert.deepEqual(padded(x + 256, y), master(x, y), `master pixel ${x},${y} is unchanged`);
+  assert.equal(sha(MASTER), before, 'the input is unchanged');
+  // From the lock: written once, outside the repository, and only if the hash matches the lock.
+  const fx = fixture(), out = path.join(dir, 'reference.png');
+  const meta = await padFromLock({lock: fx.lock, outFile: out});
+  assert.equal(sha(out), ref.sha256); assert.equal(meta.output_sha256, ref.sha256);
+  await assert.rejects(padFromLock({lock: fx.lock, outFile: out}), /EEXIST/);
+  await assert.rejects(padFromLock({lock: fx.lock, outFile: path.join(REPO, 'studio', 'never-written.png')}), /outside the repository/);
+  const other = fixture({mutate: o => { o.workflows.S.reference.padColourRGB = [0, 0, 0]; }});      // the node's own black padding is not the approved grey
+  await assert.rejects(padFromLock({lock: other.lock, outFile: path.join(dir, 'black.png')}), /differs from the lock/);
+  assert.ok(!fs.existsSync(path.join(dir, 'black.png')) && !fs.existsSync(path.join(REPO, 'studio', 'never-written.png')));
+  await assert.rejects(padReference({input: MASTER, canvasWidth: 1000, canvasHeight: 1536, padColourRGB: [203, 203, 203]}), /larger than the canvas/);
+  await assert.rejects(padReference({input: MASTER, canvasWidth: 1537, canvasHeight: 1536, padColourRGB: [203, 203, 203]}), /cannot be centred exactly/);
+  await assert.rejects(padReference({input: MASTER, canvasWidth: 1536, canvasHeight: 1536, padColourRGB: [203, 203, 300]}), /padColourRGB/);
+  if (!REAL.approved) {
+    const r = spawnSync(process.execPath, [path.join(TOOLS, 'pad-reference.mjs'), '--out', path.join(dir, 'cli.png')], {encoding: 'utf8'});
+    assert.equal(r.status, 1); assert.match(r.stderr, /not recorded as owner-approved/); assert.ok(!fs.existsSync(path.join(dir, 'cli.png')));
+  }
+});
+
+test('cumulative limits: earlier sessions reduce what a later session may use; nothing resets and no funding is added', () => {
+  const L = REAL.lock, none = spec.remainingLimits(L, []);
+  assert.deepEqual([none.remainingRuntimeSeconds, none.watchdogStopSeconds, none.noNewGenerationSeconds, none.estimateStopUSD, none.sessionAllowed, none.additionalFunding], [10800, 10200, 8400, '4.750000', true, 'none']);
+  const one = spec.remainingLimits(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:30:00Z', consumedUSD: '0.60'}]);
+  assert.deepEqual([one.priorRuntimeSeconds, one.remainingRuntimeSeconds, one.watchdogStopSeconds, one.noNewGenerationSeconds, one.estimateStopUSD, one.sessionAllowed], [1800, 9000, 8400, 6600, '4.150000', true]);
+  const two = spec.remainingLimits(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:30:00Z', consumedUSD: '0.60'}, {startedAt: '2026-11-21T09:00:00Z', endedAt: '2026-11-21T10:00:01Z', consumedUSD: '1.15'}]);
+  assert.deepEqual([two.priorRuntimeSeconds, two.watchdogStopSeconds, two.estimateStopUSD], [5401, 4799, '3.000000']);
+  // The reduced values are always tighter than the approved maxima, so the watchdog accepts them as they are.
+  for (const r of [one, two]) assert.ok(r.watchdogStopSeconds < 10200 && r.noNewGenerationSeconds < 8400 && r.estimateStopMicro < 4750000);
+  // When the runtime or the estimate margin is used up, no further session is allowed.
+  assert.equal(spec.remainingLimits(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T16:20:00Z', consumedUSD: '2.60'}]).sessionAllowed, false, 'past the no-new-generation point');
+  assert.equal(spec.remainingLimits(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:10:00Z', consumedUSD: '4.75'}]).sessionAllowed, false, 'the estimate margin is used up');
+  assert.throws(() => spec.remainingLimits(L, [{startedAt: 'yesterday', endedAt: '2026-11-20T14:10:00Z', consumedUSD: '1.00'}]), /valid startedAt and endedAt/);
+  assert.throws(() => spec.remainingLimits(L, [{startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:10:00Z', consumedUSD: 1}]), /not a decimal dollar amount/);
+});
+
+test('smoke outputs: verified into their own folder, recorded in the run sheet, and never importable as a candidate', async () => {
+  const fx = fixture(), smokeQ = png('smoke q', 64, 96), {run, sheet, writeSheet, adapter} = buildRun(fx);
+  const rec = verifyTransfer({runDir: run, candidate: 'smoke', stagingDir: stage(run, 'smoke', {'smoke-q.png': smokeQ})});
+  assert.equal(rec.candidate, 'smoke'); assert.equal(isRetained(run, 'smoke'), true);
+  assert.deepEqual(fs.readdirSync(path.join(run, 'transfers')).sort(), ['A', 'A.verified.json', 'smoke', 'smoke.verified.json']);
+  assert.throws(() => verifyTransfer({runDir: run, candidate: 'D', stagingDir: stage(run, 'D', {'x.png': smokeQ})}), /candidate must be A, B, C or smoke/);
+  // Recorded in the run sheet with the lock's seed, size and steps: the sheet stays valid and candidate A still imports.
+  const s = structuredClone(sheet); s.smoke = [smokeEntry(fx, 'Q', shaBuf(smokeQ))]; writeSheet(s);
+  assert.deepEqual(spec.validateRunSheet(s, fx.lock, fx.sha256), []);
+  // No job can ask for the smoke output, whatever it is called.
+  for (const d of ['AP-84B3 candidate smoke', 'AP-84B3 smoke', 'AP-84B3 candidate S', 'smoke-q.png']) await assert.rejects(adapter.generate({...REQ, description: d}), /description must start with/);
+  // Passing the smoke image off as candidate B is refused: by its name, and by its hash.
+  const cut = png('cut b', 96, 144, true);
+  fs.writeFileSync(path.join(run, 'cutouts', 'candidate-b-cutout.png'), cut);
+  verifyTransfer({runDir: run, candidate: 'B', stagingDir: stage(run, 'B', {'candidate-b-raw.png': smokeQ})});
+  const asB = structuredClone(s); asB.candidates.B = {...asB.candidates.B, status: 'retained', raw: entry('candidate-b-raw.png', smokeQ), cutout: entry('candidate-b-cutout.png', cut)}; writeSheet(asB);
+  await assert.rejects(adapter.generate({...REQ, description: 'AP-84B3 candidate B'}), /candidate B: raw is a smoke image; smoke images are never candidates/);
+  assert.ok(!fs.existsSync(path.join(run, 'imported', 'B.json')));
+  // While the run sheet is invalid nothing imports, candidate A included. With the valid sheet restored, A imports.
+  await assert.rejects(adapter.generate(REQ), /run sheet does not match the approved experiment/);
+  assert.ok(!fs.existsSync(path.join(run, 'imported', 'A.json')));
+  writeSheet(s);
+  const [out] = await adapter.generate(REQ);
+  assert.equal(out.provenance.candidate, 'A');
 });

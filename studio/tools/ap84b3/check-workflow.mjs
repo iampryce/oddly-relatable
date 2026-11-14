@@ -1,131 +1,179 @@
 #!/usr/bin/env node
-// AP-84B3 workflow checker (D1-6, addition A4, required by the owner's D1-2 caveat: the exact node graph and
-// shift value must be exported, hashed and recorded before any candidate, with no silent workflow changes).
+// AP-84B3 workflow graph checker (D1-6 addition A4, amended under owner decision L12).
 //
-// Input: a workflow exported from ComfyUI in API format (Workflow > Export (API)): an object of
-//   "<node id>": {"class_type": "...", "inputs": {...}}   where a link is ["<node id>", <output index>].
-// The checker confirms that the model files, seed, steps, CFG, sampler, scheduler, size, prompts and batch size
-// equal the approved experiment lock, that no LoRA node is present, and prints the SHA-256 to record in the run
-// sheet. It reports the values it cannot judge (for workflow Q, the model-sampling shift) so they are recorded.
+// The owner's D1-2 caveat: the exact node graph and shift value must be exported, hashed and recorded before any
+// candidate, with no silent workflow changes. This tool validates a workflow exported from ComfyUI in API format
+// (Workflow > Export (API)): an object of  "<node id>": {"class_type": "...", "inputs": {...}}  where a
+// connection is ["<node id>", <output index>].
 //
-//   node studio/tools/ap84b3/check-workflow.mjs --workflow Q|S --candidate A|B|C --file <exported.json>
+// TWO LAYERS
+//   Layer 1 (fixed now, in the experiment lock): for each workflow, one entry per node (its type and literal
+//     settings) and the connections between them. These come from the approved specification and the pinned
+//     sources. The world is closed: any node, literal setting or connection that is not listed is not accepted.
+//   Layer 2 (frozen during authorised execution): the details of the real export that Layer 1 cannot know in
+//     advance, i.e. output slot numbers, the recorded shift value and the "free" values (file names). The first
+//     export that passes Layer 1 is frozen; every later export must equal it except for the values allowed to
+//     differ (the seed; for a smoke run also the latent size and the step count).
 //
-// Built from the public pinned template only (owner decision: Option A; ComfyUI is not installed locally):
-//   comfyui-workflow-templates==0.11.107 (pinned by ComfyUI v0.45.3), templates/image_qwen_image_edit_2511.json,
-//   SHA-256 fd2d7ebc17c80ab1e55f8320babd13a568de94c26b67807dbdf2a74cea18b65b.
-// That template uses these node types: UNETLoader, CLIPLoader, VAELoader, TextEncodeQwenImageEditPlus,
-// ModelSamplingAuraFlow (shift 3.1 in the template), CFGNorm, KSampler, VAEEncode, VAEDecode and an optional
-// Lightning LoraLoaderModelOnly. The approved specification differs from the template in two ways the operator
-// must apply before exporting: remove the LoRA node, and set the latent size explicitly (an empty-latent node
-// at 1024x1536) instead of deriving it from the scaled input image. The API export of this graph has NOT been
-// seen (it needs a running ComfyUI), so the checker is deliberately strict: anything it cannot confirm fails.
+// The real API export has NOT been seen (ComfyUI is not installed locally), and no expected export graph is
+// invented or pre-approved here. So the checker is deliberately strict:
+//   - a wrong, missing or extra node, a changed setting or a rewired connection FAILS;
+//   - a literal setting that Layer 1 does not list is not judged harmless by this tool or by the operator: the
+//     result is STOP, and the export goes to the owner for review. Nothing may be generated.
+// Node numbering is ignored: nodes are matched to their roles by type, settings and connections.
+//
+//   node studio/tools/ap84b3/check-workflow.mjs --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json>
+//        [--write-frozen <frozen.json>]   freeze this export (first export only; write outside the repository)
+//        [--frozen <frozen.json>]         compare with the frozen graph
+//
+// Sources for Layer 1: ComfyUI at the pinned commit (node input names), the pinned IP-Adapter node source, and
+// comfyui-workflow-templates==0.11.107, templates/image_qwen_image_edit_2511.json
+// (SHA-256 fd2d7ebc17c80ab1e55f8320babd13a568de94c26b67807dbdf2a74cea18b65b), whose shift value is 3.1.
+// The Qwen latent node (EmptySD3LatentImage) is an UNVERIFIED compatibility gate: it is tested in the smoke run
+// during authorised execution, and if it is incompatible the run stops. No other node is substituted.
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {loadLock, sha256Buffer} from '../../lib/experiment-spec.mjs';
+import {loadLock, resolveLiteral, isInside, REPO_ROOT, CANDIDATE_IDS} from '../../lib/experiment-spec.mjs';
 
-const isLink = v => Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && Number.isInteger(v[1]);
+export const FROZEN_SCHEMA = 'ap84b3-frozen-graph/1';
+const isLink = v => Array.isArray(v) && v.length === 2 && (typeof v[0] === 'string' || Number.isInteger(v[0])) && Number.isInteger(v[1]);
 const base = p => String(p).split(/[\\/]/).pop();
-const num = (lockString, value) => typeof value === 'number' && Number(lockString) === value;
+// Deterministic JSON with sorted keys (the graph contains decimals, so the lock's integer-only form is not used).
+const stable = v => Array.isArray(v) ? '[' + v.map(stable).join(',') + ']'
+  : v && typeof v === 'object' ? '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}' : JSON.stringify(v);
+export const graphHash = normalForm => crypto.createHash('sha256').update(stable(normalForm)).digest('hex');
+const permutations = a => a.length <= 1 ? [a] : a.flatMap((x, i) => permutations([...a.slice(0, i), ...a.slice(i + 1)]).map(p => [x, ...p]));
 
-export function checkWorkflow({graph, workflow, candidate, lock}) {
-  const problems = [], recorded = {};
-  const bad = m => problems.push(m);
-  if (!graph || typeof graph !== 'object' || Array.isArray(graph) || 'nodes' in graph) return {ok: false, problems: ['this is not an API-format export (use Workflow > Export (API) in ComfyUI)'], recorded};
-  const W = lock.workflows[workflow], C = lock.candidates[candidate];
-  if (!W || !C || C.workflow !== workflow) return {ok: false, problems: [`candidate ${candidate} does not use workflow ${workflow}`], recorded};
-  const nodes = Object.entries(graph).map(([id, n]) => ({id, type: n?.class_type, inputs: n?.inputs || {}}));
-  if (nodes.some(n => typeof n.type !== 'string')) return {ok: false, problems: ['every node needs a class_type'], recorded};
-  const ofType = t => nodes.filter(n => n.type === t);
-  const byId = id => nodes.find(n => n.id === id);
-  // Follow a link upstream until a node satisfying `found` is reached (bounded, so a cycle cannot hang it).
-  const trace = (link, found, hops = 12) => {
-    let cur = isLink(link) ? byId(link[0]) : null;
-    for (let i = 0; cur && i < hops; i++) {
-      if (found(cur)) return cur;
-      const next = Object.values(cur.inputs).find(isLink);
-      cur = next ? byId(next[0]) : null;
+// The expected settings for one export. mode: {candidate: 'A'} or {smoke: true}.
+function expectation(lock, workflow, mode) {
+  const G = lock.workflows[workflow].graphConstraints;
+  const ctx = mode.smoke ? {seed: lock.smoke.seed, smoke: true} : {seed: lock.candidates[mode.candidate].seed, smoke: false};
+  return {G, ctx, nodes: G.nodes.map(n => ({role: n.role, type: n.type, literals: Object.fromEntries(Object.entries(n.literals).map(([k, s]) => [k, resolveLiteral(lock, workflow, s, ctx)]))}))};
+}
+
+// Check one assignment of export nodes to roles. Returns {problems, unlisted, recorded, free, normalForm}.
+function evaluate(exp, assign, graph) {
+  const problems = [], unlisted = [], recorded = {}, free = {}, normalForm = {};
+  const roleOf = new Map([...assign].map(([role, id]) => [String(id), role]));
+  const wanted = new Map(exp.G.connections.map(c => [`${c.to}.${c.input}`, c.from]));
+  for (const n of exp.nodes) {
+    const node = graph[assign.get(n.role)], inputs = node.inputs || {}, norm = {};
+    for (const [name, want] of Object.entries(n.literals)) {
+      const has = name in inputs, v = inputs[name];
+      if (!has) { if (!(want.kind === 'value' && want.optional)) problems.push(`${n.role} (${n.type}): setting "${name}" is missing`); continue; }
+      if (isLink(v)) { problems.push(`${n.role} (${n.type}): "${name}" must be a literal setting, but it is connected to another node`); continue; }
+      norm[name] = v;
+      if (want.kind === 'free') { free[`${n.role}.${name}`] = v; continue; }
+      if (want.kind === 'record') { if (typeof v !== 'number') problems.push(`${n.role} (${n.type}): "${name}" must be a number`); else recorded[want.name] = v; continue; }
+      const got = typeof want.value === 'string' && /\.(safetensors|bin)$/.test(want.value) ? base(v) : v;
+      if (got !== want.value) problems.push(`${n.role} (${n.type}): "${name}" is ${JSON.stringify(v)}, approved ${JSON.stringify(want.value)}`);
     }
-    return null;
-  };
-
-  // No LoRA anywhere in the exported graph.
-  for (const n of nodes) if (/lora/i.test(n.type)) bad(`LoRA node present (${n.type}); the approved workflow uses none`);
-
-  // Exactly one sampler, with the approved settings.
-  const samplers = ofType('KSampler');
-  if (samplers.length !== 1) bad(`expected exactly one KSampler, found ${samplers.length}`);
-  const k = samplers[0];
-  if (k) {
-    if (k.inputs.seed !== C.seed) bad(`seed is ${JSON.stringify(k.inputs.seed)}, approved ${C.seed}`);
-    if (k.inputs.steps !== W.steps) bad(`steps is ${JSON.stringify(k.inputs.steps)}, approved ${W.steps}`);
-    if (!num(W.cfg, k.inputs.cfg)) bad(`cfg is ${JSON.stringify(k.inputs.cfg)}, approved ${W.cfg}`);
-    if (k.inputs.sampler_name !== W.sampler) bad(`sampler is ${JSON.stringify(k.inputs.sampler_name)}, approved ${W.sampler}`);
-    if (k.inputs.scheduler !== W.scheduler) bad(`scheduler is ${JSON.stringify(k.inputs.scheduler)}, approved ${W.scheduler}`);
-    if (k.inputs.denoise !== 1) bad(`denoise is ${JSON.stringify(k.inputs.denoise)}, expected 1`);
-    // Explicit latent size and batch size.
-    const latent = trace(k.inputs.latent_image, n => Number.isInteger(n.inputs.width) && Number.isInteger(n.inputs.height) && 'batch_size' in n.inputs, 1);
-    if (!latent) bad('the latent size must be set explicitly by an empty-latent node connected directly to the sampler');
-    else {
-      if (latent.inputs.width !== W.width || latent.inputs.height !== W.height) bad(`latent size is ${latent.inputs.width}x${latent.inputs.height}, approved ${W.width}x${W.height}`);
-      if (latent.inputs.batch_size !== W.batchSize) bad(`batch size is ${JSON.stringify(latent.inputs.batch_size)}, approved ${W.batchSize}`);
+    for (const [name, v] of Object.entries(inputs)) {
+      if (name in n.literals) continue;
+      const key = `${n.role}.${name}`;
+      if (isLink(v)) {
+        const from = roleOf.get(String(v[0]));
+        norm[name] = ['@' + (from ?? '?'), v[1]];
+        if (!wanted.has(key)) problems.push(`${n.role} (${n.type}): unexpected connection on "${name}"`);
+        else if (from !== wanted.get(key)) problems.push(`${n.role} (${n.type}): "${name}" is connected to ${from ?? 'an unknown node'}, expected ${wanted.get(key)}`);
+      } else {
+        norm[name] = v;
+        if (wanted.has(key)) problems.push(`${n.role} (${n.type}): "${name}" must be connected to ${wanted.get(key)}, but it is a literal value`);
+        else unlisted.push(`${n.role} (${n.type}): setting "${name}" = ${JSON.stringify(v)} is not listed in the approved constraints`);
+      }
     }
-    // Prompts: the text that actually reaches the sampler's positive and negative inputs.
-    const textOf = n => (typeof n.inputs.prompt === 'string' ? n.inputs.prompt : typeof n.inputs.text === 'string' ? n.inputs.text : null);
-    const pos = trace(k.inputs.positive, n => textOf(n) !== null), neg = trace(k.inputs.negative, n => textOf(n) !== null);
-    if (!pos) bad('no prompt text reaches the sampler\'s positive input');
-    else if (textOf(pos) !== W.prompt) bad('the positive prompt differs from the approved prompt');
-    if (!neg) bad('no prompt text reaches the sampler\'s negative input');
-    else if (textOf(neg) !== W.negativePrompt) bad('the negative prompt differs from the approved negative prompt');
+    for (const c of exp.G.connections) if (c.to === n.role && !(c.input in inputs)) problems.push(`${n.role} (${n.type}): required connection "${c.input}" from ${c.from} is missing`);
+    normalForm[n.role] = {class_type: n.type, inputs: norm};
   }
+  return {problems, unlisted, recorded, free, normalForm};
+}
 
-  const models = Object.fromEntries(lock.models.filter(m => m.workflow === workflow).map(m => [m.role, base(m.saveAs)]));
-  const one = (type, input, expected, label) => {
-    const found = ofType(type);
-    if (found.length !== 1) return bad(`expected exactly one ${type}, found ${found.length}`);
-    if (base(found[0].inputs[input]) !== expected) bad(`${label} is ${JSON.stringify(found[0].inputs[input])}, approved ${expected}`);
-  };
-  if (workflow === 'Q') {
-    one('UNETLoader', 'unet_name', models['diffusion-model'], 'diffusion model');
-    one('CLIPLoader', 'clip_name', models['text-encoder'], 'text encoder');
-    one('VAELoader', 'vae_name', models.vae, 'VAE');
-    if (ofType('CheckpointLoaderSimple').length) bad('workflow Q must not load a checkpoint');
-    const shift = ofType('ModelSamplingAuraFlow');
-    if (shift.length !== 1 || typeof shift[0].inputs.shift !== 'number') bad('expected exactly one ModelSamplingAuraFlow node with a numeric shift');
-    else recorded.shift = shift[0].inputs.shift;                     // not an approved value: recorded, not judged
-    if (!nodes.some(n => n.type === 'LoadImage')) bad('workflow Q needs the input image (LoadImage)');
-  } else {
-    one('CheckpointLoaderSimple', 'ckpt_name', models.checkpoint, 'checkpoint');
-    if (ofType('UNETLoader').length) bad('workflow S must not load a separate diffusion model');
-    const ipa = nodes.filter(n => /^IPAdapter/.test(n.type) && 'weight' in n.inputs);
-    if (ipa.length !== 1) bad(`expected exactly one IP-Adapter apply node, found ${ipa.length}`);
-    else {
-      const a = ipa[0].inputs, A = W.ipAdapter;
-      if (!num(A.weight, a.weight)) bad(`IP-Adapter weight is ${JSON.stringify(a.weight)}, approved ${A.weight}`);
-      if (a.weight_type !== A.weightType) bad(`IP-Adapter weight type is ${JSON.stringify(a.weight_type)}, approved ${A.weightType}`);
-      if (!num(A.startAt, a.start_at) || !num(A.endAt, a.end_at)) bad(`IP-Adapter range is ${JSON.stringify(a.start_at)} to ${JSON.stringify(a.end_at)}, approved ${A.startAt} to ${A.endAt}`);
+// Validate an export against Layer 1. Returns {ok, stop, problems, unlisted, recorded, free, normalForm, graphSha256}.
+//   ok   : every constraint holds and nothing is unlisted.
+//   stop : true when the only obstacle is unlisted settings, which need the owner's review.
+export function checkWorkflow({graph, workflow, lock, candidate = null, smoke = false}) {
+  const fail = problems => ({ok: false, stop: false, problems, unlisted: [], recorded: {}, free: {}, normalForm: null, graphSha256: null});
+  if (!['Q', 'S'].includes(workflow)) return fail(['workflow must be Q or S']);
+  if (smoke ? candidate !== null : !CANDIDATE_IDS.includes(candidate)) return fail(['name either a candidate (A, B or C) or a smoke run, not both']);
+  if (!smoke && lock.candidates[candidate].workflow !== workflow) return fail([`candidate ${candidate} does not use workflow ${workflow}`]);
+  if (!graph || typeof graph !== 'object' || Array.isArray(graph) || 'nodes' in graph || 'links' in graph) return fail(['this is not an API-format export (use Workflow > Export (API) in ComfyUI)']);
+  const ids = Object.keys(graph);
+  if (!ids.length || ids.some(id => !graph[id] || typeof graph[id].class_type !== 'string' || (graph[id].inputs !== undefined && (typeof graph[id].inputs !== 'object' || Array.isArray(graph[id].inputs))))) return fail(['every node needs a class_type and an inputs object']);
+  const exp = expectation(lock, workflow, smoke ? {smoke: true} : {candidate});
+
+  // Closed world: node types and counts must equal the constraint list exactly.
+  const count = list => list.reduce((m, t) => m.set(t, (m.get(t) || 0) + 1), new Map());
+  const want = count(exp.nodes.map(n => n.type)), got = count(ids.map(id => graph[id].class_type)), problems = [];
+  for (const [t, n] of want) if ((got.get(t) || 0) !== n) problems.push(`expected ${n} node(s) of type ${t}, found ${got.get(t) || 0}`);
+  for (const [t, n] of got) if (!want.has(t)) problems.push(`node type ${t} is not part of the approved workflow (${n} found)`);
+  if (problems.length) return fail(problems);
+
+  // Match nodes to roles. Nodes of the same type are tried in every order; the best assignment is reported.
+  const types = [...want.keys()];
+  const options = types.map(t => { const roles = exp.nodes.filter(n => n.type === t).map(n => n.role); return permutations(ids.filter(id => graph[id].class_type === t)).map(p => roles.map((r, i) => [r, p[i]])); });
+  let best = null;
+  const walk = (i, acc) => {
+    if (i === options.length) {
+      const r = evaluate(exp, new Map(acc), graph);
+      if (!best || r.problems.length < best.problems.length || (r.problems.length === best.problems.length && r.unlisted.length < best.unlisted.length)) best = r;
+      return;
     }
-    for (const n of nodes) if (/controlnet/i.test(n.type)) bad(`ControlNet node present (${n.type}); the approved baseline uses none`);
-    for (const n of nodes) if (/refiner/i.test(JSON.stringify(n.inputs))) bad('a refiner is referenced; the approved baseline uses none');
-    // The final resize may be done in the workflow or locally. If it is in the workflow it must be the approved one.
-    const resize = nodes.filter(n => n.type === 'ImageScale');
-    recorded.resizeInWorkflow = resize.length > 0;
-    for (const r of resize) if (r.inputs.upscale_method !== W.finalResize || r.inputs.width !== W.finalWidth || r.inputs.height !== W.finalHeight) bad(`resize is ${r.inputs.upscale_method} ${r.inputs.width}x${r.inputs.height}, approved ${W.finalResize} ${W.finalWidth}x${W.finalHeight}`);
-    if (!nodes.some(n => n.type === 'LoadImage')) bad('workflow S needs the reference image (LoadImage)');
+    for (const o of options[i]) walk(i + 1, acc.concat(o));
+  };
+  walk(0, []);
+  // The smoke seed belongs to smoke runs only (the lock already guarantees it differs from every candidate seed).
+  const ok = best.problems.length === 0 && best.unlisted.length === 0;
+  return {ok, stop: best.problems.length === 0 && best.unlisted.length > 0, problems: best.problems, unlisted: best.unlisted, recorded: best.recorded, free: best.free,
+    normalForm: best.problems.length === 0 ? best.normalForm : null, graphSha256: ok ? graphHash(best.normalForm) : null};
+}
+
+// Layer 2. The frozen record of the first export that passed Layer 1.
+export function freeze({result, workflow, candidate, lockSha256, apiSha256}) {
+  if (!result.ok) throw new Error('only an export that passes every constraint, with nothing unlisted, can be frozen');
+  return {schema: FROZEN_SCHEMA, workflow, frozenFrom: `candidate ${candidate}`, lockSha256, apiSha256, graphSha256: result.graphSha256, recorded: result.recorded, free: result.free, normalForm: result.normalForm, frozenAt: new Date().toISOString()};
+}
+// Compare a later export with the frozen graph. Only the listed values may differ: the seed, and for a smoke run
+// also the latent size and the steps. Everything else, including slot numbers, shift and file names, must be identical.
+export function compareToFrozen({frozen, result, lock, workflow, smoke = false}) {
+  if (!frozen || frozen.schema !== FROZEN_SCHEMA || frozen.workflow !== workflow || !frozen.normalForm) return ['the frozen graph is missing or is for a different workflow'];
+  if (!result.ok || !result.normalForm) return ['the export did not pass the constraints, so it cannot be compared with the frozen graph'];
+  const G = lock.workflows[workflow].graphConstraints, mayDiffer = new Set();
+  for (const n of G.nodes) for (const [k, s] of Object.entries(n.literals)) if (s.seed === true || (smoke && typeof s.smoke === 'string')) mayDiffer.add(`${n.role}.${k}`);
+  const mask = nf => Object.fromEntries(Object.entries(nf).map(([role, n]) => [role, {class_type: n.class_type, inputs: Object.fromEntries(Object.entries(n.inputs).map(([k, v]) => [k, mayDiffer.has(`${role}.${k}`) ? '<may differ>' : v]))}]));
+  const a = mask(frozen.normalForm), b = mask(result.normalForm), diffs = [];
+  for (const role of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (!a[role] || !b[role]) { diffs.push(`${role}: present in only one of the two graphs`); continue; }
+    for (const k of new Set([...Object.keys(a[role].inputs), ...Object.keys(b[role].inputs)])) if (stable(a[role].inputs[k]) !== stable(b[role].inputs[k])) diffs.push(`${role}.${k}: ${stable(b[role].inputs[k])} differs from the frozen ${stable(a[role].inputs[k])}`);
   }
-  recorded.nodeTypes = [...new Set(nodes.map(n => n.type))].sort();
-  return {ok: problems.length === 0, problems, recorded};
+  return diffs;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const arg = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
-    const workflow = arg('--workflow'), candidate = arg('--candidate'), file = arg('--file');
-    if (!['Q', 'S'].includes(workflow) || !['A', 'B', 'C'].includes(candidate) || !file) throw new Error('usage: check-workflow.mjs --workflow Q|S --candidate A|B|C --file <exported API-format JSON>');
+    const workflow = arg('--workflow'), candidate = arg('--candidate') ?? null, smoke = process.argv.includes('--smoke'), file = arg('--file');
+    if (!workflow || !file || (smoke ? candidate !== null : !candidate)) throw new Error('usage: check-workflow.mjs --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json> [--write-frozen <file> | --frozen <file>]');
     const {lock, sha256: lockSha256} = loadLock();                              // refuses unless the lock is owner-approved
-    const bytes = fs.readFileSync(file);
-    const result = checkWorkflow({graph: JSON.parse(bytes.toString('utf8')), workflow, candidate, lock});
-    console.log(JSON.stringify({workflow, candidate, lockSha256, apiSha256: sha256Buffer(bytes), ...result}, null, 1));
-    if (!result.ok) process.exit(1);
+    const bytes = fs.readFileSync(file), apiSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    const result = checkWorkflow({graph: JSON.parse(bytes.toString('utf8')), workflow, lock, candidate, smoke});
+    const out = {workflow, candidate, smoke, lockSha256, apiSha256, ok: result.ok, stop: result.stop, problems: result.problems, unlisted: result.unlisted, recorded: result.recorded, free: result.free, graphSha256: result.graphSha256};
+    if (result.ok && arg('--frozen')) {
+      const frozen = JSON.parse(fs.readFileSync(arg('--frozen'), 'utf8'));
+      if (frozen.lockSha256 !== lockSha256) throw new Error('the frozen graph was made under a different experiment lock');
+      out.differencesFromFrozen = compareToFrozen({frozen, result, lock, workflow, smoke});
+      if (out.differencesFromFrozen.length) out.ok = false;
+    }
+    if (result.ok && arg('--write-frozen')) {
+      if (smoke) throw new Error('a smoke export cannot be frozen; freeze the first candidate export');
+      const target = path.resolve(arg('--write-frozen'));
+      if (isInside(path.dirname(target), REPO_ROOT)) throw new Error('the frozen graph must be written outside the repository');
+      fs.writeFileSync(target, JSON.stringify(freeze({result, workflow, candidate, lockSha256, apiSha256}), null, 1), {flag: 'wx'});
+      out.frozenWritten = target;
+    }
+    console.log(JSON.stringify(out, null, 1));
+    if (result.stop) console.error('check-workflow: STOP. The export contains settings that are not in the approved constraints. Do not generate anything; send this report to the owner for review.');
+    if (!out.ok) process.exit(result.stop ? 3 : 1);
   } catch (e) { console.error(`check-workflow: ${e.message}`); process.exit(1); }
 }

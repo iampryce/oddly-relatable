@@ -11,14 +11,17 @@
 // moved to rejected/ with a failure record, and no success record exists. An output is "safely retained" only
 // once this record exists; anything else is not retained.
 //
-//   node studio/tools/ap84b3/verify-transfer.mjs --run <run folder> --candidate A --staging <staging folder>
+//   node studio/tools/ap84b3/verify-transfer.mjs --run <run folder> --candidate A|B|C|smoke --staging <staging folder>
+//
+// Smoke outputs use --candidate smoke and land in transfers/smoke/. The import adapter only ever reads the
+// folders of candidates A, B and C, so a smoke output cannot be imported.
 //
 // The run folder and the staging folder must be on the same volume (so the rename is atomic) and outside the
 // repository. This tool never contacts the Pod and never extends a time limit.
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {loadLock, sha256Buffer, pngSize, isInside, REPO_ROOT, MANIFEST_HEADER, TRANSFER_SCHEMA, CANDIDATE_IDS, OUTPUT_NAME_RE, SHA256_RE} from '../../lib/experiment-spec.mjs';
+import {loadLock, sha256Buffer, pngSize, isInside, REPO_ROOT, MANIFEST_HEADER, TRANSFER_SCHEMA, TRANSFER_IDS, OUTPUT_NAME_RE, SHA256_RE} from '../../lib/experiment-spec.mjs';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 export class TransferRejected extends Error {
@@ -72,7 +75,8 @@ const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+
 // Verify and, only on success, move the staging folder into place and write the verification record last.
 // beforeRecord is a test hook that simulates an interruption between the move and the record.
 export function verifyTransfer({runDir, candidate, stagingDir, beforeRecord = null}) {
-  if (!CANDIDATE_IDS.includes(candidate)) throw new Error('candidate must be A, B or C');
+  // 'smoke' is a transfer folder of its own: smoke outputs are verified like any other file but are never a candidate.
+  if (!TRANSFER_IDS.includes(candidate)) throw new Error('candidate must be A, B, C or smoke');
   const run = path.resolve(runDir), staging = path.resolve(stagingDir);
   for (const [p, what] of [[run, 'run folder'], [staging, 'staging folder']]) {
     if (!fs.existsSync(p) || fs.lstatSync(p).isSymbolicLink() || !fs.statSync(p).isDirectory()) throw new Error(`the ${what} does not exist`);
@@ -123,7 +127,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const arg = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
     const runDir = arg('--run'), candidate = arg('--candidate'), stagingDir = arg('--staging');
-    if (!runDir || !candidate || !stagingDir) throw new Error('usage: verify-transfer.mjs --run <run folder> --candidate A|B|C --staging <staging folder>');
+    if (!runDir || !candidate || !stagingDir) throw new Error('usage: verify-transfer.mjs --run <run folder> --candidate A|B|C|smoke --staging <staging folder>');
     loadLock();                                                                // refuses unless the lock is owner-approved
     console.log(JSON.stringify(verifyTransfer({runDir, candidate, stagingDir}), null, 1));
   } catch (e) { console.error(`verify-transfer: ${e.message}`); process.exit(1); }

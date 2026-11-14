@@ -4,11 +4,13 @@
   "3": {"class_type": "VAELoader", "inputs": {"vae_name": "__VAE__"}},
   "4": {"class_type": "LoadImage", "inputs": {"image": "master-v3.png"}},
   "5": {"class_type": "ModelSamplingAuraFlow", "inputs": {"shift": 3.1, "model": ["1", 0]}},
-  "6": {"class_type": "CFGNorm", "inputs": {"strength": 1, "model": ["5", 0]}},
+  "6": {"class_type": "CFGNorm", "inputs": {"strength": 1, "pre_cfg": false, "model": ["5", 0]}},
   "7": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "__PROMPT__", "clip": ["2", 0], "vae": ["3", 0], "image1": ["4", 0]}},
   "8": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"prompt": "__NEGATIVE__", "clip": ["2", 0], "vae": ["3", 0], "image1": ["4", 0]}},
   "9": {"class_type": "EmptySD3LatentImage", "inputs": {"width": "__WIDTH__", "height": "__HEIGHT__", "batch_size": 1}},
-  "10": {"class_type": "KSampler", "inputs": {"seed": "__SEED__", "steps": "__STEPS__", "cfg": "__CFG__", "sampler_name": "__SAMPLER__", "scheduler": "__SCHEDULER__", "denoise": 1, "model": ["6", 0], "positive": ["7", 0], "negative": ["8", 0], "latent_image": ["9", 0]}},
+  "10": {"class_type": "KSampler", "inputs": {"seed": "__SEED__", "steps": "__STEPS__", "cfg": "__CFG__", "sampler_name": "__SAMPLER__", "scheduler": "__SCHEDULER__", "denoise": 1, "model": ["6", 0], "positive": ["13", 0], "negative": ["14", 0], "latent_image": ["9", 0]}},
   "11": {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["3", 0]}},
-  "12": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ap84b3", "images": ["11", 0]}}
+  "12": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ap84b3", "images": ["11", 0]}},
+  "13": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"reference_latents_method": "index_timestep_zero", "conditioning": ["7", 0]}},
+  "14": {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"reference_latents_method": "index_timestep_zero", "conditioning": ["8", 0]}}
 }

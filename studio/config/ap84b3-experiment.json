@@ -120,7 +120,295 @@
       "prompt": "Keep exactly the same character: the same round bald head, large round eyes, ears, skin colour, rust-orange turtleneck with a ribbed collar and ribbed hem, thin black limbs, black mitten hands, brown shoes, thick black outlines and flat colours. Change only the pose and expression. He stands, full body, turned slightly toward the right of the image, holding a dark smartphone up in the hand on the right of the image and looking at its screen. His other hand is raised to his chest. He looks worried: eyebrows slanted up in the middle, mouth open and turned down. Keep the plain flat light-grey background. Show the whole figure from head to shoes with space around it. No shadows, no text, no extra objects.",
       "negativePrompt": " ",
       "lora": "none",
-      "batchSize": 1
+      "batchSize": 1,
+      "denoise": "1.0",
+      "inputScaling": "none",
+      "shift": "recorded-at-export",
+      "latentNode": "EmptySD3LatentImage",
+      "latentNodeStatus": "compatibility-gate: unverified; test in the smoke run; on failure stop, no substitution",
+      "referenceImages": {
+        "image1": "master-v3",
+        "image2": "none",
+        "image3": "none"
+      },
+      "negativeEncoderInputs": "same image and VAE as the positive encoder",
+      "referenceLatentsMethod": "index_timestep_zero",
+      "cfgNorm": {
+        "strength": "1.0",
+        "preCfg": "false"
+      },
+      "diffusionModelWeightDtype": "default",
+      "textEncoderType": "qwen_image",
+      "textEncoderDevice": "default",
+      "graphConstraints": {
+        "closedWorld": true,
+        "note": "Layer 1 constraints from the approved specification and the pinned sources. One entry per node. Any other node, literal or connection fails or stops for owner review. The actual API export is inspected and frozen during authorised execution; it is not pre-approved here.",
+        "nodes": [
+          {
+            "role": "unet",
+            "type": "UNETLoader",
+            "literals": {
+              "unet_name": {
+                "model": "diffusion-model"
+              },
+              "weight_dtype": {
+                "ref": "workflows.Q.diffusionModelWeightDtype",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "clip",
+            "type": "CLIPLoader",
+            "literals": {
+              "clip_name": {
+                "model": "text-encoder"
+              },
+              "type": {
+                "ref": "workflows.Q.textEncoderType",
+                "type": "string"
+              },
+              "device": {
+                "ref": "workflows.Q.textEncoderDevice",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "vae",
+            "type": "VAELoader",
+            "literals": {
+              "vae_name": {
+                "model": "vae"
+              }
+            }
+          },
+          {
+            "role": "image",
+            "type": "LoadImage",
+            "literals": {
+              "image": {
+                "free": "uploaded master v3; its SHA-256 is checked on the Pod"
+              }
+            }
+          },
+          {
+            "role": "shift",
+            "type": "ModelSamplingAuraFlow",
+            "literals": {
+              "shift": {
+                "record": "shift"
+              }
+            }
+          },
+          {
+            "role": "cfgnorm",
+            "type": "CFGNorm",
+            "literals": {
+              "strength": {
+                "ref": "workflows.Q.cfgNorm.strength",
+                "type": "number"
+              },
+              "pre_cfg": {
+                "ref": "workflows.Q.cfgNorm.preCfg",
+                "type": "boolean",
+                "optional": true
+              }
+            }
+          },
+          {
+            "role": "positive",
+            "type": "TextEncodeQwenImageEditPlus",
+            "literals": {
+              "prompt": {
+                "ref": "workflows.Q.prompt",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "negative",
+            "type": "TextEncodeQwenImageEditPlus",
+            "literals": {
+              "prompt": {
+                "ref": "workflows.Q.negativePrompt",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "refpos",
+            "type": "FluxKontextMultiReferenceLatentMethod",
+            "literals": {
+              "reference_latents_method": {
+                "ref": "workflows.Q.referenceLatentsMethod",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "refneg",
+            "type": "FluxKontextMultiReferenceLatentMethod",
+            "literals": {
+              "reference_latents_method": {
+                "ref": "workflows.Q.referenceLatentsMethod",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "latent",
+            "type": "EmptySD3LatentImage",
+            "literals": {
+              "width": {
+                "ref": "workflows.Q.width",
+                "type": "integer",
+                "smoke": "smoke.width"
+              },
+              "height": {
+                "ref": "workflows.Q.height",
+                "type": "integer",
+                "smoke": "smoke.height"
+              },
+              "batch_size": {
+                "ref": "workflows.Q.batchSize",
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "role": "sampler",
+            "type": "KSampler",
+            "literals": {
+              "seed": {
+                "seed": true
+              },
+              "steps": {
+                "ref": "workflows.Q.steps",
+                "type": "integer",
+                "smoke": "smoke.steps"
+              },
+              "cfg": {
+                "ref": "workflows.Q.cfg",
+                "type": "number"
+              },
+              "sampler_name": {
+                "ref": "workflows.Q.sampler",
+                "type": "string"
+              },
+              "scheduler": {
+                "ref": "workflows.Q.scheduler",
+                "type": "string"
+              },
+              "denoise": {
+                "ref": "workflows.Q.denoise",
+                "type": "number"
+              }
+            }
+          },
+          {
+            "role": "decode",
+            "type": "VAEDecode",
+            "literals": {}
+          },
+          {
+            "role": "save",
+            "type": "SaveImage",
+            "literals": {
+              "filename_prefix": {
+                "free": "file name only; does not affect pixels"
+              }
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": "unet",
+            "to": "shift",
+            "input": "model"
+          },
+          {
+            "from": "shift",
+            "to": "cfgnorm",
+            "input": "model"
+          },
+          {
+            "from": "cfgnorm",
+            "to": "sampler",
+            "input": "model"
+          },
+          {
+            "from": "clip",
+            "to": "positive",
+            "input": "clip"
+          },
+          {
+            "from": "clip",
+            "to": "negative",
+            "input": "clip"
+          },
+          {
+            "from": "vae",
+            "to": "positive",
+            "input": "vae"
+          },
+          {
+            "from": "vae",
+            "to": "negative",
+            "input": "vae"
+          },
+          {
+            "from": "image",
+            "to": "positive",
+            "input": "image1"
+          },
+          {
+            "from": "image",
+            "to": "negative",
+            "input": "image1"
+          },
+          {
+            "from": "positive",
+            "to": "refpos",
+            "input": "conditioning"
+          },
+          {
+            "from": "negative",
+            "to": "refneg",
+            "input": "conditioning"
+          },
+          {
+            "from": "refpos",
+            "to": "sampler",
+            "input": "positive"
+          },
+          {
+            "from": "refneg",
+            "to": "sampler",
+            "input": "negative"
+          },
+          {
+            "from": "latent",
+            "to": "sampler",
+            "input": "latent_image"
+          },
+          {
+            "from": "sampler",
+            "to": "decode",
+            "input": "samples"
+          },
+          {
+            "from": "vae",
+            "to": "decode",
+            "input": "vae"
+          },
+          {
+            "from": "decode",
+            "to": "save",
+            "input": "images"
+          }
+        ]
+      }
     },
     "S": {
       "name": "SDXL 1.0 + IP-Adapter Plus",
@@ -131,7 +419,13 @@
         "weight": "0.8",
         "weightType": "linear",
         "startAt": "0.0",
-        "endAt": "1.0"
+        "endAt": "1.0",
+        "loader": "IPAdapterModelLoader",
+        "imageEncoderLoader": "CLIPVisionLoader",
+        "combineEmbeds": "concat",
+        "embedsScaling": "V only",
+        "imageNegative": "none",
+        "attnMask": "none"
       },
       "width": 832,
       "height": 1248,
@@ -146,20 +440,316 @@
       "negativePrompt": "photo, realistic, 3d, shading, gradient, shadow, text, watermark, cropped, extra limbs, extra fingers, background scene",
       "refiner": "none",
       "controlNet": "none",
-      "batchSize": 1
+      "batchSize": 1,
+      "denoise": "1.0",
+      "latentNode": "EmptyLatentImage",
+      "promptEncoder": "CLIPTextEncode",
+      "clipSkip": "none",
+      "vae": "from the checkpoint",
+      "reference": {
+        "source": "master-v3",
+        "canvasWidth": 1536,
+        "canvasHeight": 1536,
+        "padColourRGB": [
+          203,
+          203,
+          203
+        ],
+        "placement": "centred",
+        "preparedLocally": true,
+        "sha256": "9f9c41c0f9b1090a8e94c00d50db467fcb09847b960fe0ede06c23061841b521"
+      },
+      "finalResizeLocation": "in the workflow",
+      "finalResizeCrop": "disabled",
+      "rawOutputRetained": true,
+      "graphConstraints": {
+        "closedWorld": true,
+        "note": "Layer 1 constraints from the approved specification and the pinned sources. One entry per node. Any other node, literal or connection fails or stops for owner review. The actual API export is inspected and frozen during authorised execution; it is not pre-approved here.",
+        "nodes": [
+          {
+            "role": "checkpoint",
+            "type": "CheckpointLoaderSimple",
+            "literals": {
+              "ckpt_name": {
+                "model": "checkpoint"
+              }
+            }
+          },
+          {
+            "role": "image",
+            "type": "LoadImage",
+            "literals": {
+              "image": {
+                "free": "uploaded padded reference; its SHA-256 is checked on the Pod"
+              }
+            }
+          },
+          {
+            "role": "ipaloader",
+            "type": "IPAdapterModelLoader",
+            "literals": {
+              "ipadapter_file": {
+                "model": "ip-adapter"
+              }
+            }
+          },
+          {
+            "role": "visionloader",
+            "type": "CLIPVisionLoader",
+            "literals": {
+              "clip_name": {
+                "model": "image-encoder"
+              }
+            }
+          },
+          {
+            "role": "ipadapter",
+            "type": "IPAdapterAdvanced",
+            "literals": {
+              "weight": {
+                "ref": "workflows.S.ipAdapter.weight",
+                "type": "number"
+              },
+              "weight_type": {
+                "ref": "workflows.S.ipAdapter.weightType",
+                "type": "string"
+              },
+              "combine_embeds": {
+                "ref": "workflows.S.ipAdapter.combineEmbeds",
+                "type": "string"
+              },
+              "start_at": {
+                "ref": "workflows.S.ipAdapter.startAt",
+                "type": "number"
+              },
+              "end_at": {
+                "ref": "workflows.S.ipAdapter.endAt",
+                "type": "number"
+              },
+              "embeds_scaling": {
+                "ref": "workflows.S.ipAdapter.embedsScaling",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "positive",
+            "type": "CLIPTextEncode",
+            "literals": {
+              "text": {
+                "ref": "workflows.S.prompt",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "negative",
+            "type": "CLIPTextEncode",
+            "literals": {
+              "text": {
+                "ref": "workflows.S.negativePrompt",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "latent",
+            "type": "EmptyLatentImage",
+            "literals": {
+              "width": {
+                "ref": "workflows.S.width",
+                "type": "integer",
+                "smoke": "smoke.width"
+              },
+              "height": {
+                "ref": "workflows.S.height",
+                "type": "integer",
+                "smoke": "smoke.height"
+              },
+              "batch_size": {
+                "ref": "workflows.S.batchSize",
+                "type": "integer"
+              }
+            }
+          },
+          {
+            "role": "sampler",
+            "type": "KSampler",
+            "literals": {
+              "seed": {
+                "seed": true
+              },
+              "steps": {
+                "ref": "workflows.S.steps",
+                "type": "integer",
+                "smoke": "smoke.steps"
+              },
+              "cfg": {
+                "ref": "workflows.S.cfg",
+                "type": "number"
+              },
+              "sampler_name": {
+                "ref": "workflows.S.sampler",
+                "type": "string"
+              },
+              "scheduler": {
+                "ref": "workflows.S.scheduler",
+                "type": "string"
+              },
+              "denoise": {
+                "ref": "workflows.S.denoise",
+                "type": "number"
+              }
+            }
+          },
+          {
+            "role": "decode",
+            "type": "VAEDecode",
+            "literals": {}
+          },
+          {
+            "role": "resize",
+            "type": "ImageScale",
+            "literals": {
+              "upscale_method": {
+                "ref": "workflows.S.finalResize",
+                "type": "string"
+              },
+              "width": {
+                "ref": "workflows.S.finalWidth",
+                "type": "integer"
+              },
+              "height": {
+                "ref": "workflows.S.finalHeight",
+                "type": "integer"
+              },
+              "crop": {
+                "ref": "workflows.S.finalResizeCrop",
+                "type": "string"
+              }
+            }
+          },
+          {
+            "role": "saveraw",
+            "type": "SaveImage",
+            "literals": {
+              "filename_prefix": {
+                "free": "file name only; does not affect pixels"
+              }
+            }
+          },
+          {
+            "role": "savefinal",
+            "type": "SaveImage",
+            "literals": {
+              "filename_prefix": {
+                "free": "file name only; does not affect pixels"
+              }
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": "checkpoint",
+            "to": "ipadapter",
+            "input": "model"
+          },
+          {
+            "from": "ipaloader",
+            "to": "ipadapter",
+            "input": "ipadapter"
+          },
+          {
+            "from": "visionloader",
+            "to": "ipadapter",
+            "input": "clip_vision"
+          },
+          {
+            "from": "image",
+            "to": "ipadapter",
+            "input": "image"
+          },
+          {
+            "from": "ipadapter",
+            "to": "sampler",
+            "input": "model"
+          },
+          {
+            "from": "checkpoint",
+            "to": "positive",
+            "input": "clip"
+          },
+          {
+            "from": "checkpoint",
+            "to": "negative",
+            "input": "clip"
+          },
+          {
+            "from": "positive",
+            "to": "sampler",
+            "input": "positive"
+          },
+          {
+            "from": "negative",
+            "to": "sampler",
+            "input": "negative"
+          },
+          {
+            "from": "latent",
+            "to": "sampler",
+            "input": "latent_image"
+          },
+          {
+            "from": "sampler",
+            "to": "decode",
+            "input": "samples"
+          },
+          {
+            "from": "checkpoint",
+            "to": "decode",
+            "input": "vae"
+          },
+          {
+            "from": "decode",
+            "to": "saveraw",
+            "input": "images"
+          },
+          {
+            "from": "decode",
+            "to": "resize",
+            "input": "image"
+          },
+          {
+            "from": "resize",
+            "to": "savefinal",
+            "input": "images"
+          }
+        ]
+      }
     }
   },
   "candidates": {
-    "A": {"workflow": "Q", "seed": 8403001},
-    "B": {"workflow": "Q", "seed": 8403002},
-    "C": {"workflow": "S", "seed": 8403001}
+    "A": {
+      "workflow": "Q",
+      "seed": 8403001
+    },
+    "B": {
+      "workflow": "Q",
+      "seed": 8403002
+    },
+    "C": {
+      "workflow": "S",
+      "seed": 8403001
+    }
   },
   "smoke": {
     "maxPerWorkflow": 1,
     "width": 512,
     "height": 768,
     "steps": 8,
-    "neverACandidate": true
+    "neverACandidate": true,
+    "seed": 8403900,
+    "differsFromCandidates": "only in seed, latent size and steps"
   },
   "provider": {
     "name": "RunPod",
@@ -191,6 +781,7 @@
       "absoluteLimit": 10800
     },
     "consoleCheckpointSeconds": 1800,
-    "reconciliationToleranceUSD": "0.25"
+    "reconciliationToleranceUSD": "0.25",
+    "cumulativeAcrossSessions": true
   }
 }
