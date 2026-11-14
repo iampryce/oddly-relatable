@@ -11,6 +11,7 @@ import path from 'node:path';
 import {canvas, ensureFonts, FONT} from '../../production/lib/runtime.mjs';
 import {loadLock, validateRunSheet, buildProvenance, parseStrictJson, pngSize, sha256Buffer, isInside, REPO_ROOT,
   TRANSFER_SCHEMA, CANDIDATE_IDS, OUTPUT_NAME_RE, SHA256_RE} from './experiment-spec.mjs';
+import {crossCheckRun} from './experiment-ledger.mjs';
 
 export class NoWorkerError extends Error {
   constructor() { super('No generation worker is configured (adapter "none"). Nothing was generated.'); this.code = 'NO_WORKER'; this.retryable = false; }
@@ -60,6 +61,8 @@ export const fakeAdapter = {
 //   transfers/<A|B|C>.verified.json    verification record, written last and only on success
 //   cutouts/<name>.png                 local cut-out of the raw output: this is the candidate that is imported
 //   imported/<A|B|C>.json              marker written after a successful import (an import is never repeated)
+//   ledger.json, ledger.head           the session ledger (sessions and workflow freezes); checked against the run sheet
+//   frozen-q.json, frozen-s.json       the frozen workflow graphs recorded in the ledger
 // The job description must start with "AP-84B3 candidate A" (or B, C): one job per candidate.
 export class ImportRefused extends Error {
   constructor(message) { super(`Import refused: ${message}. Nothing was imported.`); this.code = 'IMPORT_REFUSED'; this.retryable = false; }
@@ -133,8 +136,11 @@ export function createImportAdapter({dir, lockFile, decisionsFile} = {}) {
       if (cut.length !== c.cutout.bytes || sha256Buffer(cut) !== c.cutout.sha256) throw new ImportRefused('the cut-out does not match its recorded SHA-256');
       const size = pngSize(cut);
       if (!size) throw new ImportRefused('the cut-out is not a PNG');
+      // 6. The run sheet, the session ledger, the frozen graph and the lock must all agree before anything is imported.
+      const cross = crossCheckRun({runDir: root, lock, lockSha256, sheet, workflow: lock.candidates[id].workflow});
+      if (cross.length) throw new ImportRefused(`the run record is inconsistent: ${cross.join('; ')}`);
       const provenance = buildProvenance({lock, lockSha256, sheet, candidate: id, transfer: record});
-      // 6. Mark the candidate as imported (write-once), so the same candidate can never be imported twice.
+      // 7. Mark the candidate as imported (write-once), so the same candidate can never be imported twice.
       fs.mkdirSync(path.join(root, 'imported'), {recursive: true});
       try { fs.writeFileSync(path.join(root, 'imported', `${id}.json`), JSON.stringify({candidate: id, cutoutSha256: c.cutout.sha256, importedAt: new Date().toISOString()}, null, 1), {flag: 'wx'}); }
       catch { throw new ImportRefused(`candidate ${id} has already been imported`); }

@@ -25,7 +25,10 @@
 //   node studio/tools/ap84b3/check-workflow.mjs --run <run folder> --workflow Q|S (--candidate A|B|C | --smoke) --file <export.json>
 //
 // THE FREEZE IS MANDATORY AND FAILS CLOSED. The frozen graph lives in the run folder as frozen-q.json or
-// frozen-s.json; there is no option to skip it or to point at another file.
+// frozen-s.json; there is no option to skip it or to point at another file. The session ledger is the authority:
+// it records each freeze with the frozen file's SHA-256. A frozen graph that is deleted, replaced or altered, or
+// a frozen file the ledger does not know about, stops the workflow. It is never re-created automatically: the
+// only way back is the owner-controlled recovery procedure (an approval line naming the exact ledger state).
 //   - Only the first candidate of each workflow may create it: candidate A for workflow Q, candidate C for
 //     workflow S, and only when no frozen graph exists yet. It is written once and never overwritten.
 //   - Every other export (candidate B, every smoke run, and any later export of A or C) must be compared with
@@ -44,6 +47,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {loadLock, resolveLiteral, isInside, REPO_ROOT, CANDIDATE_IDS} from '../../lib/experiment-spec.mjs';
+import {readLedger, freezeStatus, registerFreeze, frozenFileName as ledgerFrozenFileName} from '../../lib/experiment-ledger.mjs';
 
 export const FROZEN_SCHEMA = 'ap84b3-frozen-graph/1';
 const isLink = v => Array.isArray(v) && v.length === 2 && (typeof v[0] === 'string' || Number.isInteger(v[0])) && Number.isInteger(v[1]);
@@ -140,7 +144,7 @@ export function checkWorkflow({graph, workflow, lock, candidate = null, smoke = 
 // Layer 2. The frozen record of the first export that passed Layer 1.
 // The candidate whose export creates each workflow's frozen graph: the first candidate that uses the workflow.
 export const FREEZING_CANDIDATE = Object.freeze({Q: 'A', S: 'C'});
-export const frozenFileName = workflow => `frozen-${workflow.toLowerCase()}.json`;
+export const frozenFileName = ledgerFrozenFileName;
 
 export function freeze({result, workflow, candidate, lockSha256, apiSha256}) {
   if (!result.ok) throw new Error('only an export that passes every constraint, with nothing unlisted, can be frozen');
@@ -204,17 +208,26 @@ export function checkExportInRun({runDir, graph, workflow, lock, lockSha256, can
   if (!fs.existsSync(run) || fs.lstatSync(run).isSymbolicLink() || !fs.statSync(run).isDirectory()) throw new Error('the run folder does not exist');
   if (isInside(run, REPO_ROOT)) throw new Error('the run folder must be outside the repository');
   if (!['Q', 'S'].includes(workflow)) throw new Error('workflow must be Q or S');
-  const file = path.join(run, frozenFileName(workflow));
+  const closed = problems => ({ok: false, stop: false, problems, unlisted: [], recorded: {}, free: {}, normalForm: null, graphSha256: null, toFreeze: null, differencesFromFrozen: null, frozenRequired: true});
+  // The ledger must be valid, for this lock, with a session in progress: exports are only checked on the Pod.
+  let led;
+  try { led = readLedger(run, lock); } catch (e) { return closed([e.message]); }
+  if (led.state.lockSha256 !== lockSha256) return closed(['the session ledger belongs to a different experiment lock']);
+  if (!led.state.sessions.some(x => x.status === 'prepared')) return closed(['no session is in progress in the session ledger']);
+  const st = freezeStatus({ledger: led, workflow});
+  if (st.status === 'broken') return closed(st.problems);
   let frozen = null;
-  if (fs.existsSync(file)) {
-    if (fs.lstatSync(file).isSymbolicLink() || !fs.statSync(file).isFile()) frozen = {};                       // unusable: fails closed below
-    else { try { frozen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { frozen = {}; } }
-    if (frozen === null || typeof frozen !== 'object') frozen = {};
+  if (st.status === 'frozen') {
+    try { frozen = JSON.parse(fs.readFileSync(st.file, 'utf8')); } catch { frozen = {}; }
+    if (frozen === null || typeof frozen !== 'object' || frozen.graphSha256 !== st.record.graphSha256) return closed([`the frozen graph for workflow ${workflow} does not contain the graph recorded in the session ledger`]);
   }
   const out = validateExport({graph, workflow, lock, lockSha256, candidate, smoke, frozen, apiSha256});
   if (out.ok && out.toFreeze) {
-    fs.writeFileSync(file, JSON.stringify(out.toFreeze, null, 1), {flag: 'wx'});                               // written once, never overwritten
-    out.frozenWritten = file;
+    // First freeze of this workflow: written once, made read-only, and recorded in the ledger with its file hash.
+    fs.writeFileSync(st.file, JSON.stringify(out.toFreeze, null, 1), {flag: 'wx'});
+    try { fs.chmodSync(st.file, 0o444); } catch {}
+    registerFreeze({runDir: run, lock, workflow, graphSha256: out.toFreeze.graphSha256, apiSha256: out.toFreeze.apiSha256});
+    out.frozenWritten = st.file;
   }
   return out;
 }

@@ -6,10 +6,15 @@
 // console. It is independent of the Pod and of the on-Pod watchdog: it works if the watchdog never started,
 // crashed or could not authenticate. It cannot stop the Pod itself, and none of its alerts extends a limit.
 //
-//   node studio/tools/ap84b3/stop-timer.mjs --start <Pod start time, ISO 8601>
+//   node studio/tools/ap84b3/stop-timer.mjs --run <run folder> --start <Pod start time, ISO 8601>
+//
+// The limits are cumulative across sessions (owner decision A2). The timer reads the session in progress from the
+// session ledger and moves every alert earlier by the runtime already used in earlier sessions, so alerts fall at
+// the cumulative milestone times. Alerts already passed in earlier sessions are not repeated.
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {loadLock} from '../../lib/experiment-spec.mjs';
+import {readLedger} from '../../lib/experiment-ledger.mjs';
 
 const hms = s => `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')} min`;
 
@@ -29,6 +34,13 @@ export function schedule(lock, startMs) {
   return out.sort((a, b) => a.seconds - b.seconds || a.kind.localeCompare(b.kind));
 }
 
+// The schedule for a later session: cumulative times, shifted by the runtime already used. Only alerts that
+// still lie ahead are kept; their `seconds` stay cumulative and `inSessionSeconds` is when they fall in this session.
+export function scheduleForSession(lock, startMs, priorRuntimeSeconds) {
+  if (!Number.isInteger(priorRuntimeSeconds) || priorRuntimeSeconds < 0) throw new Error('priorRuntimeSeconds must be a non-negative integer');
+  return schedule(lock, startMs - priorRuntimeSeconds * 1000).filter(a => a.seconds > priorRuntimeSeconds).map(a => ({...a, inSessionSeconds: a.seconds - priorRuntimeSeconds}));
+}
+
 // Alerts that are due at nowMs and have not been announced yet (announced: a Set of "seconds:kind").
 export function due(alerts, startMs, nowMs, announced) {
   return alerts.filter(a => nowMs >= startMs + a.seconds * 1000 && !announced.has(`${a.seconds}:${a.kind}`));
@@ -36,12 +48,16 @@ export function due(alerts, startMs, nowMs, announced) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const i = process.argv.indexOf('--start');
-    const startMs = i >= 0 ? Date.parse(process.argv[i + 1]) : NaN;
-    if (Number.isNaN(startMs)) throw new Error('usage: stop-timer.mjs --start <Pod start time, ISO 8601, e.g. 2026-11-20T14:05:00Z>');
+    const arg = n => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
+    const startMs = Date.parse(arg('--start') ?? '');
+    if (Number.isNaN(startMs) || !arg('--run')) throw new Error('usage: stop-timer.mjs --run <run folder> --start <Pod start time, ISO 8601, e.g. 2026-11-20T14:05:00Z>');
     if (startMs > Date.now()) throw new Error('the Pod start time is in the future');
     const {lock} = loadLock();                                                  // refuses unless the lock is owner-approved
-    const alerts = schedule(lock, startMs), announced = new Set();
+    const open = readLedger(arg('--run'), lock).state.sessions.find(s => s.status === 'prepared');
+    if (!open) throw new Error('no session is in progress in the session ledger');
+    const prior = open.prepared.priorRuntimeSeconds;
+    const alerts = scheduleForSession(lock, startMs, prior), announced = new Set();
+    console.log(`Session ${open.number}: ${prior} s of runtime already used in earlier sessions; alerts are at cumulative times.`);
     console.log(`AP-84B3 stop timer. Pod started ${new Date(startMs).toISOString()}. This timer cannot stop the Pod: you stop it in the web console.`);
     for (const a of alerts) console.log(`  ${a.at}  ${a.message}`);
     const tick = () => {

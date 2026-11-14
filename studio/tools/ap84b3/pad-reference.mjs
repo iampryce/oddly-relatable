@@ -37,6 +37,8 @@ export async function padReference({input, canvasWidth, canvasHeight, padColourR
   if (sha(fs.readFileSync(input)) !== before) throw new Error('the input changed while it was being read');
   return {buffer, meta: {tool: 'studio/tools/ap84b3/pad-reference.mjs', source_sha256: before, source_unchanged: true, source_size: {width: w, height: h},
     canvas: {width: canvasWidth, height: canvasHeight}, pad_colour_rgb: padColourRGB, placement: {left, top}, output_sha256: sha(buffer), output_bytes: buffer.length,
+    // The PNG encoder is part of the result: a different sharp/libvips version may encode different bytes. Recorded so a mismatch can be explained.
+    library: {sharp: sharp.versions?.sharp ?? null, vips: sharp.versions?.vips ?? null},
     method: 'centred on a solid-colour canvas; original pixels copied unchanged; no resizing or redrawing'}};
 }
 

@@ -1,12 +1,15 @@
 # AP-84B3 runbook: three-candidate experiment
 
-**Status (2026-11-13): NOT AUTHORISED TO EXECUTE.**
-- This runbook was written under owner decision D1-6 (implementation). It describes a future run.
+**Status (2026-11-14): NOT AUTHORISED TO EXECUTE.**
 - Execution is owner decision **D1-7**, which has not been given. No account, funding, Pod, download or image generation is authorised.
-- Two further gates sit before D1-7:
-  1. **Experiment lock approval (A4).** The owner reviews `studio/config/ap84b3-experiment.json` and its canonical hash. Only then is the hash recorded in `DECISIONS.md`. Until then every tool refuses to run. The lock was amended on 2026-11-14 (owner decisions L1 to L12); the amended lock is **not approved**.
-  2. **Environment proposal (A5).** A separately reviewed, reproducible proposal for the PyTorch version and the Pod base image. `pod-setup.sh` refuses to run without the `environment.lock` that proposal would add.
+- Two approval lines must be in `DECISIONS.md` before any tool will run, each written only on the owner's confirmation:
+  1. `AP-84B3-LOCK-APPROVED-SHA256=<hash>` for the experiment lock `studio/config/ap84b3-experiment.json`.
+  2. `AP-84B3-ENVIRONMENT-APPROVED-SHA256=<hash>` for the environment lock `studio/config/ap84b3-environment.json` (owner decision A5: Option A, two tiers).
 - Every D1-7 approval must name the approved lock hash.
+- Run the local preflight at any time; it only reads:
+  ```
+  node studio/tools/ap84b3/preflight.mjs [--run <run folder>]
+  ```
 
 Related: `AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` (what is being tested) and `DECISIONS.md` (the authoritative record).
 
@@ -23,6 +26,8 @@ Related: `AP-84B3-D1-EXPERIMENT-SPECIFICATION.md` (what is being tested) and `DE
 - The $0.25 between $4.75 and $5.00 is a margin for estimate error and stopping delay. **It is not permission to continue.**
 - Nothing in this runbook extends a limit. A transfer, retry or shutdown step in progress is cut off.
 - **The limits are cumulative across the whole experiment** (owner decision A2). The $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session, including a failed one. A failed session does not reset them. No additional deposit or funding is authorised. See §17.
+- **How the cumulative limits are enforced.** A local session ledger (`ledger.json` in the run folder, each record chained to the one before) records the deposit and every session. Each session is prepared from the ledger, which gives it only what remains, and the bundle carries that allowance in a sealed `session.env`. The watchdog on the Pod reads it, refuses to start without it, and stops the Pod when the TOTALS reach the thresholds.
+- **What this cannot do.** Consumption is entered by a person from the provider's console; no account API key is used. The tools cannot impose a hard billing cap. The provider's balance (one $10 deposit, auto-pay off), the console checkpoints (§12) and the manual stop (§13) remain the independent safeguards.
 
 ## 2. Milestones
 
@@ -47,7 +52,10 @@ These cannot be verified without a Pod. Each is checked in the live test (§8) b
 | U2 | Where the Pod identifier comes from | Unknown. The watchdog refuses to start without one |
 | U3 | Whether RunPod's SSH mode supports file copy | Unverified. A direct SSH connection is believed to be needed |
 | U4 | Whether the pinned ComfyUI and IP-Adapter node run together | Execution risk. No substitution and no pin change |
-| U5 | PyTorch version and Pod base image | Decided by the separate environment proposal |
+| U5 | PyTorch version and Pod base image | Pinned in the environment lock (A5). `pod-setup.sh environment` checks the image fingerprint, Python, PyTorch, torchvision, torchaudio, the CUDA build and the GPU before anything is installed |
+| U9 | Whether RunPod deploys an image pinned by digest (`runpod/pytorch@sha256:e745…`) | Unverified. If it does not, **stop and return to the owner**; do not deploy by tag alone |
+| U10 | Whether the 9.72 GB (compressed) image counts against the 80 GB container disk | Unknown. `pod-setup.sh models` checks the real free space before the first download |
+| U11 | FP8 on the A40 fallback | The A40 has no FP8 hardware; ComfyUI must up-cast the weights, which is slower. Unverified; observed only if the A40 is used |
 | U6 | How RunPod converts monthly prices to per-second billing | Unverified. The estimate uses a 672-hour month, which errs high |
 | U7 | The exact API export of each workflow, including the Qwen shift value | Not pre-approved. Inspected, checked against the lock's constraints and frozen on the Pod (§10) |
 | U8 | Whether the Qwen latent node `EmptySD3LatentImage` works with Qwen-Image-Edit-2511 | **Unverified compatibility gate.** Tested in the Qwen smoke run (§11). If it is incompatible, stop and return to the owner. No other node is substituted |
@@ -86,22 +94,24 @@ These cannot be verified without a Pod. Each is checked in the live test (§8) b
 
 ## 5. Step 1: local preparation ($0)
 
-1. Verify master v3 and the approved pose 02 against the hashes in the lock.
-2. Build the `character-01` reference pack in the studio. Record its ID and hash.
-3. Create the run folder **outside the repository**, named `r-YYYYMMDD-HHMMSS`. Outputs are never committed.
-4. Build the Pod bundle:
+1. Run the preflight. Every local check must pass:
    ```
-   node studio/tools/ap84b3/build-pod-bundle.mjs --out <folder outside the repository>
+   node studio/tools/ap84b3/preflight.mjs
    ```
-5. Add the approved `environment.lock` to the bundle (from the environment proposal).
-6. Build the padded reference for the SDXL baseline, outside the repository:
+2. Confirm the environment lock hash the same way as the experiment lock (§4), with `loadEnvironment` in place of `loadLock`, and compare it with the `AP-84B3-ENVIRONMENT-APPROVED-SHA256=` line.
+3. Build the `character-01` reference pack in the studio. Record its ID and hash.
+4. Create the run folder **outside the repository**, named `r-YYYYMMDD-HHMMSS`, and start its session ledger. The ledger is started only in a new, empty folder:
+   ```
+   node studio/tools/ap84b3/ledger.mjs init --run <run folder> --run-id r-YYYYMMDD-HHMMSS
+   ```
+5. Build the padded reference for the SDXL baseline:
    ```
    node studio/tools/ap84b3/pad-reference.mjs --out <run folder>/master-v3-square.png
    ```
-   It centres master v3 on a 1536×1536 canvas with RGB (203, 203, 203) borders, copies every original pixel unchanged, and fails unless the result's SHA-256 equals the one in the lock. The IP-Adapter node's own "pad" mode fills with black and must not be used.
-7. Start a run sheet (`run-sheet.json`, schema `ap84b3-run-sheet/1`) with the lock hash, an empty `priorSessions` list and an empty `smoke` list.
+   It centres master v3 on a 1536×1536 canvas with RGB (203, 203, 203) borders, copies every original pixel unchanged, and fails unless the result's SHA-256 equals the one in the lock. Its output records the sharp and libvips versions. The IP-Adapter node's own "pad" mode fills with black and must not be used.
+6. Start a run sheet (`run-sheet.json`, schema `ap84b3-run-sheet/1`) with the lock hash, an empty `priorSessions` list and an empty `smoke` list.
 
-**Evidence:** reference pack ID and hash; bundle `BUNDLE.SHA256SUMS`; padded reference SHA-256.
+**Evidence:** preflight output; both lock hashes; reference pack ID and hash; padded reference SHA-256 and library versions; `ledger.mjs status`.
 
 ## 6. Step 2: account and funding
 
@@ -112,6 +122,10 @@ Each record needs a timestamp and a screenshot.
 3. **Deposit.** Make one $10 deposit by a regular credit or debit card. A prepaid card requires $100 per transaction and must not be used.
 4. **After funding.** Record the balance. This is the **baseline**.
 5. **Check.** After-funding balance minus before-funding balance must equal $10.00. If not, do not deploy; return to the owner.
+6. **Record the deposit in the ledger.** It refuses anything but exactly $10.00, and refuses a second deposit:
+   ```
+   node studio/tools/ap84b3/ledger.mjs fund --run <run folder> --before <balance> --after <balance>
+   ```
 
 **Actual consumption** is worked out two ways during the run:
 - **Balance method:** baseline balance minus current balance.
@@ -132,10 +146,17 @@ The balance alone does not prove experiment-specific consumption: credits, adjus
 
    Conversions: per second × 3,600; per day ÷ 24; per month ÷ 672; per GB per month × GB ÷ 672. A one-off charge is added in full at the start. A resource whose billing period cannot be established cannot be normalised: do not start the watchdog; return to the owner.
 3. Enter every extra resource in `resources.tsv` in the bundle (period, quantity, conversion and hourly rate). The watchdog recomputes each hourly figure and refuses a mismatch.
-4. **Deploy:** RunPod Secure Cloud, on-demand, the approved GPU, 80 GB container disk, **no volume disk and no network volume**.
-5. Record the Pod start time. Start the local timer:
+4. **Prepare the session and build its bundle.** Read the current balance in the console. The ledger refuses if a session is still open, a limit has been reached, the balance is higher than after the deposit, or the balance does not match the recorded consumption within $0.25. It gives the session only what remains:
    ```
-   node studio/tools/ap84b3/stop-timer.mjs --start <Pod start time, ISO 8601>
+   node studio/tools/ap84b3/ledger.mjs prepare --run <run folder> --balance <current balance>
+   node studio/tools/ap84b3/build-pod-bundle.mjs --run <run folder> --out <new folder outside the repository>
+   ```
+   The bundle carries the sealed `session.env` (session number, runtime and consumption already used). Do not edit it: the watchdog checks it against `BUNDLE.SHA256SUMS`.
+5. **Deploy:** RunPod Secure Cloud, on-demand, the approved GPU, 80 GB container disk, **no volume disk and no network volume**, image **`runpod/pytorch@sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300`** (U9). Record the image reference as deployed.
+   - If the session is prepared but not deployed (for example, no GPU within the cap), close it: `ledger.mjs close --run <run folder> --not-started --reason "<why>"`.
+6. Record the Pod start time. Start the local timer; it reads the session from the ledger and alerts at the cumulative times:
+   ```
+   node studio/tools/ap84b3/stop-timer.mjs --run <run folder> --start <Pod start time, ISO 8601>
    ```
 
 **Evidence:** rate screenshot; the completed table; Pod start time; confirmation that no volume or network storage exists.
@@ -147,14 +168,15 @@ Do this **before any download**.
 1. Resolve U1 and U2: establish how a stop command run on the Pod authenticates, and how the Pod identifier is obtained. Record both. If the only mechanism is an account-level API key on the Pod, **stop and return to the owner**.
 2. Write a small stop command for the Pod that takes the Pod identifier as its only argument. It must contain no credential.
 3. **Live test.** Start the watchdog with a one-minute limit and confirm in the console that the Pod stops. This costs a few cents and counts toward the ceiling and the runtime.
-4. Start the Pod again if needed, then start the watchdog for the real run, using the settings in `watchdog.env` plus the operator settings:
+4. Start the Pod again if needed, then start the watchdog for the real run, using the settings in `watchdog.env`, the operator settings and `WD_BUNDLE_DIR` (the bundle folder holding `session.env`):
    ```
    nohup setsid ./watchdog.sh run > /dev/null 2>&1 &
    ./watchdog.sh status
    ```
-5. Confirm `status` shows `mode=production`, the hourly total from the table in §7, and a fresh heartbeat.
+5. Confirm `status` shows `mode=production`, the right `session`, `prior_runtime_seconds` and `prior_consumed_micro_usd` from the ledger, the hourly total from the table in §7, and a fresh heartbeat.
+   - The live test in step 3 uses runtime and money. Close it in the ledger as a session of its own and prepare a new one before the real run, so it counts toward the totals.
 
-The watchdog's consumption figure is an **estimate**: elapsed time × (GPU + container disk + every listed resource), plus one-off charges. It is not a provider billing measurement.
+The watchdog's consumption figure is an **estimate**: consumption already used in earlier sessions + this session's elapsed time × (GPU + container disk + every listed resource), plus one-off charges. It is not a provider billing measurement. The watchdog will not start without the sealed session file, refuses earlier-use values from anywhere else, and refuses to start if nothing remains.
 
 **Evidence:** how the stop command authenticates; the live-test result; the watchdog `status` output.
 
@@ -172,7 +194,17 @@ The watchdog's consumption figure is an **estimate**: elapsed time × (GPU + con
 
 ## 10. Step 6: setup and workflow freeze
 
-1. `./pod-setup.sh check`, then `software`, then `models`. Each stops on any mismatch. `models` verifies every file against the approved hashes.
+1. Run the setup steps in order. Each refuses to run until the step before it has succeeded, and each stops on any mismatch. Set `AP84B3_RECORD_DIR` to a folder outside ComfyUI; the evidence records go there.
+   ```
+   ./pod-setup.sh check          # bundle checksums, both lock hashes, session allowance, watchdog running
+   ./pod-setup.sh environment    # tier 1 before installation: image fingerprint, Python 3.12, torch 2.13.0+cu130,
+                                 # torchvision 0.28.0+cu130, torchaudio 2.11.0+cu130, CUDA 13.0, GPU, FP8 type
+   ./pod-setup.sh software       # ComfyUI and the IP-Adapter node at their pinned commits
+   ./pod-setup.sh requirements   # requirements.txt hash, install under the PyTorch constraints, tier 1 again,
+                                 # tier 2 record: package inventory and SHA-256, GPU, driver, CUDA, launch options
+   ./pod-setup.sh models         # free disk space first, then every model file, each hash-checked
+   ```
+   If `environment` or `requirements` fails, **stop and return to the owner**: do not install anything to make it pass.
 2. If the pinned ComfyUI and IP-Adapter node will not run together (U4), **stop and return to the owner**. Do not change a pin or substitute an implementation.
 
 **Build the two workflows.** The lock holds the constraints: one entry per node, its settings, and the connections. Nothing outside them is allowed.
@@ -210,6 +242,9 @@ The watchdog's consumption figure is an **estimate**: elapsed time × (GPU + con
    - If the frozen graph is missing, unreadable, altered or made under a different lock, the check fails. Do not generate.
    - A smoke export never creates a frozen graph. Only candidate A (Q) and candidate C (S) can, and only once.
 5. Never delete or edit a frozen graph. No workflow change after the freeze: a change needs the owner's approval.
+   - The freeze is recorded in the session ledger with the frozen file's SHA-256, and the file is made read-only.
+   - A deleted, replaced or altered frozen graph, or a frozen file the ledger does not know about, **stops the workflow**. It is never re-created automatically, not even by candidate A or C. Recovery is the owner-controlled procedure in §18.
+   - A freeze is recorded only while a session is in progress.
 
 **Evidence:** `pod-setup.sh` output; for each workflow the export hash, the frozen graph hash and the checker's report; the shift value; installed software versions.
 
@@ -289,7 +324,12 @@ Use it at 2 h 55 min if the Pod is still running, at any stop condition in §12,
 1. Confirm every retained output has a verification record locally.
 2. Stop, then terminate, the Pod. Confirm in the console that nothing remains.
 3. Record the Pod end time, the final balance and the consumption by both methods.
-4. Remove the SSH public key from the account.
+4. **Close the session in the ledger** with the higher of the two consumption figures:
+   ```
+   node studio/tools/ap84b3/ledger.mjs close --run <run folder> --gpu "<GPU>" --rate <$/h> --start <ISO> --end <ISO> --consumed <$> --reason "<why the session ended>"
+   ```
+   If it reports `overLimit`, return to the owner.
+5. Remove the SSH public key from the account.
 
 ## 15. After the Pod (local, $0)
 
@@ -298,7 +338,8 @@ Use it at 2 h 55 min if the Pod is still running, at any stop condition in §12,
    node studio/tools/ap84b3/cutout.cjs --in <raw.png> --out <run folder>/cutouts/candidate-a-cutout.png --meta <file.json>
    ```
    Raw and cut-out stay separate, each with its own hash. Report the cut-out's thresholds; do not change them.
-2. Complete the run sheet: Pod times, rate and consumption (`pod.consumedUSD`, the higher of the two methods), every earlier session in `priorSessions`, software commits, workflow hashes, the smoke records, and for each candidate its status (`retained`, `lost` or `not-generated`) and file hashes. The sheet is invalid if total runtime or total consumption across all sessions exceeds the limits.
+2. Complete the run sheet: Pod times, rate and consumption (`pod.consumedUSD`, the higher of the two methods), every earlier session in `priorSessions`, software commits, for each frozen workflow its `apiSha256` and `graphSha256`, `ledgerHead` (the newest ledger entry's hash from `ledger.mjs status`), the smoke records, and for each candidate its status (`retained`, `lost` or `not-generated`) and file hashes. The sheet is invalid if total runtime or total consumption across all sessions exceeds the limits.
+   - Before anything is imported, the import adapter checks that the run sheet, the ledger, the frozen graph and the lock all agree: the same sessions with the same times and consumption, the same frozen graph hash, no session still open. Any difference refuses the import.
 3. Start the studio with the import adapter and the run folder:
    ```
    STUDIO_GEN_ADAPTER=import STUDIO_GEN_IMPORT_DIR=<absolute run folder> node studio/server.mjs
@@ -334,24 +375,40 @@ Use it at 2 h 55 min if the Pod is still running, at any stop condition in §12,
 - [ ] Pod start and end times; final balance; consumption by both methods
 - [ ] Console confirmation that nothing remains
 - [ ] Run sheet, including any output recorded as lost, every earlier session and total consumption
+- [ ] Environment lock hash, equal to its approval line
+- [ ] Preflight output
+- [ ] `ledger.mjs status` after funding, after each prepare and after each close
+- [ ] Image reference as deployed (pinned by digest)
+- [ ] `environment.pre.json` and `environment.post.json` (tier 1 checks and the tier 2 record)
 
 ## 17. If a session ends early: cumulative limits
 
 A stop at the workflow freeze (§10), the latent gate (§11) or any other stop condition ends the Pod session. The limits do not reset.
 
-1. Terminate the Pod. Record the session in the run sheet's `priorSessions`: start and end time, GPU, consumption (the higher of the balance and usage methods) and the reason.
+1. Terminate the Pod. Close the session in the ledger (§14, step 4) with its start and end time, GPU, rate, consumption (the higher of the balance and usage methods) and the reason. Record the same session in the run sheet's `priorSessions`.
 2. Return to the owner. A further session needs the owner's decision on the reason for the stop.
-3. For a further session, work out what remains:
+3. For a further session, prepare it from the ledger (§7, step 4). The ledger:
+   - refuses if the cumulative runtime has passed 2 h 20 min, or the recorded consumption has reached $4.75 or $5.00;
+   - refuses if the console balance does not match the recorded consumption within $0.25, or is higher than after the deposit;
+   - otherwise writes a sealed `session.env` with the runtime and consumption already used, carrying forward the higher of the ledger's figure and the balance.
+4. Build a new bundle for the session. The watchdog adds the earlier use to this session's and stops at the cumulative thresholds. Its full defaults can no longer apply: it will not start without the session file, and earlier-use values cannot be given any other way.
+5. The stop timer reads the session from the ledger and alerts at the cumulative times.
+6. **No additional deposit.** The single $10 deposit is the only funding. The ledger refuses a second deposit.
+7. **Limits of this control.** The ledger is a local file. Someone who deliberately rewrites the ledger and its head record consistently is not stopped by the chain. The balance check at each prepare, the provider's balance, the console checkpoints and the manual stop are the independent checks.
+
+## 18. Frozen graph recovery (owner-controlled)
+
+A frozen graph that is deleted, replaced or altered, or a frozen file without a ledger record, stops the workflow. There is no automatic recovery.
+
+1. Stop. Do not generate. Record what happened.
+2. Return to the owner with `ledger.mjs status`. Recovery is the owner's decision.
+3. If the owner approves, the owner records in `DECISIONS.md`:
    ```
-   node -e "import('./studio/lib/experiment-spec.mjs').then(m=>console.log(m.remainingLimits(m.loadLock().lock, <priorSessions>)))"
+   AP-84B3-FREEZE-RECOVERY-APPROVED=<Q|S>:<the ledger head hash shown by status>
    ```
-4. Start the watchdog with the **reduced** settings it reports: `WD_STOP_SECONDS`, `WD_NO_NEW_GENERATION_SECONDS` and `WD_ESTIMATE_STOP_USD`. The watchdog accepts only values at or below the approved maxima, so the limits can be tightened but never loosened.
-   - **Check the settings before the session starts.** The watchdog's defaults are the full limits, so leaving a value unset would silently reset the limits:
-     ```
-     node -e "import('./studio/lib/experiment-spec.mjs').then(m=>console.log(m.checkSessionSettings(m.loadLock().lock, <priorSessions>, {WD_STOP_SECONDS:'...', WD_NO_NEW_GENERATION_SECONDS:'...', WD_ESTIMATE_STOP_USD:'...'})))"
-     ```
-     Do not start unless it reports `ok: true`. Record its output.
-   - **Known limit of this control.** The check runs locally. Nothing on the Pod verifies that the watchdog was started with these values: that still depends on the operator. Confirm it with `./watchdog.sh status` (`stop_seconds` and `threshold_micro_usd`) and record the output. A proposal to enforce the cumulative limits inside the watchdog is open and not approved.
-5. Start the local timer with the Pod start time moved earlier by the runtime already used, so its alerts fall at the cumulative times.
-6. If `sessionAllowed` is false, no further session may start.
-7. **No additional deposit.** The single $10 deposit is the only funding. If the balance cannot cover a further session within the ceiling, the experiment ends.
+   The approval names the exact ledger state, so it cannot be reused later.
+4. Run the recovery. It records the recovery in the ledger and keeps the old frozen file under a `revoked` name; nothing is deleted:
+   ```
+   node studio/tools/ap84b3/ledger.mjs recover --run <run folder> --workflow Q --reason "<what happened>"
+   ```
+5. The freeze must then be re-established by the workflow's first candidate (A for Q, C for S) under §10. Outputs made under the old freeze no longer match the run record and cannot be imported.

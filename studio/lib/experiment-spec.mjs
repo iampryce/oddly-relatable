@@ -14,6 +14,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
 export const LOCK_FILE = path.join(REPO_ROOT, 'studio', 'config', 'ap84b3-experiment.json');
 export const DECISIONS_FILE = path.join(REPO_ROOT, 'DECISIONS.md');
+export const ENVIRONMENT_FILE = path.join(REPO_ROOT, 'studio', 'config', 'ap84b3-environment.json');
+export const ENVIRONMENT_SCHEMA = 'ap84b3-environment/1';
 export const LOCK_SCHEMA = 'ap84b3-experiment-lock/1';
 export const RUN_SHEET_SCHEMA = 'ap84b3-run-sheet/1';
 export const TRANSFER_SCHEMA = 'ap84b3-transfer-verified/1';
@@ -399,8 +401,16 @@ export function validateRunSheet(sheet, lock, lockSha256) {
   if (sessionsOk && consumed > usdToMicro(lock.limits.consumptionCeilingUSD)) bad('total consumption across all sessions exceeds the approved ceiling');
   if (sheet.software?.comfyuiCommit !== lock.software.comfyui.commit) bad('software.comfyuiCommit does not match the pin');
   if (sheet.software?.ipadapterCommit !== lock.software.ipadapterPlus.commit) bad('software.ipadapterCommit does not match the pin');
-  for (const w of ['Q', 'S']) if (!SHA256_RE.test(sheet.workflows?.[w]?.apiSha256 || '')) bad(`workflows.${w}.apiSha256 must be recorded before any candidate`);
   const cands = sheet.candidates || {};
+  // A workflow that produced a retained candidate must have been frozen: its export hash and frozen graph hash are recorded.
+  for (const w of ['Q', 'S']) {
+    const used = CANDIDATE_IDS.some(id => lock.candidates[id].workflow === w && cands[id]?.status === 'retained');
+    for (const k of ['apiSha256', 'graphSha256']) {
+      const v = sheet.workflows?.[w]?.[k];
+      if (used ? !SHA256_RE.test(v || '') : (v !== undefined && !SHA256_RE.test(v || ''))) bad(`workflows.${w}.${k} must be recorded before any candidate`);
+    }
+  }
+  if (!SHA256_RE.test(sheet.ledgerHead || '')) bad('ledgerHead must be the hash of the newest session-ledger entry');
   if (Object.keys(cands).sort().join() !== CANDIDATE_IDS.join()) bad('candidates must be exactly A, B and C');
   for (const id of CANDIDATE_IDS) {
     const c = cands[id]; if (!c) continue;
@@ -461,4 +471,48 @@ export function isInside(child, parent) {
   const c = real(child), r = real(parent);
   const rel = path.relative(r, c);
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Environment lock (owner decision A5: Option A, two tiers). A separate file from the experiment lock, so the
+// approved experiment lock hash is not affected. Approved only when its canonical SHA-256 is recorded in
+// DECISIONS.md as  AP-84B3-ENVIRONMENT-APPROVED-SHA256=<hex>  after the owner's review.
+const ENV_APPROVED_RE = /AP-84B3-ENVIRONMENT-APPROVED-SHA256=([0-9a-f]{64})/g;
+const ENV_REVOKED_RE = /AP-84B3-ENVIRONMENT-REVOKED-SHA256=([0-9a-f]{64})/g;
+export function validateEnvironmentShape(env, lock) {
+  const n = (c, m) => { if (!c) throw new LockError(`environment lock: ${m}`, 'ENV_INVALID'); };
+  n(env && env.schema === ENVIRONMENT_SCHEMA, `schema must be ${ENVIRONMENT_SCHEMA}`);
+  const I = env.image || {};
+  n(/^[a-z0-9]+(\/[a-z0-9._-]+)+:[A-Za-z0-9._-]+$/.test(I.reference || ''), 'image.reference must be a tagged image name');
+  n(/^sha256:[0-9a-f]{64}$/.test(I.digest || '') && /^sha256:[0-9a-f]{64}$/.test(I.configDigest || ''), 'image.digest and image.configDigest must be sha256 digests');
+  n(I.deployAs === `${I.reference.split(':')[0]}@${I.digest}`, 'image.deployAs must be the repository pinned by digest');
+  n(I.platform === 'linux/amd64' && I.fingerprint && isStr(I.fingerprint.CUDA_VERSION) && isStr(I.fingerprint.NV_CUDNN_VERSION), 'image.platform and image.fingerprint are required');
+  const T = env.tier1 || {};
+  n(/^3\.\d+$/.test(T.python || ''), 'tier1.python must look like 3.12');
+  for (const k of ['torch', 'torchvision', 'torchaudio']) n(/^\d+\.\d+\.\d+\+cu\d+$/.test(T[k] || ''), `tier1.${k} must be an exact version with its CUDA build, e.g. 2.13.0+cu130`);
+  n(/^\d+\.\d+$/.test(T.torchCuda || ''), 'tier1.torchCuda must look like 13.0');
+  n(SHA256_RE.test(T.comfyuiRequirementsSha256 || ''), 'tier1.comfyuiRequirementsSha256 must be a SHA-256');
+  n(Array.isArray(env.installConstraints) && ['torch', 'torchvision', 'torchaudio'].every(k => env.installConstraints.includes(`${k}==${T[k]}`)), 'installConstraints must pin torch, torchvision and torchaudio to the tier 1 versions');
+  n(env.installConstraints.every(c => /^[a-z0-9_-]+==[A-Za-z0-9.+_-]+$/.test(c)), 'installConstraints must be exact pins');
+  n(Array.isArray(env.tier2?.launchOptions) && env.tier2.launchOptions.every(o => typeof o === 'string' && !/[\s;&|$`]/.test(o)), 'tier2.launchOptions must be plain arguments');
+  const G = env.gpu || {};
+  n(G.allowed && typeof G.allowed === 'object' && Number.isSafeInteger(G.minTotalMemoryBytes) && G.minTotalMemoryBytes > 0, 'gpu.allowed and gpu.minTotalMemoryBytes are required');
+  const lockGpus = [lock.provider.gpuPrimary, lock.provider.gpuFallback].sort();
+  n(JSON.stringify(Object.values(G.allowed).map(g => g.lockName).sort()) === JSON.stringify(lockGpus), 'gpu.allowed must name exactly the approved primary and fallback GPUs');
+  for (const g of Object.values(G.allowed)) n(/^\d+\.\d+$/.test(g.computeCapability || ''), 'each GPU needs its compute capability');
+  n(Number.isInteger(env.disk?.marginGB) && env.disk.marginGB >= 1, 'disk.marginGB is required');
+  return env;
+}
+export function loadEnvironment({environmentFile = ENVIRONMENT_FILE, decisionsFile = DECISIONS_FILE, lock, requireApproved = true} = {}) {
+  const text = fs.readFileSync(environmentFile);
+  const env = validateEnvironmentShape(parseStrictJson(text), lock);
+  const sha256 = canonicalHash(text);
+  const d = fs.existsSync(decisionsFile) ? fs.readFileSync(decisionsFile, 'utf8') : '';
+  const approved = new Set([...d.matchAll(ENV_APPROVED_RE)].map(m => m[1])), revoked = new Set([...d.matchAll(ENV_REVOKED_RE)].map(m => m[1]));
+  const ok = approved.has(sha256) && !revoked.has(sha256);
+  if (requireApproved && !ok) {
+    throw new LockError(`environment lock ${sha256} is not recorded as owner-approved in ${path.basename(decisionsFile)} `
+      + '(expected a line AP-84B3-ENVIRONMENT-APPROVED-SHA256=<hash>, written only after the owner\'s explicit review). Nothing was built.', 'ENV_NOT_APPROVED');
+  }
+  return {env, sha256, approved: ok};
 }

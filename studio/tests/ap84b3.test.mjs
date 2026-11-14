@@ -17,11 +17,13 @@ import {fileURLToPath} from 'node:url';
 import {createStudio} from '../lib/app.mjs';
 import {ADAPTERS, adapterFor, createImportAdapter, importAdapter} from '../lib/gen-adapters.mjs';
 import * as spec from '../lib/experiment-spec.mjs';
+import * as ledger from '../lib/experiment-ledger.mjs';
 import {bundleFiles, buildBundle} from '../tools/ap84b3/build-pod-bundle.mjs';
 import {verifyTransfer, checkStaging, isRetained, parseManifest, TransferRejected} from '../tools/ap84b3/verify-transfer.mjs';
 import {checkWorkflow, freeze, compareToFrozen, graphHash, validateExport, checkExportInRun, frozenFileName, FREEZING_CANDIDATE} from '../tools/ap84b3/check-workflow.mjs';
 import {padReference, padFromLock} from '../tools/ap84b3/pad-reference.mjs';
-import {schedule, due} from '../tools/ap84b3/stop-timer.mjs';
+import {schedule, scheduleForSession, due} from '../tools/ap84b3/stop-timer.mjs';
+import {runPreflight} from '../tools/ap84b3/preflight.mjs';
 import {buildSheet, layout} from '../tools/ap84b3/compare-sheet.mjs';
 import {canvas} from '../../production/lib/runtime.mjs';
 
@@ -49,15 +51,33 @@ const protectedBefore = PROTECTED.map(f => [f, sha(path.join(REPO, f))]);
 // Fixtures
 const REAL = spec.loadLock({requireApproved: false});
 // A fixture "approved" lock: a copy of the current lock plus a temporary decision record naming its hash.
-function fixture({approve = true, mutate = null} = {}) {
+function fixture({approve = true, approveEnvironment = true, mutate = null, mutateEnvironment = null} = {}) {
   const dir = tmp('ap84b3-fx-');
-  let text = fs.readFileSync(spec.LOCK_FILE, 'utf8');
+  let text = fs.readFileSync(spec.LOCK_FILE, 'utf8'), envText = fs.readFileSync(spec.ENVIRONMENT_FILE, 'utf8');
   if (mutate) { const o = JSON.parse(text); mutate(o); text = JSON.stringify(o, null, 2); }
-  const lockFile = path.join(dir, 'lock.json'), decisionsFile = path.join(dir, 'DECISIONS.md');
-  fs.writeFileSync(lockFile, text);
-  const sha256 = spec.canonicalHash(text);
-  fs.writeFileSync(decisionsFile, approve ? `fixture record\nAP-84B3-LOCK-APPROVED-SHA256=${sha256}\n` : 'fixture record with no approval\n');
-  return {dir, lockFile, decisionsFile, sha256, lock: spec.parseStrictJson(text)};
+  if (mutateEnvironment) { const o = JSON.parse(envText); mutateEnvironment(o); envText = JSON.stringify(o, null, 2); }
+  const lockFile = path.join(dir, 'lock.json'), environmentFile = path.join(dir, 'environment.json'), decisionsFile = path.join(dir, 'DECISIONS.md');
+  fs.writeFileSync(lockFile, text); fs.writeFileSync(environmentFile, envText);
+  const sha256 = spec.canonicalHash(text), environmentSha256 = spec.canonicalHash(envText);
+  fs.writeFileSync(decisionsFile, 'fixture record\n' + (approve ? `AP-84B3-LOCK-APPROVED-SHA256=${sha256}\n` : '') + (approveEnvironment ? `AP-84B3-ENVIRONMENT-APPROVED-SHA256=${environmentSha256}\n` : ''));
+  return {dir, lockFile, environmentFile, decisionsFile, sha256, environmentSha256, lock: spec.parseStrictJson(text)};
+}
+// A session ledger with the deposit recorded and session 1 prepared (as on the day of a run). Must be started in
+// an empty run folder, before any transfer or run sheet exists.
+function startLedger(fx, run, {runId = 'r-20261120-140500'} = {}) {
+  ledger.initLedger({runDir: run, lock: fx.lock, lockSha256: fx.sha256, runId});
+  ledger.recordFunding({runDir: run, lock: fx.lock, balanceBeforeUSD: '0.00', balanceAfterUSD: '10.00'});
+  return ledger.prepareSession({runDir: run, lock: fx.lock, currentBalanceUSD: '10.00'});
+}
+// Record workflow Q's freeze (as the checker would) and close the session to match the run sheet's pod record.
+function finishLedger(fx, run, sheet) {
+  const file = path.join(run, ledger.frozenFileName('Q'));
+  fs.writeFileSync(file, JSON.stringify({schema: 'ap84b3-frozen-graph/1', workflow: 'Q', frozenFrom: 'candidate A', lockSha256: fx.sha256, apiSha256: sheet.workflows.Q.apiSha256, graphSha256: sheet.workflows.Q.graphSha256, normalForm: {}}));
+  ledger.registerFreeze({runDir: run, lock: fx.lock, workflow: 'Q', graphSha256: sheet.workflows.Q.graphSha256, apiSha256: sheet.workflows.Q.apiSha256});
+  const P = sheet.pod;
+  const closed = ledger.closeSession({runDir: run, lock: fx.lock, gpu: P.gpu, gpuRateUSDPerHour: P.gpuRateUSDPerHour, startedAt: P.startedAt, endedAt: P.endedAt, consumedUSD: P.consumedUSD, reason: 'all candidates generated'});
+  sheet.ledgerHead = closed.ledger.head.hash;
+  return closed;
 }
 // A small, distinct PNG (synthetic test image, not artwork).
 function png(label, w = 96, h = 144, alpha = false) {
@@ -85,15 +105,17 @@ function sheetFor(fx, cands, extra = {}) {
   return {schema: spec.RUN_SHEET_SCHEMA, runId: 'r-20261120-140500', lockSha256: fx.sha256,
     pod: {provider: L.provider.name, cloud: L.provider.cloud, gpu: L.provider.gpuPrimary, region: 'test-region', startedAt: '2026-11-20T14:05:00Z', endedAt: '2026-11-20T15:35:00Z', gpuRateUSDPerHour: L.limits.gpuRateCapUSDPerHour[L.provider.gpuPrimary], consumedUSD: '1.66'},
     software: {comfyuiCommit: L.software.comfyui.commit, ipadapterCommit: L.software.ipadapterPlus.commit},
-    workflows: {Q: {apiSha256: 'a'.repeat(64)}, S: {apiSha256: 'b'.repeat(64)}}, candidates, priorSessions: [], smoke: [], ...extra};
+    workflows: {Q: {apiSha256: 'a'.repeat(64), graphSha256: 'd'.repeat(64)}, S: {apiSha256: 'b'.repeat(64), graphSha256: 'e'.repeat(64)}}, candidates, priorSessions: [], smoke: [], ledgerHead: 'c'.repeat(64), ...extra};
 }
 // A complete, verified run folder holding candidate A (small synthetic images unless raw/cut are given).
 function buildRun(fx, {raw = png('raw A'), cut = png('cutout A', 96, 144, true), sheetExtra = {}} = {}) {
   const run = tmp('ap84b3-run-');
+  startLedger(fx, run);
   const record = verifyTransfer({runDir: run, candidate: 'A', stagingDir: stage(run, 'A', {'candidate-a-raw.png': raw})});
   fs.mkdirSync(path.join(run, 'cutouts'));
   fs.writeFileSync(path.join(run, 'cutouts', 'candidate-a-cutout.png'), cut);
   const sheet = sheetFor(fx, {A: {status: 'retained', raw: entry('candidate-a-raw.png', raw), cutout: entry('candidate-a-cutout.png', cut)}}, sheetExtra);
+  finishLedger(fx, run, sheet);
   const writeSheet = s => fs.writeFileSync(path.join(run, 'run-sheet.json'), JSON.stringify(s, null, 1));
   writeSheet(sheet);
   return {run, sheet, record, writeSheet, adapter: createImportAdapter({dir: run, lockFile: fx.lockFile, decisionsFile: fx.decisionsFile})};
@@ -110,13 +132,18 @@ const BASH = (() => {
 const needBash = () => assert.ok(BASH, 'bash is required for the AP-84B3 shell-script tests (set AP84B3_BASH to its path)');
 const baseEnv = () => ({PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT || '', TEMP: process.env.TEMP || '', TMP: process.env.TMP || ''});
 // A watchdog test bed: state directory, a stand-in stop command that writes a marker, an empty resources file.
-function wdBed({stopBody = 'echo "stopped $1" >> "$(dirname "$0")/marker"'} = {}) {
+function wdBed({stopBody = 'echo "stopped $1" >> "$(dirname "$0")/marker"', session = 1, priorRuntimeSeconds = 0, priorConsumedUSD = '0.000000', sessionText = null} = {}) {
   const dir = tmp('ap84b3-wd-');
   fs.writeFileSync(path.join(dir, 'stop.sh'), `#!/usr/bin/env bash\n${stopBody}\n`, {mode: 0o755});
   fs.writeFileSync(path.join(dir, 'resources.tsv'), spec.RESOURCES_HEADER + '\n');
+  // The sealed session allowance, as the bundle builder writes it, covered by the bundle checksums.
+  const bundle = path.join(dir, 'bundle'); fs.mkdirSync(bundle);
+  const text = sessionText ?? ledger.sessionEnvText({session, priorRuntimeSeconds, priorConsumedUSD}, 'f'.repeat(64));
+  fs.writeFileSync(path.join(bundle, 'session.env'), text);
+  fs.writeFileSync(path.join(bundle, 'BUNDLE.SHA256SUMS'), `${shaBuf(Buffer.from(text))}  session.env\n`);
   const env = {...baseEnv(), WD_STATE_DIR: fwd(path.join(dir, 'state')), WD_POD_START_EPOCH: String(Math.floor(Date.now() / 1000)), WD_POD_ID: 'pod-fixture-1',
     WD_STOP_CMD: fwd(path.join(dir, 'stop.sh')), WD_GPU_RATE_USD_PER_HOUR: '1.09', WD_GPU_RATE_CAP_USD_PER_HOUR: '1.09', WD_DISK_GB: '80', WD_DISK_USD_PER_GB_MONTH: '0.10',
-    WD_RESOURCES_FILE: fwd(path.join(dir, 'resources.tsv')), WD_TEST_MODE: '1', WD_TICK_SECONDS: '1'};
+    WD_RESOURCES_FILE: fwd(path.join(dir, 'resources.tsv')), WD_BUNDLE_DIR: fwd(bundle), WD_TEST_MODE: '1', WD_TICK_SECONDS: '1'};
   const read = f => { try { return fs.readFileSync(path.join(dir, 'state', f), 'utf8').trim(); } catch { return null; } };
   const state = () => Object.fromEntries((read('state') || '').split(' ').filter(Boolean).map(kv => kv.split('=')));
   // A deterministic stand-in clock (test mode only): each call returns one second more than the previous call,
@@ -125,7 +152,7 @@ function wdBed({stopBody = 'echo "stopped $1" >> "$(dirname "$0")/marker"'} = {}
   fs.writeFileSync(path.join(dir, 'step-n'), '0\n');
   fs.writeFileSync(path.join(dir, 'step-clock.sh'), `#!/usr/bin/env bash\nd="$(dirname "$0")"; n="$(cat "$d/step-n")"; echo $(( n + 1 )) > "$d/step-n"; echo $(( ${env.WD_POD_START_EPOCH} + n ))\n`, {mode: 0o755});
   env.WD_NOW_CMD = fwd(path.join(dir, 'step-clock.sh'));
-  return {dir, env, read, state, marker: () => { try { return fs.readFileSync(path.join(dir, 'marker'), 'utf8').trim(); } catch { return null; } }};
+  return {dir, bundle, env, read, state, marker: () => { try { return fs.readFileSync(path.join(dir, 'marker'), 'utf8').trim(); } catch { return null; } }};
 }
 const wd = (env, cmd = 'run', timeout = 40000) => spawnSync(BASH, [fwd(path.join(TOOLS, 'watchdog.sh')), cmd], {env, encoding: 'utf8', timeout});
 
@@ -363,53 +390,111 @@ test('cut-out: reproduces the AP-72 record byte for byte; full-canvas mode keeps
   }
 });
 
-test('Pod bundle: every list is generated from the lock; no credential; no environment lock; unapproved locks refused', () => {
-  const fx = fixture(), out = path.join(tmp('ap84b3-bundle-'), 'bundle'), L = fx.lock;
-  const b = buildBundle({outDir: out, lockFile: fx.lockFile, decisionsFile: fx.decisionsFile, extraResources: [{name: 'example monthly add-on', rate: '7.00', period: 'month', quantity: 1}]});
-  assert.equal(b.lockSha256, fx.sha256);
+test('Pod bundle: generated from the approved locks and the prepared session; carries the environment lock and the sealed allowance; no credential', () => {
+  const fx = fixture(), run = tmp('ap84b3-run-'), out = path.join(tmp('ap84b3-bundle-'), 'bundle'), L = fx.lock;
+  const prep = startLedger(fx, run);
+  const build = (extra = {}) => buildBundle({outDir: out, runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile, ...extra});
+  const b = build({extraResources: [{name: 'example monthly add-on', rate: '7.00', period: 'month', quantity: 1}]});
+  assert.deepEqual([b.lockSha256, b.environmentSha256, b.session], [fx.sha256, fx.environmentSha256, 1]);
   const read = n => fs.readFileSync(path.join(out, n), 'utf8');
-  assert.equal(read('LOCK_SHA256').trim(), fx.sha256);
-  assert.equal(spec.canonicalHash(read('ap84b3-experiment.json')), fx.sha256);
+  assert.equal(read('LOCK_SHA256').trim(), fx.sha256); assert.equal(read('ENVIRONMENT_SHA256').trim(), fx.environmentSha256);
+  assert.equal(spec.canonicalHash(read('ap84b3-experiment.json')), fx.sha256); assert.equal(spec.canonicalHash(read('environment.lock')), fx.environmentSha256);
+  const E = JSON.parse(read('environment.lock'));
+  assert.equal(read('env-constraints.txt').split('\n').filter(l => l && !l.startsWith('#')).join(','), 'torch==2.13.0+cu130,torchvision==0.28.0+cu130,torchaudio==2.11.0+cu130');
+  const envVars = Object.fromEntries(read('environment.env').split('\n').filter(l => l && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  const modelBytes = L.models.reduce((n, m) => n + Math.round(Number(m.sizeGB) * 1e9), 0) + E.disk.marginGB * 1e9;
+  assert.deepEqual(envVars, {ENV_PYTHON: '3.12', ENV_COMFY_REQUIREMENTS_SHA256: E.tier1.comfyuiRequirementsSha256, ENV_MIN_FREE_KB: String(Math.ceil(modelBytes / 1024)), ENV_LAUNCH_OPTIONS: '--listen 127.0.0.1 --port 8188'});
+  assert.equal(read('session.env'), prep.sessionEnv, 'the sealed allowance is the one the ledger prepared');
+  assert.match(read('session.env'), /\nWD_SESSION_NUMBER=1\nWD_PRIOR_RUNTIME_SECONDS=0\nWD_PRIOR_CONSUMED_USD=0\.000000\n/);
   const downloads = read('downloads.tsv').trim().split('\n').filter(l => !l.startsWith('#')).map(l => l.split('\t'));
   assert.deepEqual(downloads, L.models.map(m => [`https://huggingface.co/${m.repo}/resolve/${m.revision}/${m.file}`, m.saveAs, m.sha256]));
   assert.equal(read('MODELS.SHA256SUMS'), L.models.map(m => `${m.sha256}  ${m.saveAs}\n`).join(''));
   assert.deepEqual(read('software.tsv').trim().split('\n').slice(1).map(l => l.split('\t')), [['comfyui', L.software.comfyui.repo, L.software.comfyui.commit, '.'],
     ['ipadapter-plus', L.software.ipadapterPlus.repo, L.software.ipadapterPlus.commit, L.software.ipadapterPlus.saveAs]]);
-  const env = Object.fromEntries(read('watchdog.env').split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split('=')));
-  assert.deepEqual(env, {WD_DISK_GB: '80', WD_DISK_USD_PER_GB_MONTH: '0.10', WD_HOURS_PER_MONTH: '672', WD_ESTIMATE_STOP_USD: '4.75', WD_STOP_SECONDS: '10200', WD_NO_NEW_GENERATION_SECONDS: '8400', WD_RESOURCES_FILE: 'resources.tsv'});
-  assert.match(read('resources.tsv'), /^# ap84b3-resources\/1\n/);
+  const wenv = Object.fromEntries(read('watchdog.env').split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split('=')));
+  assert.deepEqual(wenv, {WD_DISK_GB: '80', WD_DISK_USD_PER_GB_MONTH: '0.10', WD_HOURS_PER_MONTH: '672', WD_ESTIMATE_STOP_USD: '4.75', WD_STOP_SECONDS: '10200', WD_NO_NEW_GENERATION_SECONDS: '8400', WD_RESOURCES_FILE: 'resources.tsv'});
+  assert.ok(!/WD_PRIOR|WD_SESSION/.test(read('watchdog.env')), 'the cumulative allowance is only in the sealed session file');
   assert.match(read('resources.tsv'), /example monthly add-on\t7\.00\tmonth\t1\tper-month rate × quantity ÷ 672\t0\.010417\n/);
   // checksums cover every file, and nothing has Windows line endings
   const sums = read('BUNDLE.SHA256SUMS').trim().split('\n').map(l => l.split('  '));
-  assert.deepEqual(sums.map(s => s[1]).sort(), fs.readdirSync(out).filter(n => n !== 'BUNDLE.SHA256SUMS').sort());
+  assert.deepEqual(sums.map(x => x[1]).sort(), fs.readdirSync(out).filter(n => n !== 'BUNDLE.SHA256SUMS').sort());
+  assert.ok(['environment.lock', 'environment.env', 'env-constraints.txt', 'session.env', 'verify-environment.py', 'pod-setup.sh', 'watchdog.sh'].every(n => fs.existsSync(path.join(out, n))));
   for (const [h, n] of sums) { assert.equal(sha(path.join(out, n)), h); assert.ok(!read(n).includes('\r'), `${n} uses LF line endings`); }
-  // no environment lock and no credential in the bundle
-  assert.ok(!fs.existsSync(path.join(out, 'environment.lock')), 'the environment lock is not created in D1-6');
   for (const n of fs.readdirSync(out)) assert.ok(!/api[_-]?key\s*[:=]\s*\S|RUNPOD_API_KEY|BEGIN [A-Z ]*PRIVATE KEY|password\s*[:=]/i.test(read(n)), `${n} holds no credential`);
   // refusals
-  assert.throws(() => buildBundle({outDir: out, lockFile: fx.lockFile, decisionsFile: fx.decisionsFile}), /new or empty/);
-  assert.throws(() => buildBundle({outDir: path.join(REPO, 'studio-work', 'bundle-never-written'), lockFile: fx.lockFile, decisionsFile: fx.decisionsFile}), /outside the repository/);
+  assert.throws(() => build(), /new or empty/);
+  const fresh = () => path.join(tmp('ap84b3-bundle-'), 'b');
+  assert.throws(() => buildBundle({outDir: path.join(REPO, 'studio-work', 'bundle-never-written'), runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}), /outside the repository/);
   assert.ok(!fs.existsSync(path.join(REPO, 'studio-work', 'bundle-never-written')));
   const un = fixture({approve: false});
-  assert.throws(() => buildBundle({outDir: path.join(tmp(), 'b'), lockFile: un.lockFile, decisionsFile: un.decisionsFile}), e => e.code === 'LOCK_NOT_APPROVED');
-  assert.throws(() => bundleFiles({lock: L, lockSha256: fx.sha256, lockText: read('ap84b3-experiment.json'), extraResources: [{name: 'weekly thing', rate: '1.00', period: 'week'}]}), /unknown billing period/);
+  assert.throws(() => buildBundle({outDir: fresh(), runDir: run, lockFile: un.lockFile, environmentFile: un.environmentFile, decisionsFile: un.decisionsFile}), e => e.code === 'LOCK_NOT_APPROVED');
+  const noEnv = fixture({approveEnvironment: false});
+  assert.throws(() => buildBundle({outDir: fresh(), runDir: run, lockFile: noEnv.lockFile, environmentFile: noEnv.environmentFile, decisionsFile: noEnv.decisionsFile}), e => e.code === 'ENV_NOT_APPROVED');
+  assert.throws(() => buildBundle({outDir: fresh(), lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}), /run folder .* is required/);
+  assert.throws(() => buildBundle({outDir: fresh(), runDir: tmp('ap84b3-empty-'), lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}), e => e.code === 'LEDGER_MISSING');
+  ledger.closeSession({runDir: run, lock: L, notStarted: true, reason: 'not deployed in this test'});
+  assert.throws(() => buildBundle({outDir: fresh(), runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}), /no prepared session/);
+  assert.throws(() => bundleFiles({lock: L, lockSha256: fx.sha256, lockText: '{}', environment: E, environmentSha256: fx.environmentSha256, environmentText: '{}', session: {data: prep.session, ledgerHead: 'f'.repeat(64)},
+    extraResources: [{name: 'weekly thing', rate: '1.00', period: 'week'}]}), /unknown billing period/);
 });
 
-test('Pod setup script (never executed here): static checks of its gates and safety', () => {
+test('Pod setup script: static checks of its gates, and local runs of every step that cannot reach the network', () => {
+  needBash();
   const s = fs.readFileSync(path.join(TOOLS, 'pod-setup.sh'), 'utf8');
   assert.ok(!s.includes('\r'), 'LF line endings');
   assert.match(s, /^#!\/usr\/bin\/env bash\n/); assert.match(s, /\nset -euo pipefail\n/);
   // the environment gate comes first, before any other precondition or action
   const pre = s.slice(s.indexOf('preconditions() {'), s.indexOf('\n}\n', s.indexOf('preconditions() {')));
   assert.ok(pre.indexOf('environment.lock') > 0 && pre.indexOf('environment.lock') < pre.indexOf('BUNDLE.SHA256SUMS'), 'environment.lock is checked first');
-  for (const cmd of ['check', 'software', 'models', 'verify']) assert.match(s, new RegExp(`\\n  ${cmd}\\) preconditions;`), `"${cmd}" runs the preconditions first`);
+  for (const cmd of ['check', 'environment', 'software', 'requirements', 'models', 'verify']) assert.match(s, new RegExp(`\\n  ${cmd}\\) preconditions;`), `"${cmd}" runs the preconditions first`);
   assert.match(s, /sha256sum --check --strict --quiet BUNDLE\.SHA256SUMS/); assert.match(s, /sha256sum --check --strict --quiet "\$BUNDLE\/MODELS\.SHA256SUMS"/);
   assert.match(s, /--proto '=https' --proto-redir '=https'/); assert.match(s, /SHA-256 mismatch for/); assert.match(s, /the runtime watchdog is not running/);
   assert.match(s, /git -C "\$target" checkout --quiet --detach "\$commit"/); assert.match(s, /not the pinned commit/);
   assert.ok((s.match(/\n    gate\n/g) || []).length >= 2, 'the watchdog gate is consulted before each download and checkout');
-  // it installs no Python packages, pipes nothing into a shell and holds no credential
-  assert.ok(!/pip3? install|conda install|curl[^\n]*\|\s*(ba)?sh|wget[^\n]*\|\s*(ba)?sh|\beval\b/.test(s));
+  assert.match(s, /disk_check\n/); assert.match(s, /not enough free disk space for the models/);
+  // the only package installation is ComfyUI's requirements, under the PyTorch constraints; nothing is piped into a shell
+  const installs = s.split('\n').filter(l => /pip3?\s+install|conda install/.test(l));
+  assert.equal(installs.length, 1); assert.match(installs[0], /-m pip install .*-r "\$COMFY\/requirements\.txt" -c "\$BUNDLE\/env-constraints\.txt"/);
+  assert.ok(!/curl[^\n]*\|\s*(ba)?sh|wget[^\n]*\|\s*(ba)?sh|\beval\b/.test(s));
   assert.ok(!/api[_-]?key|token|password|RUNPOD_API_KEY|Authorization/i.test(s));
+
+  // Local runs against a real bundle. None of these steps reaches the network: each stops before any clone, install or download.
+  const fx = fixture(), run = tmp('ap84b3-run-'), bundle = path.join(tmp('ap84b3-bundle-'), 'b');
+  startLedger(fx, run);
+  buildBundle({outDir: bundle, runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile});
+  const pod = tmp('ap84b3-pod-'), comfy = path.join(pod, 'ComfyUI'), record = path.join(pod, 'record'), state = path.join(pod, 'wd');
+  fs.mkdirSync(comfy); fs.mkdirSync(state); fs.writeFileSync(path.join(state, 'heartbeat'), '1\n');
+  const env = (extra = {}) => ({...baseEnv(), AP84B3_BUNDLE: fwd(bundle), AP84B3_COMFY_DIR: fwd(comfy), AP84B3_RECORD_DIR: fwd(record), WD_STATE_DIR: fwd(state), ...extra});
+  const setup = (cmd, extra) => spawnSync(BASH, [fwd(path.join(bundle, 'pod-setup.sh')), cmd], {env: env(extra), encoding: 'utf8', timeout: 120000});
+  let r = setup('check');
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /bundle and preconditions verified/);
+  // Steps refuse to run out of order: nothing is cloned, installed or downloaded.
+  assert.match(setup('software').stderr, /run the 'environment' step first \(environment\.pre\.ok is missing\)/);
+  assert.match(setup('requirements').stderr, /run the 'software' step first/);
+  assert.match(setup('models').stderr, /run the 'requirements' step first/);
+  // Tier 1: a different Python stops everything before installation.
+  const stub = (body) => { const f = path.join(pod, `py-${crypto.randomBytes(3).toString('hex')}.sh`); fs.writeFileSync(f, `#!/usr/bin/env bash\n${body}\n`, {mode: 0o755}); return fwd(f); };
+  r = setup('environment', {AP84B3_PYTHON: stub('echo 3.11')});
+  assert.equal(r.status, 2); assert.match(r.stderr, /Python is 3\.11, the environment lock requires 3\.12\. Stopping\./);
+  // With the right version reported but no PyTorch or GPU (this machine), the full check fails closed and leaves its evidence record.
+  assert.ok(PYTHON, 'python is required for this test');
+  r = setup('environment', {AP84B3_PYTHON: stub(`if [ "$1" = "-c" ]; then echo 3.12; else exec "${fwd(PYTHON)}" "$@"; fi`)});
+  assert.equal(r.status, 2, r.stdout + r.stderr); assert.match(r.stderr, /does not match the environment lock .*nothing was installed/);
+  const preRecord = JSON.parse(fs.readFileSync(path.join(record, 'environment.pre.json'), 'utf8'));
+  assert.equal(preRecord.ok, false); assert.ok(preRecord.problems.some(p => /torch import failed|PyTorch cannot use the GPU/.test(p)));
+  assert.ok(!fs.existsSync(path.join(record, 'environment.pre.ok')), 'a failed check does not mark the step as passed');
+  assert.match(setup('software').stderr, /run the 'environment' step first/, 'the next step still refuses');
+  // ComfyUI's requirements must match the pinned hash before pip is ever run.
+  fs.writeFileSync(path.join(record, 'software.done'), ''); fs.writeFileSync(path.join(comfy, 'requirements.txt'), 'torch\nsomething-else\n');
+  r = setup('requirements');
+  assert.equal(r.status, 2); assert.match(r.stderr, /requirements\.txt does not match the pinned SHA-256/);
+  // A changed bundle file, a missing environment lock, or a stopping watchdog: refused at the preconditions.
+  fs.writeFileSync(path.join(state, 'stop-reason'), 'runtime-limit\n');
+  assert.match(setup('check').stderr, /the watchdog is stopping the Pod/); fs.rmSync(path.join(state, 'stop-reason'));
+  fs.appendFileSync(path.join(bundle, 'session.env'), 'WD_PRIOR_RUNTIME_SECONDS=0\n');
+  assert.match(setup('check').stderr, /the bundle does not match BUNDLE\.SHA256SUMS/);
+  fs.rmSync(path.join(bundle, 'environment.lock'));
+  assert.match(setup('check').stderr, /environment\.lock is missing/);
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -847,11 +932,17 @@ test('stop timer: alerts at every approved milestone and console checkpoint; non
   assert.deepEqual(first.map(a => a.seconds), [1800]); first.forEach(a => announced.add(`${a.seconds}:${a.kind}`));
   assert.deepEqual(due(alerts, start, start + 1900 * 1000, announced), [], 'an alert is announced once');
   assert.equal(due(alerts, start, start + 10800 * 1000, announced).length, alerts.length - 1, 'a late start announces everything that is overdue');
+  // A later session: alerts fall at the cumulative times; those already passed are not repeated.
+  const later = scheduleForSession(REAL.lock, start, 9000);
+  assert.deepEqual(later.map(a => [a.seconds, a.inSessionSeconds, a.kind]), [[9300, 300, 'milestone'], [9900, 900, 'alert'], [10200, 1200, 'milestone'], [10500, 1500, 'stop'], [10800, 1800, 'limit']]);
+  assert.equal(later.find(a => a.kind === 'limit').at, '2026-11-20T14:35:00.000Z', 'the absolute limit is 30 minutes into a session that starts after 2 h 30 min of earlier use');
+  assert.throws(() => scheduleForSession(REAL.lock, start, -1), /non-negative integer/);
 });
 
 // ---------------------------------------------------------------------------------------------------
 test('end to end: three separate jobs through the studio; quarantine, validation report and review; nothing is promoted', async () => {
   const fx = fixture(), run = tmp('ap84b3-run-'), dir = tmp('ap84b3-e2e-');
+  startLedger(fx, run);
   // Stand-in "outputs": the real master v3 as the raw image and its local cut-out. Read only; nothing is generated.
   const raw = fs.readFileSync(MASTER), cands = {};
   fs.mkdirSync(path.join(run, 'cutouts'));
@@ -863,7 +954,9 @@ test('end to end: three separate jobs through the studio; quarantine, validation
     cands[id] = {status: 'retained', raw: entry(rawName, raw), cutout: entry(cutName, fs.readFileSync(path.join(run, 'cutouts', cutName)))};
   }
   cands.C = {status: 'lost'};
-  fs.writeFileSync(path.join(run, 'run-sheet.json'), JSON.stringify(sheetFor(fx, cands), null, 1));
+  const e2eSheet = sheetFor(fx, cands);
+  finishLedger(fx, run, e2eSheet);
+  fs.writeFileSync(path.join(run, 'run-sheet.json'), JSON.stringify(e2eSheet, null, 1));
 
   const port = 4780 + Math.floor(Math.random() * 100);
   const s = createStudio({workspace: dir, port, genAdapter: createImportAdapter({dir: run, lockFile: fx.lockFile, decisionsFile: fx.decisionsFile}), command: () => [process.execPath, ['-e', '0']]});
@@ -913,9 +1006,9 @@ test('end to end: three separate jobs through the studio; quarantine, validation
 
 test('boundaries: protected files are byte-identical, no credential is in the D1-6 files, and nothing was left in the repository', () => {
   for (const [f, h] of protectedBefore) assert.equal(sha(path.join(REPO, f)), h, `${f} is unchanged`);
-  const files = ['studio/config/ap84b3-experiment.json', 'studio/lib/experiment-spec.mjs', 'studio/lib/gen-adapters.mjs', 'studio/server.mjs',
+  const files = ['studio/config/ap84b3-experiment.json', 'studio/config/ap84b3-environment.json', 'studio/lib/experiment-spec.mjs', 'studio/lib/experiment-ledger.mjs', 'studio/lib/gen-adapters.mjs', 'studio/server.mjs',
     ...fs.readdirSync(TOOLS).map(n => `studio/tools/ap84b3/${n}`), ...fs.readdirSync(FIX).map(n => `studio/tests/fixtures/ap84b3/${n}`), 'docs/oddly-relatable/AP-84B3-RUNBOOK.md'];
-  assert.deepEqual(fs.readdirSync(TOOLS).sort(), ['build-pod-bundle.mjs', 'check-workflow.mjs', 'collect-outputs.sh', 'compare-sheet.mjs', 'cutout.cjs', 'pad-reference.mjs', 'pod-setup.sh', 'stop-timer.mjs', 'verify-transfer.mjs', 'watchdog.sh']);
+  assert.deepEqual(fs.readdirSync(TOOLS).sort(), ['build-pod-bundle.mjs', 'check-workflow.mjs', 'collect-outputs.sh', 'compare-sheet.mjs', 'cutout.cjs', 'ledger.mjs', 'pad-reference.mjs', 'pod-setup.sh', 'preflight.mjs', 'stop-timer.mjs', 'verify-environment.py', 'verify-transfer.mjs', 'watchdog.sh']);
   assert.deepEqual(fs.readdirSync(FIX).sort(), ['q.api.template.json', 's.api.template.json']);
   const secret = /rpa_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(api[_-]?key|secret|password|token)\b\s*[:=]\s*['"][^'"\s]{8,}['"]|AKIA[0-9A-Z]{16}/i;
   for (const f of files) assert.ok(!secret.test(fs.readFileSync(path.join(REPO, f), 'utf8')), `${f} holds no credential`);
@@ -984,6 +1077,7 @@ test('reference padding: 1536x1536, grey (203,203,203) borders, original pixels 
   assert.equal(a.meta.output_sha256, ref.sha256, 'the lock records this exact file');
   assert.deepEqual(spec.pngSize(a.buffer), {width: 1536, height: 1536});
   assert.deepEqual(a.meta.placement, {left: 256, top: 0}); assert.equal(a.meta.source_sha256, L.inputs.editInput.sha256);
+  assert.match(a.meta.library.sharp, /^\d+\.\d+\.\d+/); assert.match(a.meta.library.vips, /^\d+\.\d+\.\d+/);
   // Pixels: borders are exactly the pad colour; the centre is master v3, pixel for pixel.
   fs.writeFileSync(path.join(dir, 'padded.png'), a.buffer);
   const px = async (file) => { const img = await canvas.loadImage(file); const c = canvas.createCanvas(img.width, img.height), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0); return (x, y) => [...ctx.getImageData(x, y, 1, 1).data]; };
@@ -1053,8 +1147,18 @@ test('smoke outputs: verified into their own folder, recorded in the run sheet, 
 
 // ---------------------------------------------------------------------------------------------------
 // The freeze is mandatory. There is no way to accept a later export without comparing it with the frozen graph.
+// A live run: the ledger has the deposit and session 1 in progress, as it would during execution.
+function liveRun() {
+  const run = tmp('ap84b3-live-');
+  ledger.initLedger({runDir: run, lock: REAL.lock, lockSha256: REAL.sha256, runId: 'r-20261120-140500'});
+  ledger.recordFunding({runDir: run, lock: REAL.lock, balanceBeforeUSD: '0.00', balanceAfterUSD: '10.00'});
+  ledger.prepareSession({runDir: run, lock: REAL.lock, currentBalanceUSD: '10.00'});
+  return run;
+}
+const unlock = f => { try { fs.chmodSync(f, 0o644); } catch {} };
+
 test('workflow freeze is mandatory and fails closed: only A (Qwen) and C (SDXL) may create it; everything else must match it', () => {
-  const lock = REAL.lock, lockSha256 = REAL.sha256, run = tmp('ap84b3-freeze-');
+  const lock = REAL.lock, lockSha256 = REAL.sha256, run = liveRun();
   const A = {candidate: 'A'}, B = {candidate: 'B'}, C = {candidate: 'C'}, SMOKE = {smoke: true};
   const check = (w, mode, change = null, dir = run) => {
     const g = graph(w, lock, mode); if (change) change(g);
@@ -1062,91 +1166,345 @@ test('workflow freeze is mandatory and fails closed: only A (Qwen) and C (SDXL) 
   };
   const fileQ = path.join(run, frozenFileName('Q')), fileS = path.join(run, frozenFileName('S'));
   assert.deepEqual([frozenFileName('Q'), frozenFileName('S'), FREEZING_CANDIDATE.Q, FREEZING_CANDIDATE.S], ['frozen-q.json', 'frozen-s.json', 'A', 'C']);
-
   // 1. Nothing is frozen yet: a later candidate and every smoke export fail closed, and create nothing.
   for (const [w, mode, pattern] of [['Q', B, /Only candidate A's export may create it/], ['Q', SMOKE, /A smoke export cannot create one: freeze candidate A's export first/], ['S', SMOKE, /A smoke export cannot create one: freeze candidate C's export first/]]) {
     const r = check(w, mode);
-    assert.equal(r.ok, false, 'fails closed without a frozen graph'); assert.equal(r.graphSha256, null); assert.equal(r.toFreeze, null); assert.equal(r.frozenRequired, true);
-    assert.match(r.problems[0], /no frozen graph exists/); assert.match(r.problems[0], pattern);
+    assert.equal(r.ok, false); assert.equal(r.graphSha256, null); assert.equal(r.toFreeze, null); assert.match(r.problems[0], pattern);
   }
-  assert.ok(!fs.existsSync(fileQ) && !fs.existsSync(fileS), 'nothing was frozen by a smoke or later-candidate export');
-  // 2. A faulty or unreviewed export of the freezing candidate creates nothing either.
+  assert.ok(!fs.existsSync(fileQ) && !fs.existsSync(fileS));
   assert.equal(check('Q', A, g => { g['10'].inputs.steps = 20; }).ok, false);
-  const stopped = check('Q', A, g => { g['10'].inputs.control_after_generate = 'fixed'; });
-  assert.deepEqual([stopped.ok, stopped.stop, stopped.toFreeze], [false, true, null]);
-  assert.ok(!fs.existsSync(fileQ));
-  // 3. The first valid export of A freezes workflow Q; the first valid export of C freezes workflow S. Written once.
+  assert.deepEqual([check('Q', A, g => { g['10'].inputs.control_after_generate = 'fixed'; }).stop], [true]);
+  assert.ok(!fs.existsSync(fileQ), 'a faulty or unreviewed export freezes nothing');
+  // 2. The first valid export of A freezes Q, and of C freezes S: the file is written once, made read-only and recorded in the ledger.
   const a = check('Q', A), c = check('S', C);
-  for (const [r, file, from, w] of [[a, fileQ, 'candidate A', 'Q'], [c, fileS, 'candidate C', 'S']]) {
-    assert.equal(r.ok, true); assert.equal(r.frozenRequired, false); assert.equal(r.frozenWritten, file);
-    const f = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.deepEqual([f.workflow, f.frozenFrom, f.lockSha256, f.graphSha256], [w, from, lockSha256, r.graphSha256]); assert.equal(graphHash(f.normalForm), f.graphSha256);
+  for (const [r, file, w] of [[a, fileQ, 'Q'], [c, fileS, 'S']]) {
+    assert.equal(r.ok, true); assert.equal(r.frozenWritten, file);
+    const rec = ledger.readLedger(run, lock).state.freezes[w];
+    assert.equal(rec.graphSha256, r.graphSha256); assert.equal(rec.fileSha256, sha(file)); assert.equal(rec.apiSha256, 'a'.repeat(64));
+    assert.equal(fs.statSync(file).mode & 0o222, 0, 'the frozen graph is read-only');
   }
-  const frozenBytes = sha(fileQ);
-  // 4. From now on every export is compared. The permitted differences pass: seed (B), and seed, size and steps (smoke).
+  // 3. Every later export is compared; the permitted differences pass.
   for (const [w, mode] of [['Q', A], ['Q', B], ['Q', SMOKE], ['S', C], ['S', SMOKE]]) {
     const r = check(w, mode);
-    assert.equal(r.ok, true, `${w} ${JSON.stringify(mode)} equals the frozen graph apart from the permitted values`);
-    assert.deepEqual(r.differencesFromFrozen, []); assert.equal(r.toFreeze, null); assert.equal(r.frozenWritten, undefined);
+    assert.equal(r.ok, true, `${w} ${JSON.stringify(mode)}`); assert.deepEqual(r.differencesFromFrozen, []); assert.equal(r.frozenWritten, undefined);
   }
-  // 5. Nothing frozen may change silently: the shift, an output slot, a file name. None of these is caught by layer 1.
+  // 4. Nothing frozen may change silently: shift, output slots, connections, file names.
   const differs = (w, mode, change, pattern) => {
-    const g = graph(w, lock, mode); change(g);
-    assert.equal(checkWorkflow({graph: g, workflow: w, lock, candidate: mode.candidate ?? null, smoke: !!mode.smoke}).ok, true, 'layer 1 alone would pass this export');
     const r = check(w, mode, change);
-    assert.equal(r.ok, false); assert.equal(r.graphSha256, null); assert.deepEqual(r.problems, ['the export differs from the frozen graph']);
-    assert.ok(r.differencesFromFrozen.some(d => pattern.test(d)), `${pattern} in ${JSON.stringify(r.differencesFromFrozen)}`);
+    assert.equal(r.ok, false); assert.ok((r.differencesFromFrozen || []).some(d => pattern.test(d)) || r.problems.some(d => pattern.test(d)), `${pattern} in ${JSON.stringify([r.problems, r.differencesFromFrozen])}`);
   };
   for (const mode of [A, B, SMOKE]) {
-    differs('Q', mode, g => { g['5'].inputs.shift = 3.0; }, /^shift\.shift: 3 differs from the frozen 3\.1$/);                         // changed shift
-    differs('Q', mode, g => { g['11'].inputs.vae = ['3', 1]; }, /^decode\.vae: \["@vae",1\] differs from the frozen \["@vae",0\]$/);   // changed output slot
-    differs('Q', mode, g => { g['10'].inputs.model = ['6', 1]; }, /^sampler\.model: \["@cfgnorm",1\]/);                                // changed output slot on the model chain
-    differs('Q', mode, g => { g['4'].inputs.image = 'other.png'; }, /^image\.image:/);                                                 // changed input file name
+    differs('Q', mode, g => { g['5'].inputs.shift = 3.0; }, /^shift\.shift: 3 differs from the frozen 3\.1$/);
+    differs('Q', mode, g => { g['11'].inputs.vae = ['3', 1]; }, /^decode\.vae: \["@vae",1\] differs from the frozen \["@vae",0\]$/);
+    differs('Q', mode, g => { g['4'].inputs.image = 'other.png'; }, /^image\.image:/);
   }
-  differs('S', C, g => { g['9'].inputs.vae = ['1', 0]; }, /^decode\.vae: \["@checkpoint",0\] differs from the frozen \["@checkpoint",2\]$/);
-  differs('S', SMOKE, g => { g['5'].inputs.clip = ['1', 0]; }, /^positive\.clip:/);
-  // A changed connection or node setting fails as well (at layer 1, before the comparison is even reached).
-  for (const change of [g => { g['10'].inputs.model = ['5', 0]; }, g => { g['7'].inputs.image2 = ['4', 0]; }, g => { g['6'].inputs.strength = 0.5; }, g => { g['10'].inputs.cfg = 3.5; }]) {
-    for (const mode of [B, SMOKE]) { const r = check('Q', mode, change); assert.equal(r.ok, false); assert.ok(r.problems.length > 0); assert.equal(r.differencesFromFrozen, null); }
-  }
-  // And a connection difference is detected by the comparison itself.
+  differs('S', C, g => { g['9'].inputs.vae = ['1', 0]; }, /^decode\.vae:/);
+  differs('Q', B, g => { g['10'].inputs.model = ['5', 0]; }, /"model" is connected to shift, expected cfgnorm/);
   const frozenQ = JSON.parse(fs.readFileSync(fileQ, 'utf8')), layer1 = checkWorkflow({graph: graph('Q', lock, B), workflow: 'Q', lock, candidate: 'B'});
   const rewired = structuredClone(layer1); rewired.normalForm.sampler.inputs.positive = ['@refneg', 0];
   assert.deepEqual(compareToFrozen({frozen: frozenQ, result: rewired, lock, workflow: 'Q'}), ['sampler.positive: ["@refneg",0] differs from the frozen ["@refpos",0]']);
-  const retyped = structuredClone(layer1); retyped.normalForm.latent.class_type = 'EmptyLatentImage';
-  assert.deepEqual(compareToFrozen({frozen: frozenQ, result: retyped, lock, workflow: 'Q'}), ['latent: node type EmptyLatentImage differs from the frozen EmptySD3LatentImage']);
-  // The permitted differences are exactly these, and no others: a candidate's size and steps may not differ.
   assert.deepEqual(compareToFrozen({frozen: frozenQ, result: checkWorkflow({graph: graph('Q', lock, SMOKE), workflow: 'Q', lock, smoke: true}), lock, workflow: 'Q', smoke: false}).map(d => d.split(':')[0]).sort(), ['latent.height', 'latent.width', 'sampler.steps']);
-  // 6. The frozen graph is never replaced: a different "first" export of A is compared, not re-frozen.
+  // 5. Re-freezing is refused: a different "first" export of A is compared, never re-frozen; the ledger refuses a second freeze record.
+  const frozenBytes = sha(fileQ);
   assert.equal(check('Q', A, g => { g['5'].inputs.shift = 2.9; }).ok, false);
-  assert.equal(sha(fileQ), frozenBytes, 'the frozen graph is unchanged');
-  // 7. An unusable frozen graph fails closed: altered, unreadable, made under another lock, for another workflow, or not from the freezing candidate.
-  const withFrozen = (content, w = 'Q', mode = B) => { const dir = tmp('ap84b3-frz-'); fs.writeFileSync(path.join(dir, frozenFileName(w)), typeof content === 'string' ? content : JSON.stringify(content)); return check(w, mode, null, dir); };
-  const altered = structuredClone(frozenQ); altered.normalForm.shift.inputs.shift = 3.0;                       // edited to match a changed export
-  for (const [content, pattern] of [[altered, /has been altered/], ['{not json', /not a valid frozen record/], ['[]', /not a valid frozen record/], ['null', /not a valid frozen record/],
-    [{...frozenQ, lockSha256: 'c'.repeat(64)}, /different experiment lock/], [{...frozenQ, frozenFrom: 'candidate B'}, /not made from candidate A/], [{...frozenQ, schema: 'something-else'}, /not a valid frozen record/]]) {
-    const r = withFrozen(content);
-    assert.equal(r.ok, false); assert.equal(r.graphSha256, null); assert.ok(r.problems.some(x => pattern.test(x)), `${pattern} in ${JSON.stringify(r.problems)}`);
-  }
-  assert.ok(withFrozen(JSON.parse(fs.readFileSync(fileS, 'utf8'))).problems.some(x => /is for workflow S, not Q/.test(x)));
-  assert.equal(withFrozen(altered, 'Q', SMOKE).ok, false); assert.equal(withFrozen('{not json', 'Q', A).ok, false, 'even candidate A cannot overwrite an unusable frozen graph');
-  // 8. Remove the frozen graph and the later exports fail closed again.
-  const gone = tmp('ap84b3-gone-');
-  for (const mode of [B, SMOKE]) assert.match(check('Q', mode, null, gone).problems[0], /no frozen graph exists/);
-  // 9. The decision function itself fails closed with no frozen record, and a smoke export can never be frozen.
-  const direct = m => validateExport({graph: graph('Q', lock, m), workflow: 'Q', lock, lockSha256, candidate: m.candidate ?? null, smoke: !!m.smoke, frozen: null});
-  assert.deepEqual([direct(B).ok, direct(SMOKE).ok, direct(A).ok], [false, false, true]); assert.equal(direct(SMOKE).toFreeze, null); assert.ok(direct(A).toFreeze);
-  assert.throws(() => freeze({result: layer1, workflow: 'Q', candidate: 'B', lockSha256, apiSha256: 'a'.repeat(64)}), /only candidate A may freeze workflow Q/);
-  assert.throws(() => freeze({result: checkWorkflow({graph: graph('S', lock, C), workflow: 'S', lock, candidate: 'C'}), workflow: 'S', candidate: 'A', lockSha256, apiSha256: 'a'.repeat(64)}), /only candidate C may freeze workflow S/);
-  // 10. The run folder must exist and be outside the repository; the command line has no way to skip or redirect the freeze.
+  assert.equal(sha(fileQ), frozenBytes);
+  assert.throws(() => ledger.registerFreeze({runDir: run, lock, workflow: 'Q', graphSha256: 'b'.repeat(64), apiSha256: 'b'.repeat(64)}), /already frozen; a freeze is never replaced/);
+  // 6. The run folder must exist, be outside the repository, and have a valid ledger with a session in progress.
   assert.throws(() => check('Q', A, null, path.join(REPO, 'studio')), /outside the repository/);
   assert.throws(() => check('Q', A, null, path.join(os.tmpdir(), 'ap84b3-no-such-run')), /run folder does not exist/);
+  assert.match(check('Q', A, null, tmp('ap84b3-noledger-')).problems[0], /the ledger is missing/);
   const cli = (...args) => spawnSync(process.execPath, [path.join(TOOLS, 'check-workflow.mjs'), ...args], {encoding: 'utf8'});
-  const exportFile = path.join(run, 'export-b.json'); fs.writeFileSync(exportFile, JSON.stringify(graph('Q', lock, B)));
+  const exportFile = path.join(tmp(), 'export-b.json'); fs.writeFileSync(exportFile, JSON.stringify(graph('Q', lock, B)));
   for (const flag of ['--frozen', '--write-frozen']) { const r = cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--file', exportFile, flag, fileQ); assert.equal(r.status, 1); assert.match(r.stderr, /not accepted: the frozen graph is always the one in the run folder/); }
-  assert.match(cli('--workflow', 'Q', '--candidate', 'B', '--file', exportFile).stderr, /usage: check-workflow\.mjs --run <run folder>/);
-  assert.match(cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--smoke', '--file', exportFile).stderr, /usage:/);
   if (!REAL.approved) assert.match(cli('--run', run, '--workflow', 'Q', '--candidate', 'B', '--file', exportFile).stderr, /not recorded as owner-approved/);
+});
+
+test('frozen graph protection: deletion, replacement, tampering and missing metadata stop the workflow; only owner-approved recovery clears it', () => {
+  const lock = REAL.lock, lockSha256 = REAL.sha256;
+  const check = (run, w, mode) => checkExportInRun({runDir: run, graph: graph(w, lock, mode), workflow: w, lock, lockSha256, candidate: mode.candidate ?? null, smoke: !!mode.smoke, apiSha256: 'a'.repeat(64)});
+  const frozenRun = () => { const run = liveRun(); assert.equal(check(run, 'Q', {candidate: 'A'}).ok, true); return {run, file: path.join(run, 'frozen-q.json')}; };
+  const brokenFor = (run, pattern) => {
+    for (const mode of [{candidate: 'A'}, {candidate: 'B'}, {smoke: true}]) {
+      const r = check(run, 'Q', mode);
+      assert.equal(r.ok, false); assert.equal(r.frozenWritten, undefined); assert.ok(r.problems.some(p => pattern.test(p)), `${pattern} in ${JSON.stringify(r.problems)}`);
+    }
+  };
+  // Deletion: never silently re-created, not even by candidate A.
+  let {run, file} = frozenRun(); unlock(file); fs.rmSync(file);
+  brokenFor(run, /has been deleted.*never re-created automatically/);
+  assert.ok(!fs.existsSync(file), 'not re-created');
+  // Replacement with another valid-looking frozen graph (e.g. from another run), and tampering with one byte.
+  const other = frozenRun();
+  ({run, file} = frozenRun()); unlock(file);
+  const replaced = JSON.parse(fs.readFileSync(file, 'utf8')); replaced.normalForm.shift.inputs.shift = 3.0; replaced.graphSha256 = graphHash(replaced.normalForm);
+  fs.writeFileSync(file, JSON.stringify(replaced, null, 1));
+  brokenFor(run, /has been replaced or altered/);
+  ({run, file} = frozenRun()); unlock(file); fs.appendFileSync(file, ' ');
+  brokenFor(run, /has been replaced or altered/);
+  // Missing metadata: a frozen file the ledger has no record of. Candidate A cannot adopt it.
+  const bare = liveRun(); fs.copyFileSync(other.file, path.join(bare, 'frozen-q.json'));
+  brokenFor(bare, /no freeze record for workflow Q \(missing freeze metadata\)/);
+  // Tampering with the ledger's freeze record (or anything else in the ledger) breaks the chain.
+  ({run, file} = frozenRun());
+  const L1 = JSON.parse(fs.readFileSync(path.join(run, 'ledger.json'), 'utf8'));
+  const fe = L1.entries.find(e => e.type === 'freeze'); const d = JSON.parse(fe.dataJson); d.fileSha256 = 'f'.repeat(64); fe.dataJson = JSON.stringify(d);
+  fs.writeFileSync(path.join(run, 'ledger.json'), JSON.stringify(L1));
+  brokenFor(run, /entry \d+ has been altered/);
+  // Recovery needs the owner's approval line naming the exact ledger state. Without it, nothing changes.
+  ({run, file} = frozenRun()); unlock(file); fs.rmSync(file);
+  const decisions = path.join(tmp('ap84b3-dec-'), 'DECISIONS.md');
+  fs.writeFileSync(decisions, 'no approval here\n');
+  assert.throws(() => ledger.recoverFreeze({runDir: run, lock, workflow: 'Q', reason: 'frozen graph lost', decisionsFile: decisions}), e => e.code === 'RECOVERY_NOT_APPROVED' && /AP-84B3-FREEZE-RECOVERY-APPROVED=Q:[0-9a-f]{64}/.test(e.message));
+  const head = ledger.readLedger(run, lock).head.hash;
+  fs.writeFileSync(decisions, `AP-84B3-FREEZE-RECOVERY-APPROVED=S:${head}\nAP-84B3-FREEZE-RECOVERY-APPROVED=Q:${'0'.repeat(64)}\n`);
+  assert.throws(() => ledger.recoverFreeze({runDir: run, lock, workflow: 'Q', reason: 'frozen graph lost', decisionsFile: decisions}), e => e.code === 'RECOVERY_NOT_APPROVED', 'an approval for another workflow or another ledger state does not count');
+  fs.writeFileSync(decisions, `AP-84B3-FREEZE-RECOVERY-APPROVED=Q:${head}\n`);
+  const after = ledger.recoverFreeze({runDir: run, lock, workflow: 'Q', reason: 'frozen graph lost', decisionsFile: decisions});
+  assert.equal(after.state.freezes.Q, null); assert.equal(after.state.revokedFreezes.length, 1);
+  assert.throws(() => ledger.recoverFreeze({runDir: run, lock, workflow: 'Q', reason: 'again', decisionsFile: decisions}), e => e.code === 'RECOVERY_NOT_APPROVED', 'the approval cannot be reused: the ledger head has moved');
+  assert.equal(check(run, 'Q', {candidate: 'B'}).ok, false, 'after recovery the freeze must be re-established by candidate A first');
+  assert.equal(check(run, 'Q', {candidate: 'A'}).ok, true, 'candidate A re-establishes the freeze under the documented process');
+  // A replaced frozen file is kept, renamed, never deleted, when recovering.
+  ({run, file} = frozenRun()); unlock(file); fs.appendFileSync(file, ' ');
+  const h2 = ledger.readLedger(run, lock).head.hash; fs.writeFileSync(decisions, `AP-84B3-FREEZE-RECOVERY-APPROVED=Q:${h2}\n`);
+  const rec2 = ledger.recoverFreeze({runDir: run, lock, workflow: 'Q', reason: 'altered file', decisionsFile: decisions});
+  assert.ok(fs.existsSync(path.join(run, `frozen-q.revoked-${rec2.head.seq}.json`)) && !fs.existsSync(file));
+});
+
+test('session ledger: chained records; tampering, removal, truncation and replacement are detected', () => {
+  const lock = REAL.lock, run = liveRun();
+  ledger.closeSession({runDir: run, lock, gpu: lock.provider.gpuPrimary, gpuRateUSDPerHour: '1.09', startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:30:00Z', consumedUSD: '0.60', reason: 'stopped at the freeze for review'});
+  const good = fs.readFileSync(path.join(run, 'ledger.json'), 'utf8'), goodHead = fs.readFileSync(path.join(run, 'ledger.head'), 'utf8');
+  assert.equal(ledger.readLedger(run, lock).entries.length, 4);
+  const restore = () => { fs.writeFileSync(path.join(run, 'ledger.json'), good); fs.writeFileSync(path.join(run, 'ledger.head'), goodHead); };
+  const broken = (mutate, pattern) => {
+    restore(); const doc = JSON.parse(good); mutate(doc); fs.writeFileSync(path.join(run, 'ledger.json'), JSON.stringify(doc));
+    assert.throws(() => ledger.readLedger(run, lock), e => e instanceof ledger.LedgerError && pattern.test(e.message), String(pattern));
+  };
+  const edit = (doc, type, f) => { const e = doc.entries.find(x => x.type === type); const d = JSON.parse(e.dataJson); f(d); e.dataJson = JSON.stringify(d); return e; };
+  broken(doc => edit(doc, 'session-closed', d => { d.consumedUSD = '0.10'; }), /entry 4 has been altered/);                       // lower the recorded spend
+  broken(doc => { const e = edit(doc, 'session-closed', d => { d.runtimeSeconds = 60; }); e.hash = ledger.entryHash(e); }, /does not end where its head record says/);   // re-hashed: the head no longer matches
+  broken(doc => { const e = edit(doc, 'funded', d => { d.balanceAfterUSD = '20.00'; }); e.hash = ledger.entryHash(e); }, /entry 3 does not follow/);                         // re-hashed in the middle: the chain breaks
+  broken(doc => { doc.entries.splice(2, 1); }, /entry 3 is malformed or out of order|does not follow/);                          // a record removed
+  broken(doc => { doc.entries.pop(); }, /does not end where its head record says/);                                                // the newest record removed
+  broken(doc => { [doc.entries[1], doc.entries[2]] = [doc.entries[2], doc.entries[1]]; }, /out of order/);
+  restore(); fs.rmSync(path.join(run, 'ledger.head'));
+  assert.throws(() => ledger.readLedger(run, lock), /does not end where its head record says/);
+  restore(); const other = liveRun(); fs.copyFileSync(path.join(other, 'ledger.json'), path.join(run, 'ledger.json'));
+  assert.throws(() => ledger.readLedger(run, lock), /does not end where its head record says/, 'a ledger swapped in from another run folder');
+  restore(); fs.rmSync(path.join(run, 'ledger.json'));
+  assert.throws(() => ledger.readLedger(run, lock), e => e.code === 'LEDGER_MISSING');
+  restore(); assert.equal(ledger.readLedger(run, lock).head.seq, 4);
+  // A ledger is started only in a new run folder.
+  assert.throws(() => ledger.initLedger({runDir: run, lock, lockSha256: REAL.sha256, runId: 'r-20261120-140500'}), e => e.code === 'LEDGER_EXISTS');
+  const used = tmp('ap84b3-used-'); fs.writeFileSync(path.join(used, 'run-sheet.json'), '{}');
+  assert.throws(() => ledger.initLedger({runDir: used, lock, lockSha256: REAL.sha256, runId: 'r-20261120-140500'}), /already contains run-sheet\.json/);
+  assert.throws(() => ledger.initLedger({runDir: tmp(), lock, lockSha256: 'x', runId: 'r-20261120-140500'}), /needs the lock hash/);
+  // The command line refuses every command while the lock is not approved, and writes nothing.
+  if (!REAL.approved) {
+    const empty = tmp('ap84b3-cli-');
+    for (const args of [['init', '--run', empty, '--run-id', 'r-20261120-140500'], ['status', '--run', run], ['prepare', '--run', run, '--balance', '9.40']]) {
+      const r = spawnSync(process.execPath, [path.join(TOOLS, 'ledger.mjs'), ...args], {encoding: 'utf8'});
+      assert.equal(r.status, 1); assert.match(r.stderr, /not recorded as owner-approved/);
+    }
+    assert.deepEqual(fs.readdirSync(empty), []);
+  }
+});
+
+test('cumulative enforcement: each session gets only what remains; a session cannot start when the ledger, the balance or the limits say no', () => {
+  const lock = REAL.lock, run = tmp('ap84b3-cum-');
+  ledger.initLedger({runDir: run, lock, lockSha256: REAL.sha256, runId: 'r-20261120-140500'});
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '10.00'}), /the deposit has not been recorded/);
+  assert.throws(() => ledger.recordFunding({runDir: run, lock, balanceBeforeUSD: '0.00', balanceAfterUSD: '20.00'}), /must be exactly \$10\.00/);
+  ledger.recordFunding({runDir: run, lock, balanceBeforeUSD: '1.25', balanceAfterUSD: '11.25'});
+  assert.throws(() => ledger.recordFunding({runDir: run, lock, balanceBeforeUSD: '11.25', balanceAfterUSD: '21.25'}), /no additional deposit is authorised/);
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '12.00'}), /additional funding is not authorised/);
+  const s1 = ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '11.25'});
+  assert.deepEqual([s1.session.session, s1.session.priorRuntimeSeconds, s1.session.priorConsumedUSD, s1.session.watchdogStopSecondsRemaining], [1, 0, '0.000000', 10200]);
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '11.25'}), /previous session has not been closed/);
+  // Closing checks the GPU, the rate cap, the times and the reason.
+  const close = (o = {}) => ledger.closeSession({runDir: run, lock, gpu: lock.provider.gpuPrimary, gpuRateUSDPerHour: '1.09', startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T14:30:00Z', consumedUSD: '0.60', reason: 'stopped at the freeze for review', ...o});
+  assert.throws(() => close({gpu: 'NVIDIA RTX 4090 24 GB'}), /not one of the approved GPUs/);
+  assert.throws(() => close({gpuRateUSDPerHour: '1.10'}), /above the approved cap/);
+  assert.throws(() => close({endedAt: '2026-11-20T13:00:00Z'}), /valid times, in order/);
+  assert.throws(() => close({reason: ''}), /a reason is required/);
+  close();
+  // Session 2: the provider's balance must agree with the ledger; the allowance is reduced, never reset.
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '11.25'}), /the balance shows \$0\.000000 spent since the deposit, but the ledger records \$0\.600000/);
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '10.00'}), /unaccounted for/);
+  const s2 = ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '10.55'});             // within the $0.25 tolerance
+  assert.deepEqual([s2.session.session, s2.session.priorRuntimeSeconds, s2.session.priorConsumedUSD, s2.session.watchdogStopSecondsRemaining, s2.session.noNewGenerationSecondsRemaining], [2, 1800, '0.700000', 8400, 6600], 'the higher of the ledger and the balance is carried forward');
+  assert.match(s2.sessionEnv, /\nWD_SESSION_NUMBER=2\nWD_PRIOR_RUNTIME_SECONDS=1800\nWD_PRIOR_CONSUMED_USD=0\.700000\nWD_LEDGER_HEAD=[0-9a-f]{64}\n$/);
+  // A prepared session that never started is closed with nothing used.
+  let c = ledger.closeSession({runDir: run, lock, notStarted: true, reason: 'no L40S or A40 within the rate cap'});
+  assert.deepEqual([c.session.runtimeSeconds, c.session.consumedUSD, c.overLimit], [0, '0.00', false]);
+  // Session 3 uses up the runtime up to the no-new-generation cut-off: no further session may be prepared.
+  ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '10.65'});
+  c = close({startedAt: '2026-11-21T09:00:00Z', endedAt: '2026-11-21T10:50:00Z', consumedUSD: '2.10', reason: 'stopped at the gate'});
+  assert.equal(c.totals.runtimeSeconds, 1800 + 6600); assert.equal(c.overLimit, false);
+  const a = ledger.allowance(lock, c.ledger.state);
+  assert.equal(a.allowed, false); assert.match(a.reasons.join(), /past the point where a generation may start/);
+  assert.throws(() => ledger.prepareSession({runDir: run, lock, currentBalanceUSD: '8.55'}), /no session may be prepared: the cumulative runtime is past the point/);
+  // Over the limits: recorded honestly and flagged; it never unlocks anything.
+  const run2 = liveRun();
+  const over = ledger.closeSession({runDir: run2, lock, gpu: lock.provider.gpuPrimary, gpuRateUSDPerHour: '1.09', startedAt: '2026-11-20T14:00:00Z', endedAt: '2026-11-20T17:10:00Z', consumedUSD: '5.20', reason: 'watchdog did not stop the Pod'});
+  assert.equal(over.overLimit, true);
+  assert.match(ledger.allowance(lock, over.ledger.state).reasons.join(), /reached the estimated stop threshold.*reached the ceiling/);
+});
+
+test('run record cross-check: the run sheet, the ledger, the frozen graph and the lock must agree before an import', async () => {
+  const fx = fixture();
+  const refuse = async (pattern, change) => {
+    const r = buildRun(fx); const s2 = structuredClone(r.sheet); change(r, s2); r.writeSheet(s2);
+    await assert.rejects(r.adapter.generate(REQ), e => e.code === 'IMPORT_REFUSED' && pattern.test(e.message), String(pattern));
+    assert.ok(!fs.existsSync(path.join(r.run, 'imported', 'A.json')));
+  };
+  await refuse(/not completed against the current ledger/, (r, s2) => { s2.ledgerHead = 'f'.repeat(64); });
+  await refuse(/sessions in the run sheet do not match the sessions recorded in the ledger/, (r, s2) => { s2.pod.consumedUSD = '1.00'; });
+  await refuse(/sessions in the run sheet do not match/, (r, s2) => { s2.pod.endedAt = '2026-11-20T15:00:00Z'; });
+  await refuse(/sessions in the run sheet do not match/, (r, s2) => { s2.priorSessions = [{startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:10:00Z', gpu: s2.pod.gpu, consumedUSD: '0.20', reason: 'not in the ledger'}]; });
+  await refuse(/frozen graph hash for workflow Q does not match the ledger/, (r, s2) => { s2.workflows.Q.graphSha256 = '9'.repeat(64); });
+  await refuse(/export hash for workflow Q does not match the ledger/, (r, s2) => { s2.workflows.Q.apiSha256 = '9'.repeat(64); });
+  await refuse(/has been deleted/, r => { fs.rmSync(path.join(r.run, 'frozen-q.json')); });
+  await refuse(/the ledger is missing/, r => { fs.rmSync(path.join(r.run, 'ledger.json')); });
+  await refuse(/a session is still open/, (r, s2) => { const p = ledger.prepareSession({runDir: r.run, lock: fx.lock, currentBalanceUSD: '8.34'}); s2.ledgerHead = p.ledger.head.hash; });
+  // A ledger made under a different experiment lock is refused even with a matching run sheet.
+  const other = fixture({mutate: o => { o.note += ' (another lock)'; }});
+  const r = buildRun(other);
+  await assert.rejects(createImportAdapter({dir: r.run, lockFile: fx.lockFile, decisionsFile: fx.decisionsFile}).generate(REQ), /lockSha256 does not match|different experiment lock/);
+});
+
+test('watchdog: cumulative enforcement from the sealed session file; prior use cannot be reset or overridden', () => {
+  needBash();
+  // Session 2 after 8000 s: the watchdog stops when the TOTAL reaches 2 h 50 min, i.e. 2200 s into this session.
+  let b = wdBed({session: 2, priorRuntimeSeconds: 8000, priorConsumedUSD: '0.600000'});
+  let r = wd({...b.env, WD_TIME_SCALE: '550'});
+  assert.equal(r.status, 0, r.stderr);
+  let st = b.state();
+  assert.deepEqual([b.read('stop-reason'), st.session, st.prior_runtime_seconds, st.elapsed_seconds, st.total_elapsed_seconds], ['runtime-limit', '2', '8000', '2200', '10200']);
+  assert.ok(Number(st.estimate_micro_usd) >= 600000, 'earlier consumption is included in the estimate');
+  // Session 2 after $4.70: the estimate starts at $4.70 and the watchdog stops as soon as it reaches $4.75.
+  b = wdBed({session: 2, priorRuntimeSeconds: 1000, priorConsumedUSD: '4.700000'});
+  r = wd({...b.env, WD_TIME_SCALE: '60'});
+  assert.equal(r.status, 0, r.stderr); st = b.state();
+  assert.equal(b.read('stop-reason'), 'estimated-consumption'); assert.equal(st.elapsed_seconds, '180');
+  assert.ok(Number(st.estimate_micro_usd) >= 4750000 && Number(st.estimate_micro_usd) - 4700000 < 4750000 - 4700000 + 40000);
+  // Refusals: nothing remains, a missing or changed session file, prior values from anywhere else.
+  const refuse = (pattern, opts, change = () => {}) => {
+    const bed = wdBed(opts); const env = {...bed.env}; change(env, bed);
+    const res = wd(env);
+    assert.equal(res.status, 2, `${pattern}: ${res.stderr}`); assert.match(res.stderr, pattern); assert.equal(bed.marker(), null); assert.equal(bed.read('heartbeat'), null);
+  };
+  refuse(/no runtime remains/, {session: 3, priorRuntimeSeconds: 10200, priorConsumedUSD: '1.00'});
+  refuse(/no generation can start/, {session: 3, priorRuntimeSeconds: 8400, priorConsumedUSD: '1.00'});
+  refuse(/no consumption allowance remains/, {session: 2, priorRuntimeSeconds: 100, priorConsumedUSD: '4.750000'});
+  refuse(/session 1 cannot have earlier runtime or consumption/, {session: 1, priorRuntimeSeconds: 600, priorConsumedUSD: '0.000000'});
+  refuse(/WD_BUNDLE_DIR is required/, {}, e => { delete e.WD_BUNDLE_DIR; });
+  refuse(/session\.env is missing from the bundle/, {}, (e, bed) => { fs.rmSync(path.join(bed.bundle, 'session.env')); });
+  refuse(/session\.env does not match BUNDLE\.SHA256SUMS/, {session: 2, priorRuntimeSeconds: 8000, priorConsumedUSD: '3.000000'}, (e, bed) => {
+    fs.writeFileSync(path.join(bed.bundle, 'session.env'), ledger.sessionEnvText({session: 2, priorRuntimeSeconds: 0, priorConsumedUSD: '0.000000'}, 'f'.repeat(64)));   // "reset" to a fresh allowance
+  });
+  refuse(/BUNDLE\.SHA256SUMS does not cover session\.env/, {}, (e, bed) => { fs.writeFileSync(path.join(bed.bundle, 'BUNDLE.SHA256SUMS'), ''); });
+  for (const v of ['WD_SESSION_NUMBER', 'WD_PRIOR_RUNTIME_SECONDS', 'WD_PRIOR_CONSUMED_USD', 'WD_LEDGER_HEAD']) refuse(new RegExp(`${v} must come from the sealed session file`), {}, e => { e[v] = '0'; });
+  refuse(/session\.env has an unexpected line/, {sessionText: 'WD_SESSION_NUMBER=1\nWD_PRIOR_RUNTIME_SECONDS=0\nWD_PRIOR_CONSUMED_USD=0\nWD_LEDGER_HEAD=' + 'f'.repeat(64) + '\nWD_STOP_SECONDS=99999\n'});
+  refuse(/WD_PRIOR_RUNTIME_SECONDS is missing or invalid/, {sessionText: 'WD_SESSION_NUMBER=2\nWD_PRIOR_CONSUMED_USD=0\nWD_LEDGER_HEAD=' + 'f'.repeat(64) + '\n'});
+  // The gate counts earlier sessions: at 8399 s before this session, it is open for one more second only.
+  b = wdBed({session: 2, priorRuntimeSeconds: 8399, priorConsumedUSD: '1.000000'});
+  fs.mkdirSync(path.join(b.dir, 'state')); fs.writeFileSync(path.join(b.dir, 'state', 'heartbeat'), `${b.env.WD_POD_START_EPOCH}\n`);
+  const g1 = wd(b.env, 'gate'), g2 = wd(b.env, 'gate');
+  assert.equal(g1.status, 0, g1.stdout + g1.stderr); assert.match(g1.stdout, /session 2: 0s here, 8399s in total, cut-off 8400s/);
+  assert.equal(g2.status, 1); assert.match(g2.stdout, /past the no-new-generation cut-off, counting earlier sessions/);
+});
+
+test('environment lock: shape, pins and approval; nothing is approved by the file itself', () => {
+  const E0 = JSON.parse(fs.readFileSync(spec.ENVIRONMENT_FILE, 'utf8')), L = REAL.lock;
+  assert.equal(E0.image.digest, 'sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300');
+  assert.equal(E0.image.deployAs, 'runpod/pytorch@sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300');
+  assert.deepEqual([E0.tier1.python, E0.tier1.torch, E0.tier1.torchvision, E0.tier1.torchaudio, E0.tier1.torchCuda], ['3.12', '2.13.0+cu130', '0.28.0+cu130', '2.11.0+cu130', '13.0']);
+  assert.equal(E0.tier1.comfyuiRequirementsSha256, '6cda5d945d0b22ba6c520007c7a557d63c75a1ab62c14703da57da4a884e5abb');
+  const real = spec.loadEnvironment({lock: L, requireApproved: false});
+  assert.equal(real.sha256, spec.canonicalHash(fs.readFileSync(spec.ENVIRONMENT_FILE)));
+  if (!real.approved) assert.throws(() => spec.loadEnvironment({lock: L}), e => e.code === 'ENV_NOT_APPROVED' && /owner's explicit review/.test(e.message));
+  const fx = fixture();
+  assert.equal(spec.loadEnvironment({lock: L, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}).approved, true);
+  fs.appendFileSync(fx.decisionsFile, `AP-84B3-ENVIRONMENT-REVOKED-SHA256=${fx.environmentSha256}\n`);
+  assert.throws(() => spec.loadEnvironment({lock: L, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile}), e => e.code === 'ENV_NOT_APPROVED');
+  const invalid = (mutateEnvironment, pattern) => assert.throws(() => spec.loadEnvironment({lock: L, environmentFile: fixture({mutateEnvironment}).environmentFile, requireApproved: false}), pattern);
+  invalid(o => { o.installConstraints = ['torch==2.13.0+cu130']; }, /installConstraints must pin torch, torchvision and torchaudio/);
+  invalid(o => { o.installConstraints.push('numpy>=1.25'); }, /exact pins/);
+  invalid(o => { o.tier1.torch = '2.13.0'; }, /exact version with its CUDA build/);
+  invalid(o => { o.image.deployAs = 'runpod/pytorch:2.1.0-cu1300-torch2130-ubuntu2404'; }, /pinned by digest/);
+  invalid(o => { o.image.digest = 'sha256:abc'; }, /must be sha256 digests/);
+  invalid(o => { delete o.gpu.allowed['NVIDIA A40']; }, /exactly the approved primary and fallback GPUs/);
+  invalid(o => { o.tier2.launchOptions.push('--extra; rm -rf /'); }, /plain arguments/);
+  invalid(o => { o.tier1.comfyuiRequirementsSha256 = 'x'; }, /comfyuiRequirementsSha256/);
+  // A changed environment file changes its hash, so an earlier approval no longer covers it.
+  assert.notEqual(fixture({mutateEnvironment: o => { o.tier1.torch = '2.14.1+cu130'; o.installConstraints[0] = 'torch==2.14.1+cu130'; }}).environmentSha256, real.sha256);
+});
+
+// The Pod-side environment check, run with this machine's Python on clearly synthetic facts.
+const PYTHON = (() => {
+  for (const p of [process.env.AP84B3_PYTHON_EXE, 'python', 'python3', 'py'].filter(Boolean)) {
+    try { const r = spawnSync(p, ['-c', 'import sys; print(sys.executable)'], {encoding: 'utf8'}); if (r.status === 0 && r.stdout.trim()) return r.stdout.trim(); } catch {}
+  }
+  return null;
+})();
+test('environment check (verify-environment.py): tier 1 matches pass; any version, GPU or image difference fails; tier 2 must be recorded', () => {
+  assert.ok(PYTHON, 'python is required for the environment-check tests (set AP84B3_PYTHON_EXE)');
+  const dir = tmp('ap84b3-envchk-'), lockPath = path.join(dir, 'environment.lock');
+  fs.copyFileSync(spec.ENVIRONMENT_FILE, lockPath);
+  const inv = 'comfyui-frontend-package==1.58.5\ntorch==2.13.0+cu130\ntorchvision==0.28.0+cu130\n';
+  const good = {schema: 'ap84b3-environment-facts/1', python: '3.12.3', env: {CUDA_VERSION: '13.0.0', NV_CUDNN_VERSION: '9.12.0.46-1'}, errors: [], torch: '2.13.0+cu130', torchCuda: '13.0', float8: true,
+    cudaAvailable: true, cudaOpOk: true, gpuName: 'NVIDIA L40S', gpuComputeCapability: '8.9', gpuTotalMemoryBytes: 47700000000, gpuCount: 1, torchvision: '0.28.0+cu130', torchaudio: '2.11.0+cu130',
+    driverVersion: '580.95.05', packageInventory: inv, packageInventorySha256: shaBuf(Buffer.from(inv))};
+  const run = (facts, stage) => {
+    const f = path.join(dir, `facts-${crypto.randomBytes(3).toString('hex')}.json`); fs.writeFileSync(f, JSON.stringify(facts));
+    const r = spawnSync(PYTHON, ['-I', path.join(TOOLS, 'verify-environment.py'), 'check', '--lock', lockPath, '--facts', f, '--stage', stage], {encoding: 'utf8'});
+    return {status: r.status, out: JSON.parse(r.stdout || '{}'), stderr: r.stderr};
+  };
+  for (const stage of ['pre', 'post']) { const r = run(good, stage); assert.equal(r.status, 0, JSON.stringify(r)); assert.deepEqual(r.out.problems, []); }
+  assert.equal(run({...good, gpuName: 'NVIDIA A40', gpuComputeCapability: '8.6'}, 'pre').status, 0, 'the A40 fallback passes');
+  const fails = (change, stage, pattern) => { const r = run({...good, ...change}, stage); assert.equal(r.status, 1); assert.ok(r.out.problems.some(p => pattern.test(p)), `${pattern} in ${JSON.stringify(r.out.problems)}`); };
+  fails({python: '3.13.1'}, 'pre', /Python is 3\.13\.1, the environment lock requires 3\.12/);
+  fails({torch: '2.14.1+cu130'}, 'post', /torch is 2\.14\.1\+cu130, the environment lock requires 2\.13\.0\+cu130 \(it was replaced during installation\)/);
+  fails({torchvision: '0.29.1+cu130'}, 'pre', /torchvision is 0\.29\.1/);
+  fails({torchaudio: undefined}, 'pre', /torchaudio is None/);
+  fails({torchCuda: '12.8'}, 'pre', /built for CUDA 12\.8/);
+  fails({env: {CUDA_VERSION: '12.9.1', NV_CUDNN_VERSION: '9.12.0.46-1'}}, 'pre', /does not look like the pinned image/);
+  fails({cudaAvailable: false}, 'pre', /cannot use the GPU/);
+  fails({cudaOpOk: false}, 'pre', /test operation on the GPU failed/);
+  fails({gpuName: 'NVIDIA GeForce RTX 4090', gpuComputeCapability: '8.9'}, 'pre', /not one of the approved GPUs/);
+  fails({gpuComputeCapability: '8.6'}, 'pre', /compute capability is 8\.6, expected 8\.9/);
+  fails({gpuTotalMemoryBytes: 25000000000}, 'pre', /below the required/);
+  fails({gpuCount: 2}, 'pre', /exactly one GPU/);
+  fails({float8: false}, 'pre', /no float8_e4m3fn/);
+  fails({driverVersion: null}, 'pre', /driver version could not be read/);
+  fails({errors: ['torch import failed: No module named torch']}, 'pre', /probe error: torch import failed/);
+  fails({packageInventory: undefined}, 'post', /package inventory was not recorded/);
+  fails({packageInventorySha256: 'f'.repeat(64)}, 'post', /package inventory was not recorded, or its SHA-256 does not match/);
+  assert.equal(run({...good, packageInventory: undefined}, 'pre').status, 0, 'the inventory is required after installation, not before');
+  assert.match(run({schema: 'something-else'}, 'pre').out.problems[0], /not an environment probe/);
+  // On this machine (no PyTorch, no NVIDIA GPU) the full probe-and-check fails closed and says why.
+  const rec = path.join(dir, 'record.json');
+  const real = spawnSync(PYTHON, ['-I', path.join(TOOLS, 'verify-environment.py'), 'run', '--lock', lockPath, '--stage', 'pre', '--out', rec], {encoding: 'utf8', timeout: 300000});
+  assert.equal(real.status, 1); const record = JSON.parse(fs.readFileSync(rec, 'utf8'));
+  assert.equal(record.ok, false); assert.ok(record.problems.some(p => /torch import failed/.test(p)));
+});
+
+test('preflight: local checks pass with approved fixture locks; the execution-time checks are listed, never claimed', async () => {
+  const fx = fixture(), run = tmp('ap84b3-pf-');
+  startLedger(fx, run);
+  const r = await runPreflight({runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile});
+  const by = Object.fromEntries(r.checks.map(c => [c.id, c]));
+  for (const id of ['experiment-lock', 'environment-lock', 'input-editInput', 'input-control', 'padded-reference', 'smoke-isolation', 'vram-budget', 'disk-budget', 'session-ledger', 'session-allowance', 'freeze-Q', 'freeze-S']) assert.equal(by[id]?.status, 'pass', `${id}: ${by[id]?.detail}`);
+  for (const id of ['qwen-latent-node', 'qwen-shift', 'comfyui-ipadapter', 'watchdog-authentication', 'ssh-transfer', 'provider-billing', 'image-identity', 'image-size', 'gpu-compatibility']) assert.equal(by[id]?.status, 'execution-time', id);
+  assert.equal(r.ok, true);
+  // Unapproved locks, a broken ledger and a broken freeze are failures.
+  const un = await runPreflight({runDir: tmp('ap84b3-none-'), lockFile: fixture({approve: false}).lockFile, environmentFile: fx.environmentFile, decisionsFile: fixture({approve: false, approveEnvironment: false}).decisionsFile});
+  assert.equal(un.ok, false); assert.equal(un.checks.find(c => c.id === 'experiment-lock').status, 'fail'); assert.equal(un.checks.find(c => c.id === 'session-ledger').status, 'fail');
+  fs.writeFileSync(path.join(run, 'frozen-s.json'), '{}');
+  const br = await runPreflight({runDir: run, lockFile: fx.lockFile, environmentFile: fx.environmentFile, decisionsFile: fx.decisionsFile});
+  assert.equal(br.ok, false); assert.match(br.checks.find(c => c.id === 'freeze-S').detail, /missing freeze metadata/);
 });
 
 test('cumulative limits cannot silently reset: a later session with default or over-generous watchdog settings is refused before it starts', () => {

@@ -197,7 +197,7 @@ All of this reads the repository and never writes to it (`lib/asset-intel.mjs`, 
 - **API:** `GET /api/generation/promotions` lists promotions. Job detail includes `promotions`.
 - **Tests** run only against temporary registries and a temporary library in the git-ignored `studio-work/studio-*/`. They assert that the real registries, stories, artwork and the real `generated/` folder are untouched.
 
-## AP-84B3 experiment tooling (D1-6)
+## AP-84B3 experiment tooling (D1-6, A5, cumulative limits)
 
 Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a GPU, creates an account or spends money, and execution (D1-7) is not authorised.** The procedure is in `docs/oddly-relatable/AP-84B3-RUNBOOK.md`.
 
@@ -214,15 +214,18 @@ Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a 
   | Tool | Where it runs | Purpose |
   |---|---|---|
   | `cutout.cjs` | Local | The AP-72 cut-out with input and output as arguments; full-canvas or cropped |
-  | `build-pod-bundle.mjs` | Local | Generates download lists, checksums, software pins and watchdog settings from the lock |
-  | `pod-setup.sh` | Pod | Pinned checkouts, revision-pinned downloads and hash checks. Refuses to run without an approved `environment.lock` |
-  | `watchdog.sh` | Pod | Stops the Pod at 2 h 50 min or at a $4.75 estimate; gates new generations |
+  | `build-pod-bundle.mjs` | Local | Builds the bundle for one prepared session: download lists, checksums, pins, the environment lock and constraints, and the sealed session allowance |
+  | `pod-setup.sh` | Pod | In order: `check`, `environment` (tier 1 before installation), `software`, `requirements` (installed under PyTorch constraints, then tier 1 again and the tier 2 record), `models` (free space first, then hash-checked downloads) |
+  | `verify-environment.py` | Pod | Probes Python, PyTorch, the GPU, the driver and the package inventory, and checks them against the environment lock |
+  | `watchdog.sh` | Pod | Stops the Pod when the cumulative runtime reaches 2 h 50 min or the cumulative estimate reaches $4.75; reads earlier use only from the sealed `session.env`; gates new generations |
   | `collect-outputs.sh` | Pod | Copies each finished output into an outbox and lists it in a checksum manifest |
   | `verify-transfer.mjs` | Local | Verifies a pulled folder against the manifest; writes the success record last |
   | `check-workflow.mjs` | Local | Two-layer graph check of an exported ComfyUI workflow: constraints from the lock, then a freeze of the first export |
   | `pad-reference.mjs` | Local | Pads master v3 to 1536×1536 with RGB (203, 203, 203) for the SDXL baseline's reference |
   | `compare-sheet.mjs` | Local | One-scale comparison sheet for review |
-  | `stop-timer.mjs` | Local | Alerts for the manual stop and the 30-minute console checkpoints |
+  | `stop-timer.mjs` | Local | Alerts for the manual stop and the 30-minute console checkpoints, at cumulative times read from the ledger |
+  | `ledger.mjs` | Local | The session ledger: `init`, `fund`, `prepare`, `close`, `status`, `recover` |
+  | `preflight.mjs` | Local | Read-only report of every local check, and the list of checks that need the Pod |
 
 - **Watchdog estimate:** GPU compute at the higher of the recorded rate and the approved cap, plus the container disk, plus every other listed resource. Each rate is normalised to dollars per hour with its billing period and conversion stated; rates with different billing periods are never added directly. It is an estimate, not a billing measurement. $5.00 and 3 hours remain absolute.
 - **Watchdog authentication is unresolved until D1-7.** The script holds no credential and assumes none is injected; it calls the stop command it is given. No account-level API key may be placed in the repository or the Pod bundle. The manual stop in the web console is independent of it.
@@ -235,9 +238,11 @@ Local tooling for the AP-84B3 three-candidate experiment. **Nothing here runs a 
   - **Qwen latent node:** `EmptySD3LatentImage` is an **unverified compatibility gate**, tested in the smoke run. If it is incompatible the run stops; no other node is substituted.
   - **Qwen shift:** recorded from the export, not pinned.
 - **Smoke runs:** 512×768, 8 steps, seed 8403900, at most one per workflow. The lock is invalid if the smoke seed equals a candidate seed. Smoke outputs are verified into their own folder, recorded in the run sheet and can never be imported as a candidate.
-- **Cumulative limits:** the $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session of the experiment. `remainingLimits` in `lib/experiment-spec.mjs` gives the reduced watchdog settings for a later session, and `checkSessionSettings` refuses settings that would reset the limits (the watchdog's defaults are the full limits). A run sheet whose sessions exceed the limits in total is invalid. These are local checks: the watchdog on the Pod is not yet told about earlier sessions by anything except the operator's settings.
+- **Environment lock (A5):** `config/ap84b3-environment.json`, separate from the experiment lock. It pins the image by digest (`runpod/pytorch@sha256:e745…`), Python 3.12, PyTorch 2.13.0+cu130, torchvision 0.28.0+cu130, torchaudio 2.11.0+cu130, CUDA 13.0 and ComfyUI's requirements hash. These were read from public registry and package metadata; nothing was pulled or installed. The bundle is built only when its hash is on an `AP-84B3-ENVIRONMENT-APPROVED-SHA256=` line in `DECISIONS.md`.
+- **Cumulative limits:** the $5.00 ceiling, the 3 hours and the single $10 deposit cover every Pod session of the experiment. They are enforced through the session ledger (`lib/experiment-ledger.mjs`): chained records of the deposit, each session and each freeze; a session is prepared only with what remains and only if the console balance agrees with the record; the watchdog applies the totals from the sealed `session.env`. The ledger is local and consumption is entered by a person from the console: no tool here can impose a hard billing cap.
+- **Frozen-graph protection:** each freeze is recorded in the ledger with the file's hash, and the file is made read-only. Deletion, replacement, tampering or a frozen file without a ledger record stops the workflow; recovery needs the owner's approval line naming the exact ledger state. Before any import, the run sheet, the ledger, the frozen graph and the lock must agree.
 - **Run folders, bundles and outputs live outside the repository** and are never committed.
-- **Tests:** `tests/ap84b3.test.mjs` (31 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts. `pod-setup.sh` is checked statically and is never executed.
+- **Tests:** `tests/ap84b3.test.mjs` (39 tests) uses temporary folders, synthetic fixtures and a stand-in stop command. It needs Bash for the shell scripts and Python for the environment check. Steps of `pod-setup.sh` that stop before any network access are run locally; the steps that clone, install or download are never run. `pod-setup.sh` is checked statically and is never executed.
 
 ## Security
 

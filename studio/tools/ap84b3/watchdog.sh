@@ -5,6 +5,16 @@
 # whichever comes first. It does not look at what else is running: a transfer, retry or shutdown step in
 # progress never delays it.
 #
+# CUMULATIVE ACROSS SESSIONS (owner decision A2). The limits cover the whole experiment, not one Pod session.
+# The watchdog reads the session's allowance from the sealed session file in the Pod bundle (session.env,
+# generated from the local session ledger and covered by BUNDLE.SHA256SUMS): the session number, the runtime
+# already used and the consumption already used. It adds those to this session's elapsed time and estimate, and
+# applies the fixed thresholds to the TOTALS. A session therefore only ever gets what remains, never a fresh
+# full allowance. The prior values cannot be given on the command line or in the environment.
+# Limits of this control: the session file is only as good as the ledger it came from, and the consumption in the
+# ledger is entered by a person from the provider's console. The provider's balance (one $10 deposit, auto-pay
+# off) and the manual stop in the web console remain the independent safeguards.
+#
 #   watchdog.sh run      start the watchdog loop (keep it alive with: nohup setsid watchdog.sh run &)
 #   watchdog.sh gate     exit 0 only if a new generation or retry may start now
 #   watchdog.sh status   print the last recorded state
@@ -20,7 +30,8 @@
 #   hourly total = max(recorded GPU rate, approved GPU rate cap)
 #                + container disk (GB x $/GB/month / hours-per-month assumption)
 #                + every extra resource in WD_RESOURCES_FILE, each already normalised to an hourly rate
-#   estimate     = elapsed seconds x hourly total / 3600 + one-off charges        (all rounded up)
+#   estimate     = consumption already used in earlier sessions
+#                + this session's elapsed seconds x hourly total / 3600 + one-off charges   (all rounded up)
 # Rates with different billing periods are never added directly: the resources file must state each rate's
 # period and conversion, and this script recomputes the hourly figure and refuses a mismatch.
 #
@@ -34,6 +45,7 @@
 #   WD_DISK_GB                    container disk size in GB
 #   WD_DISK_USD_PER_GB_MONTH      container disk price
 #   WD_RESOURCES_FILE             extra billable resources (see below); must exist even when there are none
+#   WD_BUNDLE_DIR                 the Pod bundle; its session.env must match BUNDLE.SHA256SUMS
 # Optional (may only tighten the approved limits, never loosen them):
 #   WD_STOP_SECONDS (default and maximum 10200)          WD_NO_NEW_GENERATION_SECONDS (default and maximum 8400)
 #   WD_ESTIMATE_STOP_USD (default and maximum 4.75)      WD_HOURS_PER_MONTH (default and maximum 672)
@@ -97,8 +109,46 @@ load_config() {
   is_uint "$RETRY" && (( RETRY >= 1 && RETRY <= 30 )) || die "WD_RETRY_SECONDS must be 1 to 30"
 }
 
+# The sealed session allowance. Values come only from the bundle's session.env, which must match the bundle
+# checksums. Sets SESSION, PRIOR_RUNTIME, PRIOR_CONSUMED (micro-dollars) and LEDGER_HEAD.
+load_session() {
+  local f line key val sum want got
+  for v in WD_SESSION_NUMBER WD_PRIOR_RUNTIME_SECONDS WD_PRIOR_CONSUMED_USD WD_LEDGER_HEAD; do
+    [[ -z "${!v:-}" ]] || die "$v must come from the sealed session file, not from the environment"
+  done
+  [[ -n "${WD_BUNDLE_DIR:-}" && -d "${WD_BUNDLE_DIR:-}" ]] || die "WD_BUNDLE_DIR is required (the Pod bundle holding session.env)"
+  f="$WD_BUNDLE_DIR/session.env"
+  [[ -f "$f" && ! -L "$f" ]] || die "session.env is missing from the bundle: no session allowance, so the watchdog will not start"
+  [[ -f "$WD_BUNDLE_DIR/BUNDLE.SHA256SUMS" ]] || die "BUNDLE.SHA256SUMS is missing from the bundle"
+  want="$(awk '$2 == "session.env" { print $1 }' "$WD_BUNDLE_DIR/BUNDLE.SHA256SUMS")"
+  [[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "BUNDLE.SHA256SUMS does not cover session.env"
+  got="$(sha256sum -- "$f" | cut -d' ' -f1)"
+  [[ "$got" == "$want" ]] || die "session.env does not match BUNDLE.SHA256SUMS (it was changed after the bundle was built)"
+  SESSION=""; PRIOR_RUNTIME=""; PRIOR_CONSUMED=""; LEDGER_HEAD=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" =~ ^(WD_SESSION_NUMBER|WD_PRIOR_RUNTIME_SECONDS|WD_PRIOR_CONSUMED_USD|WD_LEDGER_HEAD)=([A-Za-z0-9.]+)$ ]] || die "session.env has an unexpected line"
+    key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
+    case "$key" in
+      WD_SESSION_NUMBER) SESSION="$val" ;;
+      WD_PRIOR_RUNTIME_SECONDS) PRIOR_RUNTIME="$val" ;;
+      WD_PRIOR_CONSUMED_USD) PRIOR_CONSUMED="$(usd_to_micro "$val")" || die "WD_PRIOR_CONSUMED_USD in session.env is not a number" ;;
+      WD_LEDGER_HEAD) LEDGER_HEAD="$val" ;;
+    esac
+  done < "$f"
+  is_uint "$SESSION" && (( SESSION >= 1 )) || die "session.env: WD_SESSION_NUMBER is missing or invalid"
+  is_uint "$PRIOR_RUNTIME" || die "session.env: WD_PRIOR_RUNTIME_SECONDS is missing or invalid"
+  is_uint "$PRIOR_CONSUMED" || die "session.env: WD_PRIOR_CONSUMED_USD is missing or invalid"
+  [[ "$LEDGER_HEAD" =~ ^[0-9a-f]{64}$ ]] || die "session.env: WD_LEDGER_HEAD is missing or invalid"
+  if (( SESSION == 1 )); then
+    (( PRIOR_RUNTIME == 0 && PRIOR_CONSUMED == 0 )) || die "session.env: session 1 cannot have earlier runtime or consumption"
+  fi
+}
+
 load_run_config() {
   load_config
+  load_session
   [[ -n "${WD_POD_ID:-}" ]] || die "WD_POD_ID is required (the Pod identifier is not assumed)"
   [[ "$WD_POD_ID" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "WD_POD_ID has an unexpected format"
   [[ -n "${WD_STOP_CMD:-}" ]] || die "WD_STOP_CMD is required (there is no default stop command)"
@@ -124,6 +174,10 @@ load_run_config() {
 
   load_resources
   HOURLY_TOTAL=$(( GPU_HOURLY + DISK_HOURLY + EXTRA_HOURLY ))
+  # Nothing remains: the earlier sessions already reached a threshold. Refuse to start.
+  (( PRIOR_RUNTIME < STOP_SECONDS )) || die "no runtime remains: earlier sessions used ${PRIOR_RUNTIME}s of the ${STOP_SECONDS}s allowance"
+  (( PRIOR_RUNTIME < NO_NEW )) || die "no generation can start: earlier sessions used ${PRIOR_RUNTIME}s, past the ${NO_NEW}s cut-off"
+  (( PRIOR_CONSUMED + ONE_OFF < THRESHOLD )) || die "no consumption allowance remains: earlier sessions used ${PRIOR_CONSUMED} of ${THRESHOLD} micro-dollars"
 }
 
 # Extra billable resources. Every entry must state its billing period and conversion; the hourly figure is
@@ -160,7 +214,7 @@ load_resources() {
   (( first == 0 )) || die "WD_RESOURCES_FILE is empty (it must start with '# ap84b3-resources/1')"
 }
 
-estimate_micro() { printf '%d' "$(( ($1 * HOURLY_TOTAL + 3599) / 3600 + ONE_OFF ))"; }
+estimate_micro() { printf '%d' "$(( PRIOR_CONSUMED + ($1 * HOURLY_TOTAL + 3599) / 3600 + ONE_OFF ))"; }
 
 stop_pod() {
   local reason="$1" attempt=0
@@ -189,11 +243,11 @@ stop_pod() {
 
 cmd_run() {
   load_run_config
-  local t prev elapsed est
+  local t prev elapsed total est
   t="$(now)"; is_uint "$t" || die "the clock did not return a valid time"
   (( START <= t )) || die "WD_POD_START_EPOCH is in the future"
   rm -f "$WD_STATE_DIR/stopped" "$WD_STATE_DIR/ALARM"
-  log "start mode=$MODE stop_seconds=$STOP_SECONDS no_new_generation_seconds=$NO_NEW threshold_micro=$THRESHOLD gpu_hourly_micro=$GPU_HOURLY disk_hourly_micro=$DISK_HOURLY extra_hourly_micro=$EXTRA_HOURLY one_off_micro=$ONE_OFF resources=$RESOURCE_COUNT hourly_total_micro=$HOURLY_TOTAL tick=$TICK"
+  log "start mode=$MODE session=$SESSION prior_runtime_seconds=$PRIOR_RUNTIME prior_consumed_micro=$PRIOR_CONSUMED ledger_head=$LEDGER_HEAD stop_seconds=$STOP_SECONDS no_new_generation_seconds=$NO_NEW threshold_micro=$THRESHOLD gpu_hourly_micro=$GPU_HOURLY disk_hourly_micro=$DISK_HOURLY extra_hourly_micro=$EXTRA_HOURLY one_off_micro=$ONE_OFF resources=$RESOURCE_COUNT hourly_total_micro=$HOURLY_TOTAL tick=$TICK"
   prev=""
   while :; do
     t="$(now)"
@@ -206,10 +260,11 @@ cmd_run() {
     fi
     prev="$t"
     elapsed=$(( (t - START) * SCALE ))
+    total=$(( PRIOR_RUNTIME + elapsed ))
     est="$(estimate_micro "$elapsed")"
-    put state "mode=$MODE elapsed_seconds=$elapsed estimate_micro_usd=$est threshold_micro_usd=$THRESHOLD hourly_total_micro_usd=$HOURLY_TOTAL gpu_hourly_micro_usd=$GPU_HOURLY disk_hourly_micro_usd=$DISK_HOURLY extra_hourly_micro_usd=$EXTRA_HOURLY one_off_micro_usd=$ONE_OFF stop_seconds=$STOP_SECONDS"
+    put state "mode=$MODE session=$SESSION prior_runtime_seconds=$PRIOR_RUNTIME prior_consumed_micro_usd=$PRIOR_CONSUMED total_elapsed_seconds=$total elapsed_seconds=$elapsed estimate_micro_usd=$est threshold_micro_usd=$THRESHOLD hourly_total_micro_usd=$HOURLY_TOTAL gpu_hourly_micro_usd=$GPU_HOURLY disk_hourly_micro_usd=$DISK_HOURLY extra_hourly_micro_usd=$EXTRA_HOURLY one_off_micro_usd=$ONE_OFF stop_seconds=$STOP_SECONDS"
     put heartbeat "$t"
-    (( elapsed < STOP_SECONDS )) || stop_pod "runtime-limit"
+    (( total < STOP_SECONDS )) || stop_pod "runtime-limit"
     (( est < THRESHOLD )) || stop_pod "estimated-consumption"
     sleep "$TICK"
   done
@@ -218,6 +273,7 @@ cmd_run() {
 # May a new generation or retry start? Only before the cut-off, with no stop under way and a live watchdog.
 cmd_gate() {
   load_config
+  load_session
   local t hb elapsed
   [[ ! -f "$WD_STATE_DIR/stop-reason" ]] || { echo "gate: closed (the watchdog is stopping the Pod)"; exit 1; }
   [[ -f "$WD_STATE_DIR/heartbeat" ]] || { echo "gate: closed (the watchdog is not running)"; exit 1; }
@@ -225,8 +281,8 @@ cmd_gate() {
   is_uint "$t" && is_uint "$hb" || { echo "gate: closed (time or heartbeat unreadable)"; exit 1; }
   (( t >= hb && t - hb <= TICK * 3 + 5 )) || { echo "gate: closed (the watchdog heartbeat is stale)"; exit 1; }
   elapsed=$(( (t - START) * SCALE ))
-  (( elapsed >= 0 && elapsed < NO_NEW )) || { echo "gate: closed (past the no-new-generation cut-off)"; exit 1; }
-  echo "gate: open (elapsed ${elapsed}s, cut-off ${NO_NEW}s)"
+  (( elapsed >= 0 && PRIOR_RUNTIME + elapsed < NO_NEW )) || { echo "gate: closed (past the no-new-generation cut-off, counting earlier sessions)"; exit 1; }
+  echo "gate: open (session ${SESSION}: ${elapsed}s here, $(( PRIOR_RUNTIME + elapsed ))s in total, cut-off ${NO_NEW}s)"
 }
 
 cmd_status() {

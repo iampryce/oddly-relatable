@@ -1,12 +1,12 @@
 # AP-84B3-D1: experiment specification and cost validation
 
-**Status (2026-11-14):** specification approved in parts; nothing has been run.
+**Status (2026-11-14):** specification approved in parts; engineering complete; nothing has been run.
 - No account, payment method, instance, API call, model download or image generation. Spend to date: **$0**.
-- **Approved by the owner:** D1-1 to D1-5 (2026-11-13), D1-6 implementation (2026-11-13), and the lock amendment L1 to L12 with cumulative limits (2026-11-14). See §8 and §10.
-- **Implemented locally ($0):** the tooling in §7.1, the experiment lock `studio/config/ap84b3-experiment.json` and the runbook `AP-84B3-RUNBOOK.md`.
-- **Not approved:** the experiment lock itself. Every tool refuses to run until the owner approves its hash (gate A4).
-- **Not authorised:** the environment proposal (A5) and execution (D1-7). No approval so far authorises account creation, funding, provisioning, model downloads or image generation.
-- `DECISIONS.md` is the authoritative record. Where this document and the lock differ, the lock holds the exact values.
+- **Approved by the owner:** D1-1 to D1-5 (2026-11-13), D1-6 implementation (2026-11-13), the lock amendment L1 to L12 with cumulative limits (2026-11-14), and on 2026-11-14: A4 (the experiment lock hash `e50d74c8…`), A5 (Option A environment, two tiers) and the implementation of environment setup, cumulative watchdog enforcement and stronger frozen-graph protection. See §8 and §11.
+- **Approval lines not yet written.** The machine-readable lines in `DECISIONS.md` that let the tools run are not written: the engineering task that built §11 was instructed not to create approval records. Until they are written, every tool refuses to run. The environment lock (hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee`) is a new file and needs the owner's confirmation of that exact hash.
+- **Implemented locally ($0):** the tooling in §7.1, the experiment lock, the environment lock `studio/config/ap84b3-environment.json`, the session ledger and the runbook `AP-84B3-RUNBOOK.md`.
+- **Not authorised:** execution (D1-7). No approval so far authorises account creation, funding, provisioning, model downloads or image generation.
+- `DECISIONS.md` is the authoritative record. Where this document and a lock differ, the lock holds the exact values.
 
 **How the facts were gathered (all free, read-only, no login):**
 - Model files, sizes, SHA-256 hashes and revisions: Hugging Face public metadata API, 2026-11-13.
@@ -70,6 +70,7 @@ Every file is pinned by repository revision and SHA-256. At execution, each down
 | ComfyUI_IPAdapter_plus (workflow S only) | commit `a0f451a5113cf9becb0847b92884cb10cbdec0ef` (2025-04-14) | GPL-3.0 |
 | Local cut-out | `bible/concepts/src/ap72-cutout.cjs` at the commit used | project |
 | Local validator | `studio/lib/asset-intel.mjs` at the commit used | project |
+| Pod image (A5) | `runpod/pytorch@sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300` (tag `2.1.0-cu1300-torch2130-ubuntu2404`): Python 3.12, PyTorch 2.13.0+cu130, torchvision 0.28.0+cu130, torchaudio 2.11.0+cu130, CUDA 13.0.0, cuDNN 9.12.0.46, Ubuntu 24.04 | See the environment lock |
 
 - The GPL covers the software, which we run and do not distribute. It places no condition on the images.
 - Open RAIL++-M permits commercial use of outputs, subject to its use restrictions. This is a reading of the licence text, not legal advice.
@@ -343,9 +344,13 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 | A3 | Runbook (required by D1-5) | `docs/oddly-relatable/AP-84B3-RUNBOOK.md` |
 | A4 | Workflow graph checker (required by the D1-2 caveat; two-layer since the amendment) | `check-workflow.mjs` |
 | — | Local reference padding (lock amendment, L10) | `pad-reference.mjs` |
+| — | Environment lock and checks (A5) | `studio/config/ap84b3-environment.json`, `verify-environment.py`, and the `environment` and `requirements` steps of `pod-setup.sh` |
+| — | Session ledger and cumulative enforcement (A2) | `studio/lib/experiment-ledger.mjs`, `ledger.mjs`, the sealed `session.env` in the bundle, and the cumulative watchdog |
+| — | Frozen-graph protection | Freezes recorded in the ledger; deletion, replacement or tampering stops the workflow; owner-controlled recovery |
+| — | Local preflight report | `preflight.mjs` (reads only) |
 
 - All of it is local, $0 work with tests. Nothing has been run on a Pod.
-- Every tool refuses to run until the owner approves the experiment lock's hash.
+- Every tool refuses to run until the owner's approval line for the experiment lock is in `DECISIONS.md`; the Pod bundle also needs the environment lock's line.
 - A live RunPod/ComfyUI adapter is not built. It would be a later milestone, if the experiment succeeds.
 
 ### 7.2 Risks
@@ -358,6 +363,10 @@ No outcome promotes anything. Approval of a candidate creates a registry proposa
 | R4 | IP-Adapter node will not run on ComfyUI v0.45.3 | Candidate C cannot be produced as specified | Stop rule applies; the fallback (a short diffusers script with the same model files) would need owner approval as a specification change |
 | R5 | Download slower than assumed | More paid time | Budgeted to 45 min; 3 h limit |
 | R6 | Storage left billing | Cost after the run | Container disk only; termination check in §6.3 |
+| R12 | RunPod cannot deploy an image pinned by digest | The exact image cannot be guaranteed | Stop and return to the owner; the fingerprint check in `pod-setup.sh environment` is a second check, not a substitute |
+| R13 | The image does not fit beside the models on the 80 GB disk | Downloads cannot complete | `pod-setup.sh models` checks free space before the first download |
+| R14 | FP8 weights on the A40 (no FP8 hardware) | Slower generation on the fallback | Observed only if the A40 is used; the watchdog limits still apply |
+| R15 | The local ledger is deliberately rewritten | Cumulative totals understated | The console balance is checked against the ledger at every prepare; the provider balance and the manual stop are independent |
 | R7 | Artwork on a third-party machine | Master v3 leaves local control for the run | Secure Cloud; one file; Pod terminated and disk erased |
 | R8 | Minimum deposit larger than the ceiling | More cash committed than consumed | Verified: $10 minimum, non-refundable (§5.1). The owner approved one $10 deposit (D1-5) |
 | R9 | Upstream files moved or changed | Download fails or hash differs | Revisions pinned; hash check stops the run |
@@ -378,8 +387,8 @@ Status on 2026-11-14. Each decision is separate. `DECISIONS.md` is the authorita
 | D1-6 | Implementation work in §7.1 | Built and tested locally, $0; 30-minute console checkpoints; $0.25 reconciliation tolerance; every D1-7 approval must name the approved lock hash | **APPROVED and implemented** |
 | Lock amendment | L1 to L12, the Qwen latent compatibility gate and two-layer graph validation (§10) | Implemented locally, $0 | **APPROVED** (2026-11-14) |
 | A2 | Cumulative limits across all sessions | $5.00, 3 hours and one $10 deposit for the whole experiment | **APPROVED** (2026-11-14) |
-| A4 | Experiment lock review | The owner reviews the lock and its canonical hash; only then is an approval line written | **Not approved** |
-| A5 | Environment proposal | PyTorch version and Pod base image, reviewed and reproducible | **Not approved** |
+| A4 | Experiment lock review | Hash `e50d74c8eddf7e920948e5d69aef72542e0524d2bb19c7ba6c1e7ff1b2c0878c` | **APPROVED** by the owner (2026-11-14); approval line **not yet written** |
+| A5 | Environment | Option A: RunPod's PyTorch image pinned by digest; two-tier environment lock (§11) | **APPROVED** by the owner (2026-11-14); the environment lock file (hash `bf8d93da7e4af28e2e79735081769845db8497fcb8d23a9bc3ffc614032fe4ee`) needs the owner's confirmation and its approval line |
 | D1-7 | Execution | Only after D1-1 to D1-6 and after §7.1 is accepted | **Not authorised** |
 
 **D1-1.** The 2511 consistency improvements are publisher claims; the experiment exists to test them.
@@ -415,7 +424,7 @@ Status on 2026-11-14. Each decision is separate. `DECISIONS.md` is the authorita
   - outputs copied to durable storage and checksums verified before the Pod is stopped.
 - The deposit may be made only as part of authorised execution.
 
-**Not authorised:** the lock approval (A4), the environment proposal (A5) and D1-7 (execution). Until they are approved, there is no account creation, funding, provisioning, model download, image generation or cost.
+**Not authorised:** D1-7 (execution). Until it is approved, and the approval lines for both locks are written, there is no account creation, funding, provisioning, model download, image generation or cost.
 
 ## 9. Sources
 
@@ -449,3 +458,28 @@ These decisions were made after the lock review. The exact values are in the exp
 | A2 | The limits are cumulative across all Pod sessions; no additional funding |
 
 **Still unresolved until execution:** the Qwen latent node, the shift value, the real API export, how the on-Pod stop command authenticates, SSH file copy, and whether the pinned ComfyUI and IP-Adapter node run together.
+
+## 11. Environment lock, cumulative enforcement and frozen-graph protection (2026-11-14)
+
+Engineering approved by the owner on 2026-11-14 (A5 and the implementation decisions). All of it is local, $0, and tested; nothing has been run on a Pod.
+
+**Environment lock (A5: Option A, two tiers).** `studio/config/ap84b3-environment.json`, a separate file so the experiment lock hash is unchanged.
+
+| Item | Value | How verified |
+|---|---|---|
+| Image | `runpod/pytorch:2.1.0-cu1300-torch2130-ubuntu2404`, deployed as `runpod/pytorch@sha256:e745934b…a5300` | Docker Hub registry: the digest resolves to a single linux/amd64 manifest (config `sha256:ae2b9b11…f3a`, created 2026-11-09) |
+| Python | 3.12 | Image build history: `/usr/bin/python3.12` linked as `python` |
+| PyTorch, torchvision, torchaudio | 2.13.0+cu130, 0.28.0+cu130, 2.11.0+cu130 | Image build history: installed from the PyTorch cu130 index |
+| CUDA, cuDNN | 13.0.0, 9.12.0.46-1 | Image configuration |
+| ComfyUI requirements | SHA-256 `6cda5d94…e5abb` at the pinned commit | Read from the pinned commit |
+| IP-Adapter node dependencies | None at the pinned commit | Its `pyproject.toml` lists none and it has no requirements file |
+
+- **Tier 1** is enforced before installation and again after it: Python, PyTorch, torchvision, torchaudio, the CUDA build, the image fingerprint, an approved GPU with the right compute capability and at least 44 GB of memory, a working GPU operation and the FP8 type. ComfyUI's requirements are installed under constraints that forbid replacing PyTorch.
+- **Tier 2** is recorded, not pinned: the package inventory and its SHA-256, the GPU, the driver, the CUDA runtime and the launch options.
+- Only the image's registry metadata was read. Nothing was pulled, installed or run, so the image's real behaviour is verified only on the Pod.
+
+**Cumulative enforcement (A2).** A session ledger in the run folder records the deposit, every session (prepared and closed, with its runtime and consumption) and every workflow freeze. Each record carries the hash of the one before it, and a head record catches truncation. A session is prepared only if the ledger is intact, no session is open, a limit has not been reached and the console balance agrees with the recorded consumption within $0.25. The bundle carries the session's allowance in a sealed `session.env`; the watchdog adds the earlier use and stops at the cumulative thresholds, and will not start without it. Limits: the ledger is local and the consumption figures are entered by a person; no tool here can impose a hard billing cap.
+
+**Frozen-graph protection.** Each freeze is recorded in the ledger with the frozen file's SHA-256, and the file is made read-only. A deleted, replaced or altered frozen graph, or a frozen file without a ledger record, stops the workflow; it is never re-created automatically. Recovery needs the owner's approval line naming the exact ledger state. Before any import, the run sheet, the ledger, the frozen graph and the lock must agree.
+
+**Still verified only on the Pod:** image deployment by digest; whether the image counts against the 80 GB disk; the GPU, driver and CUDA operation; FP8 on the A40; ComfyUI and IP-Adapter together; the Qwen latent node; the shift value; watchdog authentication and the Pod identifier; SSH file copy.

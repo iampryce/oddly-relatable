@@ -1,0 +1,54 @@
+{
+  "schema": "ap84b3-environment/1",
+  "experiment": "AP-84B3",
+  "note": "Pod environment for AP-84B3, implementing owner decision A5 (Option A: RunPod's PyTorch image pinned by digest; two-tier environment lock). Values were read from public registry and package-index metadata on 2026-11-14; nothing was pulled, installed or run. This file carries no approval status of its own: the Pod bundle is built only if its canonical SHA-256 is recorded on an approval line in DECISIONS.md after the owner's review.",
+  "image": {
+    "reference": "runpod/pytorch:2.1.0-cu1300-torch2130-ubuntu2404",
+    "digest": "sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300",
+    "deployAs": "runpod/pytorch@sha256:e745934b44a4071b1d20a181cdff9e92dc4af3d304cbaafbd0d23f8dacbe5300",
+    "configDigest": "sha256:ae2b9b11783f266bdf47d06d86d5d0d8402b6bc4c4ebd46d456a7d18d7139f3a",
+    "created": "2026-11-09T12:05:50Z",
+    "platform": "linux/amd64",
+    "compressedLayersGB": "9.72",
+    "verifiedFrom": "Docker Hub registry: the digest resolves to a single linux/amd64 OCI manifest; its config records the build history below. Read 2026-11-14.",
+    "fingerprint": {
+      "CUDA_VERSION": "13.0.0",
+      "NV_CUDNN_VERSION": "9.12.0.46-1",
+      "ubuntu": "24.04",
+      "defaultPython": "/usr/bin/python3.12 (linked as /usr/local/bin/python)",
+      "torchInstall": "torch==2.13.0 torchvision==0.28.0 from https://download.pytorch.org/whl/cu130; torchaudio==2.11.0 (cu130, --no-deps)"
+    }
+  },
+  "tier1": {
+    "note": "Pinned and enforced before anything is installed, and again after the ComfyUI requirements are installed. Any mismatch stops setup.",
+    "python": "3.12",
+    "torch": "2.13.0+cu130",
+    "torchvision": "0.28.0+cu130",
+    "torchaudio": "2.11.0+cu130",
+    "torchCuda": "13.0",
+    "comfyuiRequirementsSha256": "6cda5d945d0b22ba6c520007c7a557d63c75a1ab62c14703da57da4a884e5abb",
+    "ipadapterPythonDependencies": "none at the pinned commit (no requirements.txt; pyproject.toml lists none)"
+  },
+  "installConstraints": [
+    "torch==2.13.0+cu130",
+    "torchvision==0.28.0+cu130",
+    "torchaudio==2.11.0+cu130"
+  ],
+  "tier2": {
+    "note": "Recorded at execution, not pinned: the installed package inventory and its SHA-256, the GPU, the driver, the CUDA runtime seen by PyTorch, and the ComfyUI launch options.",
+    "record": ["packageInventory", "packageInventorySha256", "gpuName", "gpuComputeCapability", "gpuTotalMemoryBytes", "driverVersion", "torchCudaRuntime", "launchOptions"],
+    "launchOptions": ["--listen", "127.0.0.1", "--port", "8188"]
+  },
+  "gpu": {
+    "allowed": {
+      "NVIDIA L40S": {"lockName": "NVIDIA L40S 48 GB", "computeCapability": "8.9"},
+      "NVIDIA A40": {"lockName": "NVIDIA A40 48 GB", "computeCapability": "8.6"}
+    },
+    "minTotalMemoryBytes": 44000000000,
+    "requireFloat8Dtype": true
+  },
+  "disk": {
+    "marginGB": 5,
+    "note": "Before any model download, the free space where ComfyUI is installed must be at least the pinned model sizes plus this margin."
+  }
+}
