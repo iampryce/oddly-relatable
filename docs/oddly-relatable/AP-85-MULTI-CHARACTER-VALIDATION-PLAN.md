@@ -1,6 +1,6 @@
 # AP-85: multi-character validation plan
 
-**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3); Track A NOT YET ACCEPTED: first owner review done (A1 passes; A3a/A3b pass the technical layer-order checks; A2 and A4 needed corrections, now made); the owner's review of the corrected A2 and A4 sheets is pending. M3 to M8 OPEN; Track B not started.**
+**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED and TRACK A ACCEPTED by the owner on 2026-11-15 (§5.4), at commit `305a50474ee3433af16104294e921631a346a8a4`. M3 to M8 OPEN; Track B not started.**
 - No Character 02 artwork exists or is created by this plan. No existing character asset, registry, story or renderer is changed.
 - No GPU, account, spending, model download or image generation. AP-84B3 and its approved locks are not touched or extended, and AP-84B3 D1-7 remains NOT AUTHORISED.
 - Every phase below needs its own owner approval (§9). Only P0 (M1) and P1 (M2) are approved.
@@ -130,9 +130,32 @@ Tests: `production/tests/ap85-track-a.test.mjs`, 14 tests, all passing (renderer
 
   A4's shots 2 to 5 now declare the singles their captions describe. Framings that cannot meet the rules are refused with a reason.
 
-A1, A3a, A3b, A5 and A6 render byte-identically: the render plan, the generated assets and every frame at 0.1 s steps (`production/evidence/ap85/review/unchanged-check.json`). The corrected A2 and A4 sheets are in `production/evidence/ap85/review/`. Track A remains **not accepted** until the owner reviews them.
+A1, A3a, A3b, A5 and A6 render byte-identically: the render plan, the generated assets and every frame at 0.1 s steps (`production/evidence/ap85/review/unchanged-check.json`). The corrected A2 and A4 sheets are in `production/evidence/ap85/review/`. The owner then reviewed them and accepted Track A (§5.4).
 
-At P1: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity. The required owner contact-sheet review is **pending**; the sheets are in `production/evidence/ap85/review/` (README there lists what to inspect, including how the A4 "focus" pivot frames shots). Track A is not accepted until the owner completes it.
+At P1: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity. After the corrections: production 83/83 with FFmpeg (69 pass, 14 skipped without it); studio 64/64; renderer 134/135 (the same pre-existing Jensen baseline failure).
+
+### 5.4 Owner acceptance of Track A (2026-11-15)
+
+**ACCEPTED.** After visually reviewing the original sheets (`e624a91`) and the corrected sheets (`305a504`), the owner formally approved Track A:
+
+| Scene | Accepted |
+|---|---|
+| A1 | Two-character dialogue and pose changes |
+| A2 | Swapped character positions, speaker attribution and bubble positioning |
+| A3a | Placeholder in front of Character 01 |
+| A3b | Character 01 in front of the placeholder |
+| A4 | Camera framing, medium shots, close reactions and the explicit single-shot behaviour |
+
+- **Accepted implementation and evidence:** commit `305a50474ee3433af16104294e921631a346a8a4`. It builds on `910e877` (the P1 engine) and `e624a91` (the first review sheets).
+- **Evidence:** in `production/evidence/ap85/review/`. The A2 and A4 sheets were corrected at `305a504`; the A1, A3a and A3b sheets date from `e624a91`, and `unchanged-check.json` confirms that those scenes render byte-identically.
+- **Tests at acceptance:**
+  - Track A checks A-1 to A-10 pass on A1 to A6, plus the regression test for the review corrections;
+  - production 83/83 with FFmpeg (69 pass, 14 skipped without it);
+  - studio 64/64;
+  - renderer 134/135. The one failure is the pre-existing Jensen baseline test, unchanged and unrelated to AP-85;
+  - Short 001 is unchanged.
+- **What this accepts:** the composition engine only. It is not identity evidence for any character (§1). It does not approve Track B, Character 02, or any later phase, each of which keeps its own owner gate (§8, §9).
+- **Still open:** M3 to M8. Track B has not started. No Character 02 artwork or registry exists.
 
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 
