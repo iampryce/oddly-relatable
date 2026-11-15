@@ -17,22 +17,24 @@ export const textChat = {
   // Timing only (no files written): lets the story compiler lay scenes end to end first.
   sequence(scene) {
     const reactionCast = scene.reactionCast ?? scene.cast?.[0]?.id ?? 'primary';
+    if (scene.reactionCast !== undefined && scene.cast?.length && !scene.cast.some(m => m.id === scene.reactionCast)) throw new Error(`reactionCast "${scene.reactionCast}" is not a cast member of this scene`);
     const seq = sequenceConversation(scene, {defaultCast: reactionCast});
     return {...seq, reactionCast, duration: seq.conversationEnd};
   },
 
-  async compile({scene, seq, shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect, repoRoot}) {
+  async compile({scene, seq, shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
     const layout = {...LAYOUT_DEFAULTS, ...(scene.layout || {}), safe: {...LAYOUT_DEFAULTS.safe, ...(scene.layout?.safe || {})}};
     const bubbleOpts = {...BUBBLE_DEFAULTS, ...(scene.bubbles || {})};
     const world = [], screen = [], issues = [];
 
     // 1. Cast (resolved by character ID) and their pose segments for this shot.
     for (const list of Object.values(seq.castPoses)) for (const p of list) if (!Number.isFinite(p.end) || p.end > shotDuration) p.end = shotDuration;
-    const cast = await resolveCast(scene.cast || [], seq.castPoses, repoRoot);
+    const cast = await resolveCast(scene.cast || [], seq.castPoses, repoRoot, {allowSynthetic});
 
     // 2. Camera: zoom about the focus member's head top, so the face never rises into the chat zone.
     const camOpts = {...CAMERA_DEFAULTS, ...(scene.camera || {})};
     const track = buildCameraTrack(seq.camera, camOpts);
+    if (scene.camera?.focus !== undefined && !cast.some(m => m.id === scene.camera.focus)) throw new Error(`camera focus "${scene.camera.focus}" is not a cast member of this scene`);
     const focus = cast.find(m => m.id === (scene.camera?.focus ?? seq.reactionCast)) || cast[0];
     const pivot = focus ? {x: focus.placement.feetX, y: focus.placement.feetY - focus.placement.figureHeight} : {x: plane.width / 2, y: plane.height / 2};
     const coverRect = env?.rect || null;
@@ -56,7 +58,7 @@ export const textChat = {
       const zMax = Math.max(track.initialZoom, ...track.cuts.map(c => c.to), ...track.moves.map(v => v.to));
       for (const s of m.segments) {
         const info = m.infos.get(s.pose), k = m.placement.figureHeight / info.figureHeight;
-        diagnostics.push({cast: m.id, character: m.character, pose: s.pose, from: s.start, to: s.end, transition: s.transition, upscale: +(k * ppu).toFixed(2), upscaleAtMaxZoom: +(k * ppu * zMax).toFixed(2), soft: k * ppu * zMax > m.placement.maxUpscale, status: info.status});
+        diagnostics.push({cast: m.id, character: m.character, ...(m.synthetic ? {synthetic: true} : {}), pose: s.pose, from: s.start, to: s.end, transition: s.transition, upscale: +(k * ppu).toFixed(2), upscaleAtMaxZoom: +(k * ppu * zMax).toFixed(2), soft: k * ppu * zMax > m.placement.maxUpscale, status: info.status});
       }
     }
 
@@ -86,14 +88,14 @@ export const textChat = {
     }
     const items = [], art = new Map();
     for (const msg of seq.messages) {
-      const img = renderBubble({text: msg.text, side: msg.side, style: msg.style || (msg.side === 'left' ? 'her' : 'him'), ppu, ...bubbleOpts});
+      const img = renderBubble({text: msg.text, side: msg.side, style: msg.style, ppu, ...bubbleOpts});
       art.set(msg.id, {path: writeGen(`msg-${msg.id}`, img), img});
       items.push({id: msg.id, order: msg.index, start: msg.start, end: Infinity, width: img.width, height: img.height, x: bubbleX(msg.side, img.width, plane, layout)});
     }
     const dot = renderDot({diameter: 20, ppu});
     const dotPath = seq.typing.length ? writeGen('typing-dot', dot) : null;
     for (const ty of seq.typing) {
-      const img = renderTypingShell({side: ty.side, style: ty.style || (ty.side === 'left' ? 'her' : 'him'), ppu});
+      const img = renderTypingShell({side: ty.side, style: ty.style, ppu});
       art.set(ty.id, {path: writeGen(`typing-${ty.side}`, img), img});
       items.push({id: ty.id, order: ty.index, start: ty.start, end: ty.end, width: img.width, height: img.height, x: bubbleX(ty.side, img.width, plane, layout)});
     }

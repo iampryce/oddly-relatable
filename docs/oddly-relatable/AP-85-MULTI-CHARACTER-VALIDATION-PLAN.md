@@ -1,9 +1,9 @@
 # AP-85: multi-character validation plan
 
-**Status (2026-11-15): PROPOSED. Planning only; nothing in this document is approved or implemented.**
+**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3). M3 to M8 OPEN; Track B not started.**
 - No Character 02 artwork exists or is created by this plan. No existing character asset, registry, story or renderer is changed.
 - No GPU, account, spending, model download or image generation. AP-84B3 and its approved locks are not touched or extended, and AP-84B3 D1-7 remains NOT AUTHORISED.
-- Every phase below needs its own owner approval (§9).
+- Every phase below needs its own owner approval (§9). Only P0 (M1) and P1 (M2) are approved.
 
 **Builds on:** owner requirement AP-80R (multiple characters, flexible formats, separation of concerns), the AP-79 architecture (story/scene/cast/camera/timeline/format layers), and the locked visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md` §4 and §5). It does not restate or change them.
 
@@ -101,6 +101,27 @@ Character 02 is to be a **genuinely distinct, clearly feminine** character in th
 
 **Track A acceptance:** every check A-1 to A-10 passes on scenes A1 to A6. The owner reviews contact sheets of A1 to A4 to confirm the scenes read as intended. This approves the engine only.
 
+### 5.3 Phase 1 results (2026-11-15)
+
+Implemented in `production/lib` (`formats/face-to-face.mjs`, `cast.mjs`, `character.mjs`, `conversation.mjs`, `graphics.mjs`, `story.mjs`, `scene.mjs`, `formats/text-chat.mjs`). Findings F3 (styles by side), F4 (facing as data, without new artwork; never mirrored) and F5 (no Character 01 fallback) are resolved. The placeholder lives only in `production/tests/fixtures/ap85-placeholder.mjs`, is labelled on the figure, is marked `synthetic: true`, and is refused by every production path.
+
+Tests: `production/tests/ap85-track-a.test.mjs`, 14 tests, all passing (renderer painter with FFmpeg).
+
+| # | Result | Scenes |
+|---|---|---|
+| A-1 | Pass | A1 (own registry and hashes; wrong, unnamed and synthetic registries refused; another registry leaves the member's plan byte-identical) |
+| A-2 | Pass | A1 (pose changes for one member leave the other member's layers unchanged, both ways) |
+| A-3 | Pass | all (feet and height within 1 px at every key) |
+| A-4 | Pass | A1, A2, A3a, A3b, A5, A6 (paint order); A3a and A3b in pixels (the front member wins every overlapping pixel) |
+| A-5 | Pass | A1, A2, A4, A5 in rendered frames: zero foreign pixels, every pixel inside its declared rectangle; a swapped plan is detected. A6's two placeholder instances share colours, so they are separated by A-3 and A-4, not by colour |
+| A-6 | Pass | A1, A2 (bubble colour sampled from the speaker's style; swapped positions keep each speaker's style); text-chat `cast` link |
+| A-7 | Pass | A4 (wide, single, reaction shots; focus and pivot) |
+| A-8 | Pass | A1 variants (missing or invalid character, registry, facing, format, speaker, focus, unposed member) |
+| A-9 | Pass | all (byte-identical plan, report and assets twice) |
+| A-10 | Pass | Short 001, AP-78 fixture, AP-79 fixture byte-identical to the baseline at `2b480b3`; Short 001 renderer frames identical |
+
+Other suites: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity; the owner contact-sheet review of A1 to A4 is still to do.
+
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 
 Track B starts only when an owner-approved Character 02 master and pose set exist (Phase 3). It applies to artwork however it was made. If the owner chooses AI generation for Character 02, that is a **separate experiment with its own lock, budget and approval gates**; AP-84B3 locks and approvals do not carry over.
@@ -169,8 +190,8 @@ Each figure is measured from its cut-out. "Own reference" means the character's 
 
 | # | Decision |
 |---|---|
-| M1 | Approve this plan and the milestone ID AP-85 |
-| M2 | Approve the Phase 1 implementation scope (§8, P1): local, $0, no artwork |
+| M1 | Approve this plan and the milestone ID AP-85. **APPROVED 2026-11-15** |
+| M2 | Approve the Phase 1 implementation scope (§8, P1): local, $0, no artwork. **APPROVED 2026-11-15; implemented (§5.3)** |
 | M3 | Character 02's role and relationship to Character 01, including how it relates to the open cast decisions D4 and D5 |
 | M4 | The design brief choices in §3: which cues make her clearly feminine, her signature colour, hairstyle and name |
 | M5 | How Character 02's artwork is produced (for example hand-drawn, commissioned, or an AI experiment with its own lock and budget) |

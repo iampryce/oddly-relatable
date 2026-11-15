@@ -25,7 +25,7 @@ test('cast validation: ids, duplicates, character IDs, facing support', () => {
   assert.throws(() => validateCast([{id: 'A b', character: 'character-01'}]), /lowercase identifier/);
   assert.throws(() => validateCast([{id: 'a', character: 'character-01'}, {id: 'a', character: 'character-01'}]), /duplicate/);
   assert.throws(() => validateCast([{id: 'a'}]), /character ID is required/);
-  assert.throws(() => validateCast([{id: 'a', character: 'character-01', facing: 'mirrored'}]), /not supported by the B1 renderer/);
+  assert.throws(() => validateCast([{id: 'a', character: 'character-01', facing: 'mirrored'}]), /facing "mirrored" is not one of native, left, right, front/);
 });
 
 test('cast resolution: registry by character ID, z-order sorting, missing characters and unknown members fail', async () => {
@@ -59,9 +59,10 @@ test('registry hash mismatch is caught', async () => {
 });
 
 // ---------- formats and story
-test('format strategies: text-chat implemented; the other formats are declared but not implemented', async () => {
+test('format strategies: text-chat and face-to-face implemented; the other formats are declared but not implemented', async () => {
   assert.equal(FORMATS['text-chat'].implemented, true);
-  for (const id of ['phone-call', 'split-screen', 'face-to-face', 'solo']) {
+  assert.equal(FORMATS['face-to-face'].implemented, true);   // AP-85 P1
+  for (const id of ['phone-call', 'split-screen', 'solo']) {
     assert.equal(FORMATS[id].implemented, false);
     assert.throws(() => FORMATS[id].sequence({}), /designed but not implemented/);
   }
@@ -103,7 +104,7 @@ test('AP-78 episode format still compiles to the same timeline (no camera, cuts 
 
 test('multi-scene story: one shot per scene, contiguous, SFX offset, end card in the last shot', async () => {
   const sc = (id, text, pose) => ({id, format: 'text-chat', environment: 'living-room-empty-03', cast: [{id: 'him', character: 'character-01'}],
-    speakers: {a: {side: 'left'}}, events: [{type: 'message', speaker: 'a', text, duration: 2, pose, sfx: 'chime', camera: 'Wide'}]});
+    speakers: {a: {side: 'left', style: 'her'}}, events: [{type: 'message', speaker: 'a', text, duration: 2, pose, sfx: 'chime', camera: 'Wide'}]});
   const story = {schema: 'oddly-relatable/story@1', id: 'two-scenes', scenes: [sc('one', 'First scene.', '02'), sc('two', 'Second scene.', '03')], endCard: {duration: 1, caption: 'End'}};
   const out = tmp('multi');
   const {report} = await compileProject(story, {outDir: out});

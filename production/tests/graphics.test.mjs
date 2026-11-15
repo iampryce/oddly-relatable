@@ -23,7 +23,7 @@ test('short message is one line; long message wraps and never exceeds the max wi
 });
 
 test('left (HER) and right (HIM) bubbles use their distinct canon-palette fills', async () => {
-  const her = renderBubble({text: 'We need to talk.', side: 'left'}), him = renderBubble({text: 'Is everything ok?', side: 'right'});
+  const her = renderBubble({text: 'We need to talk.', side: 'left', style: 'her'}), him = renderBubble({text: 'Is everything ok?', side: 'right', style: 'him'});
   // sample inside the body, away from the text (top-right inner corner region)
   assert.ok(near(await pixel(her.png, her.width - 30, 14), hex(BUBBLE_STYLES.her.fill)));
   assert.ok(near(await pixel(him.png, him.width - 30, 14), hex(BUBBLE_STYLES.him.fill)));
@@ -37,12 +37,12 @@ test('bubble text keeps WCAG AA contrast against its fill', () => {
 });
 
 test('ppu scales pixels but not design-unit size', () => {
-  const a = renderBubble({text: 'Define March.', ppu: 1}), b = renderBubble({text: 'Define March.', ppu: 0.84375});
+  const a = renderBubble({text: 'Define March.', style: 'her', ppu: 1}), b = renderBubble({text: 'Define March.', style: 'her', ppu: 0.84375});
   assert.ok(Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2);
 });
 
 test('typing indicator: three dots inside the shell', () => {
-  const g = typingGeometry(), shell = renderTypingShell({side: 'left'});
+  const g = typingGeometry(), shell = renderTypingShell({side: 'left', style: 'her'});
   assert.equal(shell.dots.length, 3);
   for (const d of shell.dots) assert.ok(d.x > 0 && d.x + g.dot < shell.width && d.y + g.dot < shell.height);
   const dot = renderDot({diameter: 20});

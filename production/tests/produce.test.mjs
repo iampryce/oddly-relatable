@@ -18,7 +18,7 @@ function storyFile(overrides = {}, scene = {}) {
     schema: 'oddly-relatable/story@1', id: 'tiny', title: 'Tiny', format: {width: 1080, height: 1920, fps: 30},
     endCard: {duration: 1, caption: 'Oddly Relatable'},
     scenes: [{id: 's1', format: 'text-chat', environment: 'living-room-empty-03', cast: [{id: 'him', character: 'character-01'}], reactionCast: 'him',
-      speakers: {her: {side: 'left'}, him: {side: 'right'}},
+      speakers: {her: {side: 'left', style: 'her'}, him: {side: 'right', style: 'him'}},
       events: [{type: 'message', speaker: 'her', text: 'We need to talk.', duration: 1, pose: '02', sfx: 'chime', camera: 'Wide'},
         {type: 'message', speaker: 'him', text: 'Define March.', duration: 1, pose: '03', sfx: 'pop', camera: 'Medium 1.3×'}], ...scene}],
     ...overrides};

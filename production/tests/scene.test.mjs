@@ -53,7 +53,7 @@ test('output folder protection: renderer folder, bible folder and foreign projec
 });
 
 test('the toolkit is generic: a different two-person chat with no character or background compiles', async () => {
-  const ep = {schema: 'oddly-relatable/conversation-episode@1', id: 'generic', speakers: {boss: {side: 'left', style: 'neutral'}, me: {side: 'right'}},
+  const ep = {schema: 'oddly-relatable/conversation-episode@1', id: 'generic', speakers: {boss: {side: 'left', style: 'neutral'}, me: {side: 'right', style: 'him'}},
     events: [{type: 'message', speaker: 'boss', text: 'Quick question.', duration: 2}, {type: 'typing', speaker: 'boss', duration: 2},
       {type: 'message', speaker: 'boss', text: 'Never mind.', duration: 2}, {type: 'message', speaker: 'me', text: 'Cool cool cool.', duration: 2}],
     endCard: {duration: 2, caption: 'Oddly Relatable'}};

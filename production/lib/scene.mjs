@@ -30,7 +30,9 @@ export async function compileProject(input, opts = {}) {
 }
 export const compileEpisode = compileProject;   // AP-78 name, kept for compatibility
 
-export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIssues = false, sourceFile = null, sourceData = story} = {}) {
+// allowSynthetic is for tests only: it lets a scene use a registry marked "synthetic" (a labelled test placeholder).
+// The production run (produce.mjs) never passes it, so a placeholder can never reach a produced episode.
+export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIssues = false, allowSynthetic = false, sourceFile = null, sourceData = story} = {}) {
   validateStory(story);
   if (!outDir) throw new Error('outDir is required');
   const dir = assertWritableOutput(outDir);
@@ -86,7 +88,7 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
   const shots = [], sfx = [], sceneReports = [];
   for (const [i, x] of scenes.entries()) {
     const env = await resolveEnvironment(x.scene.environment, plane, repoRoot);
-    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot});
+    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
     const layers = [...out.world, ...out.screen];
     if (i === 0 && hookLayer) layers.push(hookLayer);
     if (i === scenes.length - 1 && endCard) {
@@ -124,7 +126,8 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
     endCard: endCard && {start: endCard.start, duration: endCard.duration},
     character: diagnostics,
     camera: sceneReports.map(r => ({scene: r.id, ...r.out.camera})),
-    scenes: sceneReports.map(r => ({id: r.id, format: r.format, start: r.start, duration: r.duration, messages: r.seq.messages.length, typing: r.seq.typing.length, cast: Object.keys(r.seq.castPoses)})),
+    scenes: sceneReports.map(r => ({id: r.id, format: r.format, start: r.start, duration: r.duration, messages: r.seq.messages.length, typing: r.seq.typing.length, cast: Object.keys(r.seq.castPoses), ...(r.out.lines ? {lines: r.out.lines} : {})})),
+    ...(diagnostics.some(d => d.synthetic) ? {syntheticPlaceholder: 'This build uses a SYNTHETIC test placeholder registry. It is a technical test only, never artwork, never a production episode.'} : {}),
     checks: {ok: issues.length === 0, issues, warnings},
     storyboardTimes: storyboardTimes(sceneReports, hook, endCard, duration),
   };

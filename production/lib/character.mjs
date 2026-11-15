@@ -6,6 +6,8 @@ import path from 'node:path';
 import {canvas, REPO_ROOT} from './runtime.mjs';
 
 export const PLACEMENT_DEFAULTS = Object.freeze({feetX: 640, feetY: 2070, figureHeight: 880, maxUpscale: 1.7, shadow: true});
+// Directions a pose's artwork can be declared as facing (AP-85 P1). Optional: undeclared poses can only be drawn "native".
+export const POSE_FACINGS = Object.freeze(['left', 'right', 'front']);
 
 export function loadRegistry(file) {
   const reg = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -14,6 +16,14 @@ export function loadRegistry(file) {
     if (typeof p.file !== 'string') throw new Error(`Pose ${id}: "file" is required`);
     if (!p.feet || !Number.isFinite(p.feet.x) || !Number.isFinite(p.feet.y)) throw new Error(`Pose ${id}: feet anchor {x,y} is required`);
     if (!Number.isFinite(p.figureHeight) || p.figureHeight <= 0) throw new Error(`Pose ${id}: figureHeight is required`);
+    if (p.facing !== undefined && !POSE_FACINGS.includes(p.facing)) throw new Error(`Pose ${id}: facing must be one of ${POSE_FACINGS.join(', ')}`);
+    if (p.facingVariants !== undefined) {
+      if (!p.facingVariants || typeof p.facingVariants !== 'object') throw new Error(`Pose ${id}: facingVariants must be {facing: poseId}`);
+      for (const [f, v] of Object.entries(p.facingVariants)) {
+        if (!POSE_FACINGS.includes(f)) throw new Error(`Pose ${id}: facingVariants key "${f}" must be one of ${POSE_FACINGS.join(', ')}`);
+        if (!reg.poses[v]) throw new Error(`Pose ${id}: facingVariants.${f} names unknown pose "${v}"`);
+      }
+    }
   }
   return reg;
 }

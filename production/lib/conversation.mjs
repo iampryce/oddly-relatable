@@ -11,6 +11,7 @@
 // `start` is optional: events run back to back from a cursor. An explicit start may jump forward but never back.
 // A message's `duration` is its beat length (time until the next event); messages stay in the chat afterwards.
 import {assertRenderable} from './text.mjs';
+import {validateBubbleStyle} from './cast.mjs';
 
 export const SFX_KINDS = Object.freeze(['tap', 'paper', 'pop', 'chime', 'jingle']); // renderer's built-in synthesized B1 SFX
 export const TIMING_DEFAULTS = Object.freeze({readingCps: 15, readingLead: 1.0, minMessage: 2.0, maxMessage: 4.5, sfxGain: 0.16});
@@ -35,12 +36,25 @@ function sfxCue(raw, time, timing, where) {
   return {time: +(time + (cue.offset ?? 0)).toFixed(3), kind: cue.kind, gain};
 }
 
-export function validateSpeakers(speakers) {
+// Speakers (AP-85 P1): each speaker's bubble style is either set on the speaker ("style") or taken from the cast member it
+// is linked to ("cast", whose "speech.style" is used). It is never chosen from the side. Returns the resolved speakers.
+export function validateSpeakers(speakers, {cast = []} = {}) {
   if (!speakers || typeof speakers !== 'object' || !Object.keys(speakers).length) throw new Error('speakers: at least one speaker is required');
+  const out = {};
   for (const [id, s] of Object.entries(speakers)) {
-    if (!['left', 'right'].includes(s.side)) throw new Error(`speaker ${id}: side must be "left" or "right"`);
+    if (!s || !['left', 'right'].includes(s.side)) throw new Error(`speaker ${id}: side must be "left" or "right"`);
+    let member = null;
+    if (s.cast !== undefined) {
+      member = (cast || []).find(m => m.id === s.cast);
+      if (!member) throw new Error(`speaker ${id}: cast member "${s.cast}" is not in this scene`);
+    }
+    const linked = member?.speech?.style;
+    if (s.style !== undefined && linked !== undefined && JSON.stringify(s.style) !== JSON.stringify(linked)) throw new Error(`speaker ${id}: style differs from cast member "${s.cast}"'s speech style`);
+    const style = s.style ?? linked;
+    if (style === undefined) throw new Error(`speaker ${id}: no bubble style. Set "style" on the speaker or link it to a cast member ("cast") that has "speech.style"; styles are never chosen from the side`);
+    out[id] = {...s, style: validateBubbleStyle(style, `speaker ${id}`)};
   }
-  return speakers;
+  return out;
 }
 
 // Turn a conversation into an absolute timeline.
@@ -48,7 +62,7 @@ export const TRANSITIONS = Object.freeze(['cut', 'pop', 'crossfade']);
 
 export function sequenceConversation(conv, {defaultCast = 'primary'} = {}) {
   if (!conv || !Array.isArray(conv.events) || !conv.events.length) throw new Error('conversation: events[] is required');
-  const speakers = validateSpeakers(conv.speakers);
+  const speakers = validateSpeakers(conv.speakers, {cast: conv.cast});
   const timing = {...TIMING_DEFAULTS, ...(conv.timing || {})};
   const messages = [], typing = [], poseMarks = [], sfx = [], cameraMarks = [];
   let cursor = 0, lastStart = 0;

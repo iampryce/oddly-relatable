@@ -18,6 +18,7 @@ export function validateStory(story) {
   for (const [i, s] of story.scenes.entries()) {
     if (!s.id || ids.has(s.id)) throw new Error(`scene ${i + 1}: a unique id is required`);
     ids.add(s.id);
+    if (typeof s.format !== 'string' || !s.format) throw new Error(`scene ${s.id}: "format" is required`);
     formatFor(s.format);                       // unknown formats fail here; planned ones fail when compiled
   }
   return story;
@@ -37,8 +38,14 @@ export function episodeToStory(ep) {
     }],
   };
 }
+// The character ID comes from the registry itself; a missing or unreadable registry, or one that does not name its
+// character, is an error (AP-85 P1: no silent fallback to Character 01).
 function characterIdFromRegistry(registry) {
-  try { return JSON.parse(fs.readFileSync(path.resolve(REPO_ROOT, registry), 'utf8')).character || 'character-01'; } catch { return 'character-01'; }
+  if (!registry) throw new Error('episode character: "registry" is required');
+  let reg;
+  try { reg = JSON.parse(fs.readFileSync(path.resolve(REPO_ROOT, registry), 'utf8')); } catch (e) { throw new Error(`episode character: cannot read registry ${registry} (${e.message})`); }
+  if (!reg.character) throw new Error(`episode character: registry ${registry} does not name its character ("character" is required)`);
+  return reg.character;
 }
 
 // Environment by registry ID (preferred) or legacy {file}; returns the file and a world rect covering the frame.

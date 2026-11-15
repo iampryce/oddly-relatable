@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {sequenceConversation, sequenceEpisode, readingTime, TIMING_DEFAULTS} from '../lib/conversation.mjs';
 
-const speakers = {a: {side: 'left'}, b: {side: 'right'}};
+// Styles are explicit (AP-85 P1: never chosen from the side); these are the styles the old side default picked.
+const speakers = {a: {side: 'left', style: 'her'}, b: {side: 'right', style: 'him'}};
 
 test('events run back to back from explicit durations', () => {
   const s = sequenceConversation({speakers, events: [

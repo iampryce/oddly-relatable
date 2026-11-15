@@ -70,9 +70,11 @@ class Path2DLike {
   apply(ctx) { ctx.beginPath(); for (const [op, x, y] of this.ops) ctx[op](x, y); ctx.closePath(); }
 }
 
-// A message bubble PNG. side: 'left' (HER) or 'right' (HIM).
-export function renderBubble({text, side = 'left', style = side === 'left' ? 'her' : 'him', ppu = 1, ...opts}) {
+// A message bubble PNG. side: which way the tail points ('left' or 'right'). style: required, from the speaker's
+// configuration (AP-85 P1); it is never derived from the side.
+export function renderBubble({text, side = 'left', style, ppu = 1, ...opts}) {
   if (!['left', 'right'].includes(side)) throw new Error(`Bubble side must be left or right, got ${side}`);
+  if (style === undefined) throw new Error('Bubble style is required (it comes from the speaker\'s configuration, never from the side)');
   const m = measureBubble(text, opts), o = m.opts, s = styleFor(style);
   const {c, ctx} = surface(m.width, m.height, ppu);
   drawShell(ctx, {bodyWidth: m.bodyWidth, bodyHeight: m.bodyHeight, side, style: s, o});
@@ -92,7 +94,8 @@ export function typingGeometry(opts = {}) {
   const dots = [0, 1, 2].map(i => ({x: o.outline + t.padX + i * (t.dot + t.gap), y: o.outline + t.padY}));
   return {bodyWidth, bodyHeight, width: bodyWidth + o.outline * 2, height: bodyHeight + o.tail + o.drop + o.outline * 2, dots, dot: t.dot, o};
 }
-export function renderTypingShell({side = 'left', style = side === 'left' ? 'her' : 'him', ppu = 1, ...opts}) {
+export function renderTypingShell({side = 'left', style, ppu = 1, ...opts}) {
+  if (style === undefined) throw new Error('Typing indicator style is required (it comes from the speaker\'s configuration, never from the side)');
   const g = typingGeometry(opts), s = styleFor(style);
   const {c, ctx} = surface(g.width, g.height, ppu);
   drawShell(ctx, {bodyWidth: g.bodyWidth, bodyHeight: g.bodyHeight, side, style: s, o: g.o});

@@ -1,4 +1,4 @@
-# Oddly Relatable production toolkit (AP-78, AP-79, AP-82)
+# Oddly Relatable production toolkit (AP-78, AP-79, AP-82, AP-85 P1)
 
 Turns a story, written as structured data, into a project for the existing renderer (`skills/directing-stickman-videos/`), which is **not modified**. The toolkit only produces the renderer's normal `project.json` input and uses its public functions read-only.
 
@@ -57,9 +57,9 @@ node --test production/tests/*.test.mjs
 | Layer | Data | Module |
 |---|---|---|
 | Story | `stories/*.story.json`: title, format, hook, end card, ordered scenes | `lib/story.mjs` (validation, AP-78 episode adapter, environment resolution) |
-| Scene format | each scene names a format; one strategy per format | `lib/formats/` (`text-chat` implemented; `phone-call`, `split-screen`, `face-to-face`, `solo` declared, not implemented) |
+| Scene format | each scene names a format; one strategy per format | `lib/formats/` (`text-chat` and `face-to-face` implemented; `phone-call`, `split-screen`, `solo` declared, not implemented) |
 | Environment | `environments/environments.json` (ID → file, SHA-256) | `lib/story.mjs` |
-| Character / cast | `characters/<character-id>.json` pose registries; a scene's `cast` lists members by character ID with placement, height, `z` and `facing` | `lib/cast.mjs`, `lib/character.mjs` |
+| Character / cast | `characters/<character-id>.json` pose registries; a scene's `cast` lists members by character ID with placement, height, `z`, `facing` and (for members who speak) `speech` | `lib/cast.mjs`, `lib/character.mjs` |
 | Dialogue / audio | scene `speakers` and `events` (messages, typing, pauses, pose changes, built-in SFX cues) | `lib/conversation.mjs` |
 | Camera | per-beat `camera` notes taken from the script | `lib/camera.mjs` |
 | Animation timeline | pose segments per cast member, transitions | `lib/timeline.mjs` |
@@ -136,16 +136,49 @@ Transitions only move, scale or fade existing artwork; no in-between drawings ar
 - **AP-78 files still work:** `oddly-relatable/conversation-episode@1` is converted to a one-scene story.
 - **Units:** renderer design units (the frame is 1280 wide; 1080×1920 output is 1280×2275.6).
 
+### Face-to-face scenes (AP-85 P1)
+
+```jsonc
+{
+  "id": "two-shot", "format": "face-to-face", "environment": "living-room-empty-03",
+  "cast": [
+    {"id": "a", "character": "character-01", "placement": {"feetX": 400, "feetY": 2070, "figureHeight": 800}, "z": 0,
+     "speech": {"style": "him", "side": "left"}},
+    {"id": "b", "character": "character-02", "placement": {"feetX": 880, "feetY": 2070, "figureHeight": 760}, "z": 1,
+     "facing": "left", "speech": {"style": "her", "side": "right"}}
+  ],
+  "lines": [
+    {"speaker": "a", "text": "Wide.", "duration": 1.5, "poses": {"a": "02", "b": "p1"}, "shot": {"camera": "Wide"}},
+    {"speaker": "b", "text": "Single on b.", "duration": 1.5, "pose": "p2", "shot": {"camera": "Medium 1.3×", "focus": "b"}},
+    {"speaker": "b", "text": "Reaction on a.", "duration": 1.5, "poses": {"a": "05"}, "shot": {"camera": "Close", "focus": "a"}}
+  ]
+}
+```
+
+(`character-02` above is illustrative: no Character 02 registry or artwork exists.)
+
+- Every speaker is a cast member with `speech: {style, side}`. Every member needs a pose on the first line; `pose` targets the speaker.
+- Every line has a `shot`. Medium and close shots need a `focus` (a cast member); the pivot is the focus member's head top. Camera moves, shake and drift are refused in this format. Bubbles are screen-space.
+
+### No silent defaults (AP-85 P1)
+
+- **Bubble styles** come from the speaker's configuration (`style`, or the linked cast member's `speech.style` via `"cast"` in text-chat speakers), never from left/right. A speaker with no style is an error.
+- **Characters:** a story scene must name its `format`; a registry must name its `character` and match the member that uses it; an unknown cast member, focus, reaction member or speaker is an error. Nothing falls back to Character 01.
+- **Facing is data.** `native` (the default) uses each pose as drawn. `left`, `right` or `front` resolves each pose to artwork the registry declares as facing that way (the pose's own `facing`, or its `facingVariants`), or fails. Artwork is never mirrored, and `mirror` is refused.
+- **Synthetic registries** (`"synthetic": true`, labelled test placeholders) are refused unless the caller passes `allowSynthetic`, which only tests do. `produce` and the CLI never pass it.
+
 ## Fixtures and evidence
 
 - **`stories/short-001-v2.story.json`:** Short 001. Its dialogue is identical to `fixtures/short-001-v2.conversation.json`, and its camera notes are verbatim from `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (tests enforce both). Character 01 only; pose changes stay hard cuts, because the script specifies none.
 - **`fixtures/synthetic-two-member-cast.story.json`:** **technical test only.** Two independently placed instances of Character 01 exercise the cast model, z-order, every transition and every camera feature. It is not a second character.
+- **`tests/fixtures/ap85-placeholder.mjs`:** **test fixture only.** Writes a labelled synthetic placeholder ("SYNTHETIC / PLACEHOLDER / NOT ARTWORK", blue body, green head) and a `synthetic: true` registry into temporary folders for the AP-85 Track A tests. It is not Character 02, not a design, and can never be produced.
+- **`tests/ap85-track-a.test.mjs`:** AP-85 Track A (composition architecture) checks A-1 to A-10 on scenes A1 to A6. Track A results say nothing about any character's identity (Track B). `evidence/ap85/regression-baseline.json` holds the pre-AP-85 hashes that A-10 compares against.
 - **Evidence:** `evidence/ap78/` and `evidence/ap79/` hold storyboards, previews, layout reports, the AP-78 vs AP-79 comparison and a render summary with a PSNR regression check. All technical evidence only, not production approval.
 
 ## Limitations
 
-- **Formats:** only `text-chat` is implemented. The other formats are declared strategies that fail clearly.
-- **Facing:** only `native` is supported. The B1 renderer cannot mirror images, so mirrored artwork would need separate approval.
+- **Formats:** `text-chat` and `face-to-face` are implemented. The other formats are declared strategies that fail clearly.
+- **Facing:** Character 01's registry declares no facings, so it can only be used `native`. Another facing needs artwork drawn that way (owner decision M7). The B1 renderer cannot mirror images and the engine never mirrors.
 - **Close-up softness:** sheet poses are about 550 px tall, so at 1.5× zoom they are enlarged about 2× on screen (reported as softness warnings).
 - **Crossfade ghosting:** a short dissolve between two different drawings briefly shows both.
 - **Not built:** lip-sync, voices and music. SFX are the renderer's built-in synthesized sounds.

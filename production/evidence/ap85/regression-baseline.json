@@ -1,0 +1,110 @@
+{
+ "note": "AP-85 P1 regression baseline: Short 001 story, the AP-78 conversation fixture and the AP-79 synthetic two-member fixture, compiled at commit 2b480b3e1301cdd4e6f52eb1b9079f700daad78d BEFORE any AP-85 P1 change. Hashes of project.json, layout-report.json and every generated and copied asset; for Short 001 also the renderer-painted frames (RGBA SHA-256) at fixed times. A-10 requires the current build to match exactly.",
+ "baselineCommit": "2b480b3e1301cdd4e6f52eb1b9079f700daad78d",
+ "sources": {
+  "story": "production/stories/short-001-v2.story.json",
+  "ap78-fixture": "production/fixtures/short-001-v2.conversation.json",
+  "synthetic-two-member": "production/fixtures/synthetic-two-member-cast.story.json"
+ },
+ "builds": {
+  "story": {
+   "projectSha256": "d20e73307a7c5602e25ed688f3fa5315ce6984121a6db785014a5efba2154b98",
+   "layoutReportSha256": "02ef09b9891fccacd820558e04c4b85b1894bd7715ed52d675c7496c6d8a48d8",
+   "files": {
+    "assets/gen/endcard-b36f2b8a44f2.png": "b36f2b8a44f2c6a4ea58ae3ae96b9f8ea243e52875e0addd5c1fdcafbb56cddf",
+    "assets/gen/header-e250e27cb713.png": "e250e27cb7136649fd76ccf3b73930977beaca887e5518ccd6f6117dc5c6ca8f",
+    "assets/gen/hook-9365df99adaf.png": "9365df99adaf6ea43e346faad15ed4953313bf86587f854fd2d9248322f89b25",
+    "assets/gen/msg-m1-b7e31a975a26.png": "b7e31a975a2679308f996bb4cb8d22ebf076cd7163f47e382838156f2641a86f",
+    "assets/gen/msg-m10-152809a0ac5b.png": "152809a0ac5bc3a19c6699a41b3aafc7011826a6d350577b89a4204b7acda939",
+    "assets/gen/msg-m11-03e1a661df23.png": "03e1a661df23eef4a11239d5d360d74803146710e2955916aefedb7b0a79e0a6",
+    "assets/gen/msg-m12-98ec9cd44b48.png": "98ec9cd44b484b2902fe9cc6f8dcc935ff64eac532b85044c25f17bef8249941",
+    "assets/gen/msg-m13-90bae27bff8e.png": "90bae27bff8eca59cb11312a799462aeeb32857435728a8a528b016aa1d179aa",
+    "assets/gen/msg-m14-208fd11c7c3c.png": "208fd11c7c3c8b26ed0a4d6ed687ec1d93ab40c1e760f1f000a323b06f86c3a2",
+    "assets/gen/msg-m15-93a57ae37dce.png": "93a57ae37dce4e656035aec1a63063f9ef1fd2329e09172b7f66c1a0f303b6e8",
+    "assets/gen/msg-m16-dbb80d5b9a13.png": "dbb80d5b9a13d0cfcefe58eec6f1b5d677e1342ab29729745515948f145ea868",
+    "assets/gen/msg-m17-db35c93c4bfa.png": "db35c93c4bfa0fda348cc25685ec6b0bfbf11d3488a9a2ba4d6a4f7d7c65357c",
+    "assets/gen/msg-m2-07c2264b5f5a.png": "07c2264b5f5a1c8a68f2b0b42754b6573293906ade8079ff7f8f3202e8e96593",
+    "assets/gen/msg-m3-3572ba6457e3.png": "3572ba6457e34beefa8fa362b5d009910d74b2ea91ddde20c73c0a938d714166",
+    "assets/gen/msg-m4-1c1e234023b7.png": "1c1e234023b7d96033e39a503861f26364ce6f7b7f4ba4dc34a4333cbd4950f7",
+    "assets/gen/msg-m5-c5f009c2de6e.png": "c5f009c2de6e25acc5387f613fb87e5b8cf27bbdffd02d43ee0aae212e37cfee",
+    "assets/gen/msg-m6-881ec4a388f3.png": "881ec4a388f38dde96c0f2eddaf50636109e4fa4b5c1ce89dfa553d53442f1c2",
+    "assets/gen/msg-m7-752d3c864b3a.png": "752d3c864b3a10522109ff68e2cdf8dd6d56d5f8ecd8aff5d93b3ab851867b4e",
+    "assets/gen/msg-m8-9dfb25da52a5.png": "9dfb25da52a53403eb24958216938b240879b9d771e338bdfed7084d45772440",
+    "assets/gen/msg-m9-dcefd09a0ad1.png": "dcefd09a0ad1455b8f02b656e41a9e40ee8aef96b7ae8c203ce2095e54102a8b",
+    "assets/gen/shadow-85bb6a29bbb9.png": "85bb6a29bbb998f75dd4f79f30dde54f2905547d9d0eea5555563a481ac69178",
+    "assets/gen/typing-dot-48652dcc0b06.png": "48652dcc0b068956103d4225254a64cace8e1fb9e72e5dc84b1ad11dcc4d91fc",
+    "assets/gen/typing-left-9d6773997474.png": "9d6773997474b18dd18bfa3cd1bb31cfb0da3fa304a183045b0f0063193236c8",
+    "assets/src/background-lookdev-room-empty-03.png": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70",
+    "assets/src/character-01-pose-02-character-01_pose-02-worried-phone_skin-only_test.png": "ee921285d86a356dfd9e7bb5e316a284384dc54b7f23745738eb046ea5584e26",
+    "assets/src/character-01-pose-03-character-01_pose-03-shocked_skin-only_test.png": "477f8e713d6358fdd1bbc40d56ff258f83f96f252126e33d6e7a82da3c3d963f",
+    "assets/src/character-01-pose-05-character-01_pose-05-pleading_skin-only_test.png": "f2dae957eaf4b28d7cbe71ad49bb3d527a2c607d4f8568c7123feb668324da71",
+    "assets/src/character-01-pose-06-character-01_pose-06-deadpan_skin-only_test.png": "ee9dd2574411c86bb2e325d48937d8b6106d646a079375060f82bd0076b93fd9"
+   },
+   "frames": {
+    "44": "47f421a3ef7da0ea57405e758fecc9e1eec0a0721669c14ef26aac30a6bbd638",
+    "46": "41f50c537617fbd901b3759bb2b5b22ea1a73727e70340542000309a026414ed",
+    "0.5": "6a0bb7b7f1a43fb631a7d9770d28d20361f67e2b86ac8883023bfab70de57673",
+    "3.5": "f2211376de9c79eeb26cf0e499d6cec4c36e7fd2d7ee34173893dc23cce476a8",
+    "9.5": "722afb23c016eeccb75044b6a16c3b6a2ff9d769eea7e23f47dda618fa5c98df",
+    "14.2": "8d82889aed033e77aaab418be908e8cc38aacbe0fcf1d6fd97bd924d24426f9d",
+    "20.5": "ef9d84c7894180c12ac648cd288e8dab3feced28fa053a0389819c377eb0dbe2",
+    "30.6": "e04db6b830d3c146e16e3333855c656c58d0ea5e3fb74e0a894672abb0bb92ed",
+    "52.5": "9137450e16874fd6e789a6384d7ce9acc768cf31e90c1bfd1470186d3b80c237"
+   }
+  },
+  "ap78-fixture": {
+   "projectSha256": "08f0838b5fd73c1ff574187efdc970bc1f2881bbf31969544b27a119fad1f699",
+   "layoutReportSha256": "1d970cafae35e1902263a3b923b20f19cfb4679804354be44044d56aab8daf21",
+   "files": {
+    "assets/gen/endcard-b36f2b8a44f2.png": "b36f2b8a44f2c6a4ea58ae3ae96b9f8ea243e52875e0addd5c1fdcafbb56cddf",
+    "assets/gen/header-e250e27cb713.png": "e250e27cb7136649fd76ccf3b73930977beaca887e5518ccd6f6117dc5c6ca8f",
+    "assets/gen/hook-9365df99adaf.png": "9365df99adaf6ea43e346faad15ed4953313bf86587f854fd2d9248322f89b25",
+    "assets/gen/msg-m1-b7e31a975a26.png": "b7e31a975a2679308f996bb4cb8d22ebf076cd7163f47e382838156f2641a86f",
+    "assets/gen/msg-m10-152809a0ac5b.png": "152809a0ac5bc3a19c6699a41b3aafc7011826a6d350577b89a4204b7acda939",
+    "assets/gen/msg-m11-03e1a661df23.png": "03e1a661df23eef4a11239d5d360d74803146710e2955916aefedb7b0a79e0a6",
+    "assets/gen/msg-m12-98ec9cd44b48.png": "98ec9cd44b484b2902fe9cc6f8dcc935ff64eac532b85044c25f17bef8249941",
+    "assets/gen/msg-m13-90bae27bff8e.png": "90bae27bff8eca59cb11312a799462aeeb32857435728a8a528b016aa1d179aa",
+    "assets/gen/msg-m14-208fd11c7c3c.png": "208fd11c7c3c8b26ed0a4d6ed687ec1d93ab40c1e760f1f000a323b06f86c3a2",
+    "assets/gen/msg-m15-93a57ae37dce.png": "93a57ae37dce4e656035aec1a63063f9ef1fd2329e09172b7f66c1a0f303b6e8",
+    "assets/gen/msg-m16-dbb80d5b9a13.png": "dbb80d5b9a13d0cfcefe58eec6f1b5d677e1342ab29729745515948f145ea868",
+    "assets/gen/msg-m17-db35c93c4bfa.png": "db35c93c4bfa0fda348cc25685ec6b0bfbf11d3488a9a2ba4d6a4f7d7c65357c",
+    "assets/gen/msg-m2-07c2264b5f5a.png": "07c2264b5f5a1c8a68f2b0b42754b6573293906ade8079ff7f8f3202e8e96593",
+    "assets/gen/msg-m3-3572ba6457e3.png": "3572ba6457e34beefa8fa362b5d009910d74b2ea91ddde20c73c0a938d714166",
+    "assets/gen/msg-m4-1c1e234023b7.png": "1c1e234023b7d96033e39a503861f26364ce6f7b7f4ba4dc34a4333cbd4950f7",
+    "assets/gen/msg-m5-c5f009c2de6e.png": "c5f009c2de6e25acc5387f613fb87e5b8cf27bbdffd02d43ee0aae212e37cfee",
+    "assets/gen/msg-m6-881ec4a388f3.png": "881ec4a388f38dde96c0f2eddaf50636109e4fa4b5c1ce89dfa553d53442f1c2",
+    "assets/gen/msg-m7-752d3c864b3a.png": "752d3c864b3a10522109ff68e2cdf8dd6d56d5f8ecd8aff5d93b3ab851867b4e",
+    "assets/gen/msg-m8-9dfb25da52a5.png": "9dfb25da52a53403eb24958216938b240879b9d771e338bdfed7084d45772440",
+    "assets/gen/msg-m9-dcefd09a0ad1.png": "dcefd09a0ad1455b8f02b656e41a9e40ee8aef96b7ae8c203ce2095e54102a8b",
+    "assets/gen/shadow-85bb6a29bbb9.png": "85bb6a29bbb998f75dd4f79f30dde54f2905547d9d0eea5555563a481ac69178",
+    "assets/gen/typing-dot-48652dcc0b06.png": "48652dcc0b068956103d4225254a64cace8e1fb9e72e5dc84b1ad11dcc4d91fc",
+    "assets/gen/typing-left-9d6773997474.png": "9d6773997474b18dd18bfa3cd1bb31cfb0da3fa304a183045b0f0063193236c8",
+    "assets/src/background-lookdev-room-empty-03.png": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70",
+    "assets/src/character-01-pose-02-character-01_pose-02-worried-phone_skin-only_test.png": "ee921285d86a356dfd9e7bb5e316a284384dc54b7f23745738eb046ea5584e26",
+    "assets/src/character-01-pose-03-character-01_pose-03-shocked_skin-only_test.png": "477f8e713d6358fdd1bbc40d56ff258f83f96f252126e33d6e7a82da3c3d963f",
+    "assets/src/character-01-pose-05-character-01_pose-05-pleading_skin-only_test.png": "f2dae957eaf4b28d7cbe71ad49bb3d527a2c607d4f8568c7123feb668324da71",
+    "assets/src/character-01-pose-06-character-01_pose-06-deadpan_skin-only_test.png": "ee9dd2574411c86bb2e325d48937d8b6106d646a079375060f82bd0076b93fd9"
+   }
+  },
+  "synthetic-two-member": {
+   "projectSha256": "782f56bf95cde5825e00fe9fe317fd5ed96ed8cb15bc8fda02757242d6742522",
+   "layoutReportSha256": "50a7555c50a29df72cb5c02b4cc430cc716818149a49c2dcbe7829df02c3ae95",
+   "files": {
+    "assets/gen/endcard-d750fe61509e.png": "d750fe61509e4d1eeb6d2660ba42b03a7c6f2c07f56e30912005409345a9ea51",
+    "assets/gen/header-5039a9ee8054.png": "5039a9ee805403dd0eabf2be459f4bb70b7266c44a7135468ca306ae987dd0af",
+    "assets/gen/msg-m1-1f03b55d9635.png": "1f03b55d96352c14f16d9dd28f35c92776a6055f5d3669c2f49391c992f618fc",
+    "assets/gen/msg-m2-9cc541146097.png": "9cc5411460977807231a909812324a1a17c164e379b888b078f58f477897ef2a",
+    "assets/gen/msg-m3-d8974b04e61f.png": "d8974b04e61fdec0af164f5c1c336374f51d58947c7e7677db92230e0cf391f7",
+    "assets/gen/msg-m4-d3efe4cab628.png": "d3efe4cab628e1a24ef6a5fb2055d33ceea429d386763452cbd08b01a262cdb6",
+    "assets/gen/msg-m5-f1b6bfcb6f20.png": "f1b6bfcb6f207901bd87563fc76e5348c1a1e6f7d98fc83327f72ce07917db05",
+    "assets/gen/shadow-289287c9b11e.png": "289287c9b11e81dce3f6036d2abb8e081a2fe99103a2d01d07ddb1ed262eb343",
+    "assets/gen/shadow-79b9ab3ceb9a.png": "79b9ab3ceb9a174f9401189b47001c95ba4dc7cab3dace867d8d5a58d38ab0ca",
+    "assets/src/background-lookdev-room-empty-03.png": "48ed1ca37146447d4a7d482d7b39314a6c998acc91b9a76db120bd7dcb091e70",
+    "assets/src/character-01-pose-02-character-01_pose-02-worried-phone_skin-only_test.png": "ee921285d86a356dfd9e7bb5e316a284384dc54b7f23745738eb046ea5584e26",
+    "assets/src/character-01-pose-03-character-01_pose-03-shocked_skin-only_test.png": "477f8e713d6358fdd1bbc40d56ff258f83f96f252126e33d6e7a82da3c3d963f",
+    "assets/src/character-01-pose-05-character-01_pose-05-pleading_skin-only_test.png": "f2dae957eaf4b28d7cbe71ad49bb3d527a2c607d4f8568c7123feb668324da71",
+    "assets/src/character-01-pose-06-character-01_pose-06-deadpan_skin-only_test.png": "ee9dd2574411c86bb2e325d48937d8b6106d646a079375060f82bd0076b93fd9"
+   }
+  }
+ }
+}
