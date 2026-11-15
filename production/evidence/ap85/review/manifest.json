@@ -1,0 +1,498 @@
+{
+  "schema": "oddly-relatable/ap85-track-a-review@1",
+  "track": "A (composition architecture only; not identity evidence)",
+  "placeholder": "SYNTHETIC PLACEHOLDER, NOT ARTWORK. Test fixture only; not Character 02.",
+  "generatedFromCommit": "910e877eae3bfff20dfa771dc10945e848555e42",
+  "sceneDefinitions": {
+    "file": "production/tests/ap85-track-a.test.mjs",
+    "sha256": "0ac9cf109a0b583d7db0c017e5ee3d3d69f61bf1fecf3e69f2cb95efb8a89ee7"
+  },
+  "generator": {
+    "file": "production/evidence/ap85/review/generate-review-sheets.mjs",
+    "sha256": "ecf2c0d5d55ddcbef113df5652386479dc609cd2f865f6ada12fd84d1d0823d2"
+  },
+  "ownerAcceptance": "NOT GIVEN. These sheets are for the owner review; nothing here records acceptance.",
+  "scenes": {
+    "A1": {
+      "purpose": "Two-shot. Character 01 left, placeholder right, 8 alternating lines, a pose change on every line.",
+      "times": [
+        0.9,
+        2.4,
+        3.9,
+        5.4,
+        6.9,
+        8.4,
+        9.9,
+        11.4
+      ],
+      "projectSha256": "c9584948040b7c579ba20942e3e9d20953bab522647afb53b311160470455a27",
+      "layoutIssues": [],
+      "sheets": {
+        "A1-annotated.png": "ced6748f6ffe24d1a5ad6f6812d1bfa127f3ef6639da35a79e2fbf8321b44b8d",
+        "A1-clean.png": "c8e69223c10d82304defc932233d6dd52465499d44611b83d16ddd69bc277229"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "c01": [
+            230,
+            1104,
+            520,
+            1746
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "c01": [
+            230,
+            1104,
+            520,
+            1746
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 3.9,
+          "c01": [
+            194,
+            1105,
+            476,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 5.4,
+          "c01": [
+            194,
+            1105,
+            476,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 6.9,
+          "c01": [
+            197,
+            1106,
+            491,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 8.4,
+          "c01": [
+            197,
+            1106,
+            491,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 9.9,
+          "c01": [
+            197,
+            1104,
+            480,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 11.4,
+          "c01": [
+            197,
+            1104,
+            480,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        }
+      ]
+    },
+    "A2": {
+      "purpose": "A1's lines with positions swapped and z order reversed. Speakers and styles must follow the members, not the sides.",
+      "times": [
+        0.9,
+        2.4,
+        3.9,
+        5.4,
+        6.9,
+        8.4,
+        9.9,
+        11.4
+      ],
+      "projectSha256": "49eafa69a3e4a2b7f8525306a3aa2a39f0616fcae990f73ef53feb41da266b74",
+      "layoutIssues": [],
+      "sheets": {
+        "A2-annotated.png": "f30157072c494da904ff6c9aaaf332e3c9a5d7f25de194841567ba4abf6ed4c6",
+        "A2-clean.png": "30a35f9b35b6a5beea5264c7fffb7c444886747b52684269aa262f549d95f704"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            635,
+            1104,
+            925,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            635,
+            1104,
+            925,
+            1746
+          ]
+        },
+        {
+          "t": 3.9,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            599,
+            1105,
+            881,
+            1747
+          ]
+        },
+        {
+          "t": 5.4,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            599,
+            1105,
+            881,
+            1747
+          ]
+        },
+        {
+          "t": 6.9,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            602,
+            1106,
+            897,
+            1747
+          ]
+        },
+        {
+          "t": 8.4,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            602,
+            1106,
+            897,
+            1747
+          ]
+        },
+        {
+          "t": 9.9,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            602,
+            1105,
+            885,
+            1747
+          ]
+        },
+        {
+          "t": 11.4,
+          "ph": [
+            246,
+            1116,
+            456,
+            1746
+          ],
+          "c01": [
+            602,
+            1105,
+            885,
+            1747
+          ]
+        }
+      ]
+    },
+    "A3a": {
+      "purpose": "Overlap: the placeholder (z 1) stands partly IN FRONT of Character 01 (z 0).",
+      "times": [
+        0.9,
+        2.4
+      ],
+      "projectSha256": "f24015ba9e4ff1b343369b74206c31c2dd89cdf15207657b68d162ee08721a73",
+      "layoutIssues": [],
+      "sheets": {
+        "A3a-annotated.png": "faae8701d2895be03005a356df88648ab1fae4f2ed84a8317bd5476192094a3b",
+        "A3a-clean.png": "6f9ea8297065ca8eb1fd7be49245ee840c931f01e2dc97cca45a8bb5cb77a01c"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "c01": [
+            365,
+            1104,
+            655,
+            1746
+          ],
+          "ph": [
+            471,
+            1116,
+            681,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "c01": [
+            365,
+            1104,
+            655,
+            1746
+          ],
+          "ph": [
+            471,
+            1116,
+            681,
+            1746
+          ]
+        }
+      ]
+    },
+    "A3b": {
+      "purpose": "Overlap: the placeholder (z 0) stands partly BEHIND Character 01 (z 1).",
+      "times": [
+        0.9,
+        2.4
+      ],
+      "projectSha256": "c084efb95d845e1779b1e532fc29f15c6357c65d9feb64451365bf904d2bc76a",
+      "layoutIssues": [],
+      "sheets": {
+        "A3b-annotated.png": "3602dc98795c97dc15ac23b1efc5b65aa542f890f8794cc639223043c103cd84",
+        "A3b-clean.png": "64f2bbfdb83e24e6d9314613bf70d9b84e57e8404fc870ff8daf2086f3daf79d"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "ph": [
+            526,
+            1116,
+            681,
+            1746
+          ],
+          "c01": [
+            365,
+            1104,
+            655,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "ph": [
+            526,
+            1116,
+            681,
+            1746
+          ],
+          "c01": [
+            365,
+            1104,
+            655,
+            1746
+          ]
+        }
+      ]
+    },
+    "A4": {
+      "purpose": "Shot sequence: wide, single on placeholder, single on Character 01, reaction on Character 01, reaction on placeholder, wide.",
+      "times": [
+        0.9,
+        2.4,
+        3.9,
+        5.4,
+        6.9,
+        8.4
+      ],
+      "projectSha256": "66dd1d9ab90c79761c193329f7805ed5ff0607ba5b0f27704f5b97621ec0e0fd",
+      "layoutIssues": [],
+      "sheets": {
+        "A4-annotated.png": "c875df056b8a9e2bcb95a29b017907a4661091f9d152bb05871c8a25b564a20b",
+        "A4-clean.png": "fc9b1f32423de36cb7e32631f516e64e8784cc6bf1769468cb81c450454706de"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "c01": [
+            230,
+            1104,
+            520,
+            1746
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "c01": [
+            76,
+            1103,
+            454,
+            1919
+          ],
+          "ph": [
+            588,
+            1119,
+            860,
+            1919
+          ]
+        },
+        {
+          "t": 3.9,
+          "c01": [
+            151,
+            1105,
+            518,
+            1919
+          ],
+          "ph": [
+            709,
+            1119,
+            982,
+            1919
+          ]
+        },
+        {
+          "t": 5.4,
+          "c01": [
+            127,
+            1106,
+            569,
+            1919
+          ],
+          "ph": [
+            766,
+            1121,
+            1079,
+            1919
+          ]
+        },
+        {
+          "t": 6.9,
+          "c01": [
+            0,
+            1104,
+            349,
+            1919
+          ],
+          "ph": [
+            564,
+            1121,
+            878,
+            1919
+          ]
+        },
+        {
+          "t": 8.4,
+          "c01": [
+            197,
+            1104,
+            480,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        }
+      ]
+    }
+  }
+}

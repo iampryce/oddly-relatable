@@ -1,6 +1,6 @@
 # AP-85: multi-character validation plan
 
-**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3). M3 to M8 OPEN; Track B not started.**
+**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3); Track A NOT YET ACCEPTED: the required owner contact-sheet review is pending. M3 to M8 OPEN; Track B not started.**
 - No Character 02 artwork exists or is created by this plan. No existing character asset, registry, story or renderer is changed.
 - No GPU, account, spending, model download or image generation. AP-84B3 and its approved locks are not touched or extended, and AP-84B3 D1-7 remains NOT AUTHORISED.
 - Every phase below needs its own owner approval (§9). Only P0 (M1) and P1 (M2) are approved.
@@ -99,7 +99,7 @@ Character 02 is to be a **genuinely distinct, clearly feminine** character in th
 | A-9 | Determinism | The same story gives a byte-identical render plan twice |
 | A-10 | Regression | Short 001 renders unchanged; all existing suites keep their current results |
 
-**Track A acceptance:** every check A-1 to A-10 passes on scenes A1 to A6. The owner reviews contact sheets of A1 to A4 to confirm the scenes read as intended. This approves the engine only.
+**Track A acceptance requires both:** (1) every check A-1 to A-10 passes on scenes A1 to A6, and (2) the owner reviews the contact sheets of A1 to A4 (A3 in both orders) and confirms the scenes read as intended. The owner review is **required, not optional**; passing checks alone do not accept Track A. Acceptance approves the engine only.
 
 ### 5.3 Phase 1 results (2026-11-15)
 
@@ -120,7 +120,7 @@ Tests: `production/tests/ap85-track-a.test.mjs`, 14 tests, all passing (renderer
 | A-9 | Pass | all (byte-identical plan, report and assets twice) |
 | A-10 | Pass | Short 001, AP-78 fixture, AP-79 fixture byte-identical to the baseline at `2b480b3`; Short 001 renderer frames identical |
 
-Other suites: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity; the owner contact-sheet review of A1 to A4 is still to do.
+Other suites: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity. The required owner contact-sheet review is **pending**; the sheets are in `production/evidence/ap85/review/` (README there lists what to inspect, including how the A4 "focus" pivot frames shots). Track A is not accepted until the owner completes it.
 
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 
