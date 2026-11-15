@@ -1,8 +1,13 @@
 # AP-85 Track A: owner contact-sheet review
 
-**Status: CORRECTED SHEETS AWAITING OWNER REVIEW. Nothing here records acceptance.** Track A acceptance requires both the automated checks A-1 to A-10 **and** the owner's review of these sheets (AP-85 plan §5.2).
+**Status: TRACK A FORMALLY ACCEPTED BY THE OWNER ON 2026-11-15.**
+- **Passed owner review:** A1, A2, A3a, A3b and A4.
+- **Accepted implementation and corrected evidence:** commit `305a50474ee3433af16104294e921631a346a8a4`.
+- **Acceptance record:** commit `310a74762926d809826bc0000c4f4e90cc5e01c1` (AP-85 plan §5.4, `DECISIONS.md`).
+- **Basis:** acceptance required both the automated checks A-1 to A-10 **and** the owner's review of these sheets (AP-85 plan §5.2).
+- **Still open:** Track B has not started, and owner decisions M3 to M8 remain open.
 
-**Track A only.** These sheets show the composition engine: placement, layering, timing, speaker attribution and camera framing. They are **not** identity evidence for any character (that is Track B). The blue body/green head figure is a **SYNTHETIC PLACEHOLDER, NOT ARTWORK**. It is a test fixture, not Character 02 and not a design. No Character 02 artwork exists.
+**Track A only.** These sheets show the composition engine: placement, layering, timing, speaker attribution and camera framing. The acceptance covers this composition architecture only. These sheets are **not** identity evidence for any character (that is Track B). The blue body/green head figure is a **SYNTHETIC PLACEHOLDER, NOT ARTWORK**. It is a test fixture, not Character 02, not production artwork and not a design. No Character 02 artwork exists.
 
 ## Review history
 
@@ -11,7 +16,8 @@
    - A3a and A3b pass the technical layer-order checks.
    - **A2 needs correcting:** after the positions are swapped, each bubble stayed on its original screen side, away from its speaker.
    - **A4 needs correcting:** shots 2 and 3 did not show distinct subjects, shot 5 cut Character 01 at the left edge, and the head-pivot camera did not protect the composition.
-2. **Corrections (this revision).** The engine was corrected (see below). The **A2 and A4** sheets were regenerated. The A1, A3a and A3b sheets were not regenerated: their scenes render byte-identically (`unchanged-check.json`), so their files are unchanged from `e624a91`.
+2. **Corrections (`305a504`).** The engine was corrected (see below). The **A2 and A4** sheets were regenerated. The A1, A3a and A3b sheets were not regenerated: their scenes render byte-identically (`unchanged-check.json`), so their files are unchanged from `e624a91`.
+3. **Owner acceptance (2026-11-15).** After reviewing the original and the corrected sheets, the owner formally accepted Track A. A1, A2, A3a, A3b and A4 passed owner review. This was recorded in commit `310a747`.
 
 ## What changed
 
