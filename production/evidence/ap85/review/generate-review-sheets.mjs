@@ -16,7 +16,8 @@
 //   6. Each scene gets an annotated sheet (outlines, tags, captions) and a clean sheet (same frames, no overlays).
 //
 // Run (needs FFMPEG/FFPROBE, local, $0):  node production/evidence/ap85/review/generate-review-sheets.mjs
-// Existing sheets are never overwritten unless REPLACE=1 is set.
+// SCENES=A2,A4 regenerates only those scenes; the manifest keeps the entries of the others. Existing sheets are never
+// overwritten unless REPLACE=1 is set.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,7 +33,9 @@ const {compileProject} = await imp('production/lib/scene.mjs');
 const {canvas, ensureFonts, FONT, rendererModules} = await imp('production/lib/runtime.mjs');
 
 if (!process.env.FFPROBE) throw new Error('Set FFMPEG and FFPROBE (the renderer needs them to load a project)');
-const SCENE_IDS = ['A1', 'A2', 'A3a', 'A3b', 'A4'];
+const ALL_SCENES = ['A1', 'A2', 'A3a', 'A3b', 'A4'];
+const SCENE_IDS = process.env.SCENES ? process.env.SCENES.split(',') : ALL_SCENES;
+for (const id of SCENE_IDS) if (!ALL_SCENES.includes(id)) throw new Error(`Unknown review scene ${id} (known: ${ALL_SCENES.join(', ')})`);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 const sheetFile = (id, kind) => path.join(HERE, `${id}-${kind}.png`);
 if (process.env.REPLACE !== '1') {
@@ -54,19 +57,19 @@ const SCENES = loadScenes();
 
 const PURPOSE = {
   A1: 'Two-shot. Character 01 left, placeholder right, 8 alternating lines, a pose change on every line.',
-  A2: 'A1\'s lines with positions swapped and z order reversed. Speakers and styles must follow the members, not the sides.',
+  A2: 'A1\'s lines with positions swapped and z order reversed. Styles follow the members; bubbles go on the side where the speaker stands.',
   A3a: 'Overlap: the placeholder (z 1) stands partly IN FRONT of Character 01 (z 0).',
   A3b: 'Overlap: the placeholder (z 0) stands partly BEHIND Character 01 (z 1).',
-  A4: 'Shot sequence: wide, single on placeholder, single on Character 01, reaction on Character 01, reaction on placeholder, wide.',
+  A4: 'Shot sequence: wide, single on placeholder, single on Character 01, reaction single on Character 01, reaction single on placeholder, wide.',
 };
 const INSPECT = {
   A1: ['Each bubble belongs to the member tagged SPEAKING.', 'Character 01 bubbles are style "him" (left); placeholder bubbles are style "neutral" (right).', 'Every line changes the speaker\'s pose; the other member keeps its pose.'],
-  A2: ['Character 01 is now on the RIGHT and in front; the placeholder is on the LEFT, behind, facing right.', 'Bubble styles still follow the speaker ("him" for c01, "neutral" for ph), not the side.', 'Placeholder poses resolve to its right-facing drawings (p1-r, p2-r); nothing is mirrored.'],
+  A2: ['CORRECTED: each bubble now sits on the side where its speaker stands (c01 right, ph left), tail on that side.', 'Bubble styles still come from the speaker ("him" for c01, "neutral" for ph), never from the side.', 'Character 01 is on the RIGHT and in front; the placeholder is on the LEFT, behind, using its right-facing drawings (p1-r, p2-r); nothing is mirrored.'],
   A3a: ['Where the figures overlap, the placeholder is drawn over Character 01.', 'See the overlap detail panel.'],
   A3b: ['Where the figures overlap, Character 01 is drawn over the placeholder.', 'See the overlap detail panel.'],
-  A4: ['"Focus" pins the zoom pivot to that member\'s head: the focus member stays still and the other moves toward the edge. It does NOT re-centre or isolate the focus member.',
-    'Judge whether that framing reads as intended: shots 2 and 3 (medium on ph, medium on c01) look alike, and in shot 5 (close on ph) Character 01 is the larger figure.',
-    'Both members stay identifiable and keep their own scale and position across cuts.'],
+  A4: ['CORRECTED: medium and close shots are composed: the camera pans to centre the focus member (as far as the background allows) and nobody is cut by the frame edge.',
+    'Shots 2 to 5 are declared singles ("single": true): only the focus member is on camera. Shots 2 and 3 now show different members; shot 5 shows only the placeholder.',
+    'Zoom levels are unchanged (medium 1.3x, close 1.5x); positions and relative scale are unchanged. An off-camera speaker\'s bubble sits on the side it stands.'],
 };
 
 // ---------------------------------------------------------------------------------------------- drawing helpers
@@ -102,12 +105,17 @@ function tag(ctx, text, x, y, colour, filled) {
 // ---------------------------------------------------------------------------------------------- per scene
 const {core, render} = await rendererModules();
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: REPO, encoding: 'utf8'}).trim();
+// The engine and scene sources the sheets were made from, by hash (the working tree may hold changes not yet committed).
+const SOURCES = ['production/lib/formats/face-to-face.mjs', 'production/lib/cast.mjs', 'production/tests/ap85-track-a.test.mjs', 'production/evidence/ap85/review/generate-review-sheets.mjs'];
+const sources = Object.fromEntries(SOURCES.map(f => [f, sha(fs.readFileSync(path.join(REPO, f)))]));
+const dirty = execFileSync('git', ['status', '--porcelain', '--', ...SOURCES], {cwd: REPO, encoding: 'utf8'}).trim() !== '';
+const MANIFEST = path.join(HERE, 'manifest.json'), previous = fs.existsSync(MANIFEST) ? JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) : null;
 const manifest = {
   schema: 'oddly-relatable/ap85-track-a-review@1', track: 'A (composition architecture only; not identity evidence)',
   placeholder: 'SYNTHETIC PLACEHOLDER, NOT ARTWORK. Test fixture only; not Character 02.',
-  generatedFromCommit: commit, sceneDefinitions: {file: 'production/tests/ap85-track-a.test.mjs', sha256: sha(testSource)},
-  generator: {file: 'production/evidence/ap85/review/generate-review-sheets.mjs', sha256: sha(fs.readFileSync(fileURLToPath(import.meta.url)))},
-  ownerAcceptance: 'NOT GIVEN. These sheets are for the owner review; nothing here records acceptance.', scenes: {},
+  ownerAcceptance: 'NOT GIVEN. These sheets are for the owner review; nothing here records acceptance.',
+  generator: {file: 'production/evidence/ap85/review/generate-review-sheets.mjs'},
+  scenes: {...(previous?.scenes || {})},
 };
 
 for (const id of SCENE_IDS) {
@@ -159,11 +167,11 @@ for (const id of SCENE_IDS) {
     say(PURPOSE[id], 600, 14);
     say('TRACK A ONLY: composition engine evidence, not character identity evidence (Track B). The blue/green figure is a SYNTHETIC PLACEHOLDER, NOT ARTWORK, not Character 02.', 700, 13, '#ffd34d');
     say(`Cast (back to front):`, 700, 13);
-    for (const m of cast) say(`  ${m.id} · ${m.character}${m.character === PH ? ' (SYNTHETIC PLACEHOLDER, NOT ARTWORK)' : ' (approved Character 01 poses, unchanged)'} · feet (${m.placement.feetX}, ${m.placement.feetY}) · height ${m.placement.figureHeight} · z ${m.z} · facing ${m.facing ?? 'native'} · speech ${fmtStyle(m.speech.style)} / ${m.speech.side}`, 400, 13);
-    say(`Shot sequence: ${shots.map((s, i) => `${i + 1} ${s.note ?? s.camera ?? ''}${s.focus ? ` on ${s.focus}` : ' (no focus)'}`).join('  |  ')}`, 400, 13);
+    for (const m of cast) say(`  ${m.id} · ${m.character}${m.character === PH ? ' (SYNTHETIC PLACEHOLDER, NOT ARTWORK)' : ' (approved Character 01 poses, unchanged)'} · feet (${m.placement.feetX}, ${m.placement.feetY}) · height ${m.placement.figureHeight} · z ${m.z} · facing ${m.facing ?? 'native'} · speech style ${fmtStyle(m.speech.style)}${m.speech.side ? ` · declared side ${m.speech.side}` : ' · bubble side from screen position'}`, 400, 13);
+    say(`Shot sequence: ${shots.map((s, i) => `${i + 1} ${s.note ?? s.camera ?? ''}${s.focus ? ` on ${s.focus}` : ' (no focus)'}${s.single ? ' single' : ''}`).join('  |  ')}`, 400, 13);
     say('Owner: inspect', 700, 13);
     for (const t of INSPECT[id]) say(`  • ${t}`, 400, 13);
-    say(`Commit ${commit.slice(0, 12)} · scenes from production/tests/ap85-track-a.test.mjs · renderer frames at 1080×1920 shown at 1/3 · outline boxes come from each member's painted pixels`, 400, 12, '#9aa6bd');
+    say(`Base commit ${commit.slice(0, 12)}${dirty ? ' + engine changes (hashes in manifest.json)' : ''} · scenes from production/tests/ap85-track-a.test.mjs · renderer frames at 1080×1920 shown at 1/3 · outline boxes come from each member's painted pixels`, 400, 12, '#9aa6bd');
 
     const place = k => ({x: PAD + (k % COLS) * (TW + PAD), y: HEAD + Math.floor(k / COLS) * (TH + CAP + PAD)});
     for (const [k, r] of rendered.entries()) {
@@ -187,11 +195,11 @@ for (const id of SCENE_IDS) {
       const cy = TH + 6, pose = m => segs.find(sg => sg.cast === m.id && r.t >= sg.from && r.t < sg.to);
       const cap = [
         [`Line ${r.index + 1}/${lines.length} · t = ${r.t.toFixed(2)} s`, 700, '#ffffff'],
-        [`Speaker: ${r.line.speaker} · bubble "${fmtStyle(r.line.style)}", ${r.line.side}`, 600, COL[r.line.speaker] ?? '#ffffff'],
+        [`Speaker: ${r.line.speaker}${r.line.speakerOnScreen === false ? ' (off camera)' : ''} · bubble "${fmtStyle(r.line.style)}", ${r.line.side}`, 600, COL[r.line.speaker] ?? '#ffffff'],
         [`"${scene.lines[r.index].text}"`, 400, '#dfe5f0'],
-        [`Shot ${shots.indexOf(shot) + 1}: ${shot.note ?? r.line.shot.camera} · ${shot.focus ? `focus ${shot.focus}` : 'no focus (both)'} · zoom ${shot.zoom}`, 400, '#dfe5f0'],
+        [`Shot ${shots.indexOf(shot) + 1}: ${shot.note ?? r.line.shot.camera}${shot.single ? ' single' : ''} · ${shot.focus ? `focus ${shot.focus}` : 'no focus (all)'} · zoom ${shot.zoom}`, 400, '#dfe5f0'],
         [`Poses: ${cast.map(m => { const p = pose(m); return p ? `${m.id} ${p.requestedPose}${p.pose !== p.requestedPose ? ` (drawn as ${p.pose})` : ''}` : `${m.id} –`; }).join(' · ')}`, 400, '#dfe5f0'],
-        [`Back to front: ${cast.map(m => m.id).join(', ')}${cast.filter(m => !r.boxes[m.id]).map(m => ` · ${m.id} not in frame`).join('')}`, 400, '#dfe5f0'],
+        [`Back to front: ${cast.map(m => m.id).join(', ')}${cast.filter(m => !r.boxes[m.id]).map(m => ` · ${m.id} ${shot.hidden?.includes(m.id) ? 'off camera (single)' : 'not in frame'}`).join('')}`, 400, '#dfe5f0'],
       ];
       cap.forEach(([text, w, c], i) => { ctx.font = font(w, 12.5); ctx.fillStyle = c; ctx.fillText(text, 0, cy + i * 20, TW); });
       ctx.restore();
@@ -210,6 +218,7 @@ for (const id of SCENE_IDS) {
     fs.writeFileSync(sheetFile(id, kind), sheet.toBuffer('image/png'));
   }
   manifest.scenes[id] = {
+    generatedFrom: {baseCommit: commit, uncommittedEngineChanges: dirty, sources},
     purpose: PURPOSE[id], times: rendered.map(r => r.t),
     projectSha256: sha(fs.readFileSync(built.projectFile)), layoutIssues: report.checks?.issues ?? null,
     sheets: Object.fromEntries(['annotated', 'clean'].map(k => [path.basename(sheetFile(id, k)), sha(fs.readFileSync(sheetFile(id, k)))])),
@@ -217,5 +226,8 @@ for (const id of SCENE_IDS) {
   };
   console.log(`${id}: ${rendered.length} frames${detail ? ' + overlap detail' : ''}`);
 }
-fs.writeFileSync(path.join(HERE, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+// Entries carried over from an earlier manifest keep their own provenance; older entries recorded it at the top level.
+for (const [id, e] of Object.entries(manifest.scenes)) if (!e.generatedFrom && previous?.generatedFromCommit) e.generatedFrom = {commit: previous.generatedFromCommit, sceneDefinitions: previous.sceneDefinitions, generator: previous.generator};
+manifest.scenes = Object.fromEntries(ALL_SCENES.filter(id => manifest.scenes[id]).map(id => [id, manifest.scenes[id]]));
+fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + '\n');
 console.log('written', path.relative(REPO, HERE));

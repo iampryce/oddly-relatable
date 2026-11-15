@@ -1,0 +1,54 @@
+{
+  "purpose": "Shows that the owner-review corrections (A2 bubble side, A4 framing) leave A1, A3a, A3b, A5 and A6 unchanged.",
+  "method": "fingerprint-frames.mjs: each scene compiled by the production pipeline with the test-only placeholder; sha256 of project.json, of every generated asset, and of renderer frames painted every 0.1 s by the unmodified renderer.",
+  "before": "commit e624a91 (code and scene definitions as reviewed by the owner)",
+  "after": "this commit (corrected engine; scene definitions without fixed bubble sides)",
+  "scenes": {
+    "A1": {
+      "projectSha256": "c9584948040b7c579ba20942e3e9d20953bab522647afb53b311160470455a27",
+      "assetsSha256": "3e634e5a6777e2ac0901b83682df088da5b8c0618b56885986f810bedc9dbbab",
+      "frames": 130,
+      "framesSha256": "2fae1e61b75586ec07882f63736328da5742c32cd6906ad13edf3c4e6f520098",
+      "projectIdentical": true,
+      "assetsIdentical": true,
+      "framesIdentical": true
+    },
+    "A3a": {
+      "projectSha256": "f24015ba9e4ff1b343369b74206c31c2dd89cdf15207657b68d162ee08721a73",
+      "assetsSha256": "7e36768dc7f7b725f73c57ffb67ed16b3c7fcb921e4c11cf76bb9dab61811b19",
+      "frames": 40,
+      "framesSha256": "cea4f4b70b73262c2f3ef6d021de277063018779da6bb0debac7a680406e82f3",
+      "projectIdentical": true,
+      "assetsIdentical": true,
+      "framesIdentical": true
+    },
+    "A3b": {
+      "projectSha256": "c084efb95d845e1779b1e532fc29f15c6357c65d9feb64451365bf904d2bc76a",
+      "assetsSha256": "99eb65d893af84092225de162067b7c5b514258af5d1395a1e14fc9215355a4a",
+      "frames": 40,
+      "framesSha256": "6b33b5cb2d0a6ac06b14249353cdd3ebb8d2cbb4de290740dc7368bb456771c1",
+      "projectIdentical": true,
+      "assetsIdentical": true,
+      "framesIdentical": true
+    },
+    "A5": {
+      "projectSha256": "e6cd1fcd74eb40b1dcf1439cd729ede8da0070c18204998812e03187af8ebb67",
+      "assetsSha256": "a4cf28354adb85096d70fd4cae97429ecfdd28c9a2be2cb50c0ae956dbecee88",
+      "frames": 40,
+      "framesSha256": "e149443452d07d20941a7b46318a742a109d4c68bf3b76ffe6c1c111eae65ef8",
+      "projectIdentical": true,
+      "assetsIdentical": true,
+      "framesIdentical": true
+    },
+    "A6": {
+      "projectSha256": "8b17d39c3716edb130c0184027b5fefc73788636113a1569bbf7d18c766bc025",
+      "assetsSha256": "e16223055843d69d9e3de6635b27a0ba962a8c7b823b8fa4d73a80b0ba2a809b",
+      "frames": 55,
+      "framesSha256": "54bb1a94d2bd0315a5d6f4711111e9944112548fb3df2ee45e32612f78961422",
+      "projectIdentical": true,
+      "assetsIdentical": true,
+      "framesIdentical": true
+    }
+  },
+  "sheets": "A1, A3a and A3b review sheets were not regenerated; their files are byte-identical to commit e624a91."
+}

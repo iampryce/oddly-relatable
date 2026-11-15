@@ -9,7 +9,8 @@
 //     Artwork is never mirrored: the renderer cannot mirror, and mirroring an asymmetric design changes the character.
 //   - A registry marked "synthetic" (a labelled test placeholder) is refused unless the caller passes allowSynthetic,
 //     which only tests do. Production runs never pass it, so a placeholder can never reach a produced episode.
-//   - A member that speaks carries its own speech configuration ({style, side}); styling never comes from the side.
+//   - A member that speaks carries its own speech configuration ({style, side?}); styling never comes from the side.
+//     The face-to-face format places each bubble where its speaker stands; a declared side is checked against that.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -46,9 +47,9 @@ export function validateCast(cast) {
     if (m.facing !== undefined && !FACINGS.includes(m.facing)) throw new Error(`${where} (${m.id}): facing "${m.facing}" is not one of ${FACINGS.join(', ')}`);
     if (m.z !== undefined && !Number.isFinite(m.z)) throw new Error(`${where} (${m.id}): z must be a number`);
     if (m.speech !== undefined) {
-      if (!m.speech || typeof m.speech !== 'object') throw new Error(`${where} (${m.id}): speech must be {style, side}`);
+      if (!m.speech || typeof m.speech !== 'object') throw new Error(`${where} (${m.id}): speech must be {style, side?}`);
       validateBubbleStyle(m.speech.style, `${where} (${m.id}) speech`);
-      if (!['left', 'right'].includes(m.speech.side)) throw new Error(`${where} (${m.id}) speech: side must be "left" or "right"`);
+      if (m.speech.side !== undefined && !['left', 'right'].includes(m.speech.side)) throw new Error(`${where} (${m.id}) speech: side must be "left" or "right"`);
     }
   }
   return cast;

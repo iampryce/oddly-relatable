@@ -21,6 +21,7 @@ import {loadRegistry, poseInfo} from '../lib/character.mjs';
 import {renderBubble, renderTypingShell, BUBBLE_DEFAULTS} from '../lib/graphics.mjs';
 import {BUBBLE_STYLES} from '../lib/palette.mjs';
 import {FORMATS} from '../lib/formats/index.mjs';
+import {FACE_TO_FACE_DEFAULTS} from '../lib/formats/face-to-face.mjs';
 import {canvas, PRODUCTION_ROOT, REPO_ROOT, rendererModules} from '../lib/runtime.mjs';
 import {writePlaceholder, PLACEHOLDER_CHARACTER, PLACEHOLDER_COLOURS} from './fixtures/ap85-placeholder.mjs';
 
@@ -33,9 +34,9 @@ const C01 = 'character-01', PH = PLACEHOLDER_CHARACTER;
 const EVIDENCE = path.join(PRODUCTION_ROOT, 'evidence', 'ap85', 'regression-baseline.json');
 
 // ---------------------------------------------------------------------------------------------------- scenes
-const c01 = (o = {}) => ({id: 'c01', character: C01, placement: {feetX: o.x ?? 400, feetY: o.feetY ?? 2070, figureHeight: o.h ?? 760}, z: o.z ?? 0, speech: {style: 'him', side: 'left'}, ...(o.facing ? {facing: o.facing} : {})});
+const c01 = (o = {}) => ({id: 'c01', character: C01, placement: {feetX: o.x ?? 400, feetY: o.feetY ?? 2070, figureHeight: o.h ?? 760}, z: o.z ?? 0, speech: {style: 'him', ...(o.side ? {side: o.side} : {})}, ...(o.facing ? {facing: o.facing} : {})});
 const ph = (o = {}) => ({id: o.id ?? 'ph', character: PH, registry: o.registry ?? PH_REG, placement: {feetX: o.x ?? 880, feetY: o.feetY ?? 2070, figureHeight: o.h ?? 760}, z: o.z ?? 1,
-  speech: {style: o.style ?? 'neutral', side: o.side ?? 'right'}, ...(o.facing ? {facing: o.facing} : {})});
+  speech: {style: o.style ?? 'neutral', ...(o.side ? {side: o.side} : {})}, ...(o.facing ? {facing: o.facing} : {})});
 const story = (id, cast, lines, extra = {}) => ({schema: 'oddly-relatable/story@1', id, endCard: {duration: 1, caption: 'Technical test'},
   scenes: [{id, format: 'face-to-face', environment: 'living-room-empty-03', cast, lines, ...extra}]});
 const W = c => ({camera: c ?? 'Wide'});
@@ -59,10 +60,10 @@ const SCENES = {
     {speaker: 'c01', text: 'In front.', duration: 1.5, poses: {c01: '02', ph: 'p1'}, shot: W()}, {speaker: 'ph', text: 'Behind.', duration: 1.5, shot: W()}]),
   A4: () => story('a4-shots', [c01(), ph({facing: 'left'})], [
     {speaker: 'c01', text: 'Wide.', duration: 1.5, poses: {c01: '02', ph: 'p1'}, shot: W()},
-    {speaker: 'ph', text: 'Single on the placeholder.', duration: 1.5, pose: 'p2', shot: {camera: 'Medium 1.3x', focus: 'ph'}},
-    {speaker: 'c01', text: 'Single on Character 01.', duration: 1.5, pose: '03', shot: {camera: 'Medium 1.3x', focus: 'c01'}},
-    {speaker: 'ph', text: 'Reaction on Character 01.', duration: 1.5, poses: {c01: '05', ph: 'p1'}, shot: {camera: 'Close', focus: 'c01'}},
-    {speaker: 'c01', text: 'Reaction on the placeholder.', duration: 1.5, poses: {c01: '06', ph: 'p2'}, shot: {camera: 'Close', focus: 'ph'}},
+    {speaker: 'ph', text: 'Single on the placeholder.', duration: 1.5, pose: 'p2', shot: {camera: 'Medium 1.3x', focus: 'ph', single: true}},
+    {speaker: 'c01', text: 'Single on Character 01.', duration: 1.5, pose: '03', shot: {camera: 'Medium 1.3x', focus: 'c01', single: true}},
+    {speaker: 'ph', text: 'Reaction on Character 01.', duration: 1.5, poses: {c01: '05', ph: 'p1'}, shot: {camera: 'Close', focus: 'c01', single: true}},
+    {speaker: 'c01', text: 'Reaction on the placeholder.', duration: 1.5, poses: {c01: '06', ph: 'p2'}, shot: {camera: 'Close', focus: 'ph', single: true}},
     {speaker: 'ph', text: 'Wide again.', duration: 1.5, shot: W()},
   ]),
   A5: () => story('a5-depth', [c01({x: 480, z: 1}), ph({x: 840, feetY: 1950, h: 600, z: 0})], [
@@ -198,10 +199,12 @@ function contribution(full, without) { const m = []; for (let i = 0; i < full.d.
 const STRONG = 60;
 const change = (full, without, i) => Math.max(Math.abs(full.d[i] - without.d[i]), Math.abs(full.d[i + 1] - without.d[i + 1]), Math.abs(full.d[i + 2] - without.d[i + 2]));
 // Where a member SHOULD be at time t, worked out from the scene's own declarations only (never from the render plan):
-// the declared placement, the pose the lines declare at t, and the declared shot's camera. Output pixels.
+// the declared placement, the pose the lines declare at t, and the declared shot's camera. Output pixels. Medium and
+// close shots are composed (pan within the background), so their pivot is taken from the report; the composition rules
+// are verified independently of this in A-7 and in the review-correction tests.
 const ZOOM = {wide: 1, medium: 1.3, close: 1.5};
 const zoomOf = cam => { const n = cam.toLowerCase(), m = n.match(/medium ([\d.]+)/); return m ? +m[1] : ZOOM[n.split(/[\s,]/)[0]]; };
-async function declaredRect(scene, memberId, t, plane, ppu) {
+async function declaredRect(scene, memberId, t, plane, ppu, report) {
   const m = scene.cast.find(c => c.id === memberId);
   let cursor = 0, pose = null, shot = null, zoom = 1;
   for (const l of scene.lines) {
@@ -214,8 +217,8 @@ async function declaredRect(scene, memberId, t, plane, ppu) {
   }
   const reg = loadRegistry(m.registry ?? path.join(PRODUCTION_ROOT, 'characters', `${m.character}.json`)), info = await poseInfo(reg, pose, REPO_ROOT);
   const k = m.placement.figureHeight / info.figureHeight, world = {x: m.placement.feetX - info.feet.x * k, y: m.placement.feetY - info.feet.y * k, w: info.width * k, h: info.height * k};
-  const f = shot.focus ? scene.cast.find(c => c.id === shot.focus) : null;
-  const pivot = f ? {x: f.placement.feetX, y: f.placement.feetY - f.placement.figureHeight} : {x: plane.width / 2, y: plane.height / 2};
+  const rs = shotsOf(report).find(x => t >= x.start - 1e-9 && t < x.end - 1e-9) ?? shotsOf(report).at(-1);
+  const pivot = shot.zoom > 1 ? rs.pivot : {x: plane.width / 2, y: plane.height / 2};
   const sx = v => ((v - pivot.x) * shot.zoom + pivot.x) * ppu, sy = v => ((v - pivot.y) * shot.zoom + pivot.y) * ppu;
   return {x0: sx(world.x), y0: sy(world.y), x1: sx(world.x + world.w), y1: sy(world.y + world.h)};
 }
@@ -226,6 +229,18 @@ const sampleTimes = (report, until) => {
   return [...t].sort((a, b) => a - b);
 };
 
+// True when pixel i of the full frame is an anti-aliased edge of one of the given flat colours over what lies behind it
+// (the frame without that member): full = a*colour + (1-a)*behind for some a in [0, 1], within a few levels. Such a pixel
+// is that member's own edge, even when the mix happens to resemble another character's colour (e.g. blue over the rust rug
+// looks like a shoe brown).
+function blendOf(full, behind, i, colours, tol = 6) {
+  const f = [full.d[i], full.d[i + 1], full.d[i + 2]], g = [behind.d[i], behind.d[i + 1], behind.d[i + 2]];
+  return colours.some(c => {
+    const d = c.map((v, k) => v - g[k]), dd = d.reduce((a, v) => a + v * v, 0);
+    const a = Math.min(1, Math.max(0, dd ? d.reduce((s, v, k) => s + v * (f[k] - g[k]), 0) / dd : 0));
+    return f.every((v, k) => Math.abs(v - (g[k] + a * d[k])) <= tol);
+  });
+}
 // Identity separation in rendered frames for a Character 01 + placeholder scene. Returns counts for assertions.
 // Each artwork's pixels are found by removing that artwork's layers; they must show only that artwork's colours and lie
 // inside the rectangle the SCENE declares for that member. A swap therefore shows up as pixels outside their rectangle.
@@ -240,11 +255,11 @@ async function separation(b, scene) {
     const shot = shotsOf(b.report).find(s => t >= s.start && t < s.end) || shotsOf(b.report).at(-1);
     for (const [id, c] of [['c01', cC01], ['ph', cPH]]) if (!c.length && (shot.focus === null || shot.focus === id)) result.emptyFramed.push(`${id}@${t}`);
     for (const i of cC01) if (change(full, wC01, i) > STRONG && PH_SIGNATURE.some(col => near(full.d, i, col, 40))) result.foreignInC01++;
-    for (const i of cPH) if (change(full, wPH, i) > STRONG && C01_SIGNATURE.some(col => near(full.d, i, col, 20))) result.foreignInPH++;
+    for (const i of cPH) if (change(full, wPH, i) > STRONG && C01_SIGNATURE.some(col => near(full.d, i, col, 20)) && !blendOf(full, wPH, i, PH_SIGNATURE)) result.foreignInPH++;
     result.strongC01 = (result.strongC01 || 0) + cC01.filter(i => change(full, wC01, i) > STRONG).length;
     result.strongPH = (result.strongPH || 0) + cPH.filter(i => change(full, wPH, i) > STRONG).length;
     for (const [id, c, key] of [['c01', cC01, 'outsideC01'], ['ph', cPH, 'outsidePH']]) {
-      const r = await declaredRect(scene, id, t, plane, ppu);
+      const r = await declaredRect(scene, id, t, plane, ppu, b.report);
       for (const i of c) { const p = i / 4, x = p % full.w, y = Math.floor(p / full.w); if (x < r.x0 - 3 || x > r.x1 + 3 || y < r.y0 - 3 || y > r.y1 + 3) result[key]++; }
     }
     result.times++;
@@ -293,28 +308,89 @@ test('A-5 sensitivity: a deliberately swapped render plan is caught', needsRende
 });
 
 // ---------------------------------------------------------------------------------------------------- A-6
-test('A-6 speaker attribution: each line is spoken by its cast member; style and side come from that member\'s speech configuration, not from position', async () => {
+// Screen geometry of every member at time t, read from the render plan's own keys: null when the member has no layer
+// on screen at t (off camera in a single). Design units (the 1280-wide plane).
+async function framedAt(b, cast, t) {
+  const by = await layersByMember(b.project, b.report, cast), out = {};
+  for (const m of cast) {
+    const cur = by[m.id].find(({layer}) => t >= layer.from && t < layer.to);
+    if (!cur) { out[m.id] = null; continue; }
+    const key = cur.layer.keys.reduce((a, k) => (k.t <= t + 1e-6 ? k : a)), k = key.w / cur.info.width;
+    out[m.id] = {x0: key.x, x1: key.x + key.w, feetX: key.x + cur.info.feet.x * k, top: key.y + (cur.info.feet.y - cur.info.figureHeight) * k};
+  }
+  return out;
+}
+// The framing rules of the owner review, checked on what is actually drawn.
+function assertFraming(fr, shot, where, W = 1280) {
+  const centre = c => (c.x0 + c.x1) / 2;
+  const cut = c => c.x1 > 1 && c.x0 < W - 1 && (c.x0 < -1 || c.x1 > W + 1);
+  for (const [id, c] of Object.entries(fr)) if (c) assert.ok(!cut(c), `${where}: ${id} is cut by the frame edge (${c.x0.toFixed(1)}..${c.x1.toFixed(1)})`);
+  if (shot.zoom <= 1) return;
+  const f = fr[shot.focus];
+  assert.ok(f && f.x0 >= -1 && f.x1 <= W + 1, `${where}: the focus member ${shot.focus} is fully in frame`);
+  for (const [id, c] of Object.entries(fr)) {
+    if (id === shot.focus) continue;
+    if (shot.single) { assert.equal(c, null, `${where}: single, so ${id} is off camera`); continue; }
+    if (!c || c.x1 <= 1 || c.x0 >= W - 1) continue;                 // fully out of frame
+    assert.ok(Math.abs(centre(f) - W / 2) + 0.1 * W <= Math.abs(centre(c) - W / 2) + 1, `${where}: ${shot.focus} is clearly more central than ${id}`);
+  }
+}
+// Which way a bubble's tail points: the mean x of the tail's own pixels (rows below the body and its drop shadow).
+async function tailSide(file, ppu) {
+  const img = await canvas.loadImage(file), c = canvas.createCanvas(img.width, img.height), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+  const o = BUBBLE_DEFAULTS, H = img.height / ppu, y0 = Math.ceil((H - o.tail - o.outline + 2) * ppu), y1 = Math.floor((H - o.drop - o.outline - 1) * ppu);
+  const d = ctx.getImageData(0, y0, img.width, y1 - y0).data; let sx = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128) { sx += (i / 4) % img.width; n++; }
+  assert.ok(n > 10, `${path.basename(file)}: the tail is drawn`);
+  return sx / n < img.width / 2 ? 'left' : 'right';
+}
+// Bubble placement rules of the owner review: each bubble is on the side where its speaker stands in that line's shot,
+// its tail points that way, and its style is the speaker's own.
+async function assertBubbles(b, cast, where) {
+  const ppu = b.project.width / 1280, shots = shotsOf(b.report);
+  for (const l of b.report.scenes[0].lines) {
+    const t = +(l.start + 0.01).toFixed(4), fr = await framedAt(b, cast, t), m = cast.find(c => c.id === l.speaker);
+    const shot = shots.find(x => t >= x.start - 1e-9 && t < x.end - 1e-9);
+    // Off camera (a single on someone else): where its feet would be through this shot's camera.
+    const x = fr[m.id] ? fr[m.id].feetX : (m.placement.feetX - shot.pivot.x) * shot.zoom + shot.pivot.x;
+    const side = x < 640 ? 'left' : 'right';
+    assert.equal(l.side, side, `${where} line ${l.id}: bubble on the speaker's side (${l.speaker} at x ${x.toFixed(0)})`);
+    assert.equal(JSON.stringify(l.style), JSON.stringify(m.speech.style), `${where} line ${l.id}: style from the speaker's configuration`);
+    const layer = b.project.shots[0].layers.find(y => y.path.includes(`/line-${l.id}-`));
+    if (side === 'left') assert.equal(layer.x, FACE_TO_FACE_DEFAULTS.marginX, `${where} line ${l.id}: left bubble at the left margin`);
+    else assert.ok(Math.abs(layer.x + layer.w - (1280 - FACE_TO_FACE_DEFAULTS.marginX)) < 0.6, `${where} line ${l.id}: right bubble at the right margin`);
+    assert.equal(await tailSide(path.join(b.dir, layer.path), ppu), side, `${where} line ${l.id}: the tail points to the speaker's side`);
+  }
+}
+
+test('A-6 speaker attribution: each line is spoken by its cast member; style comes from that member, and the bubble sits on the side where the speaker stands (original and swapped positions)', async () => {
   const a1 = await build(SCENES.A1()), a2 = await build(SCENES.A2());
   const expected = DIALOGUE().map(l => l.speaker);
-  for (const b of [a1, a2]) {
+  for (const [name, b] of [['A1', a1], ['A2', a2]]) {
     const lines = b.report.scenes[0].lines;
     assert.deepEqual(lines.map(l => l.speaker), expected);
-    for (const l of lines) {
-      const m = (l.speaker === 'c01' ? c01() : ph());
-      assert.deepEqual([l.character, l.style, l.side], [m.character, m.speech.style, m.speech.side], `line ${l.id}`);
-    }
+    for (const l of lines) assert.deepEqual([l.character, l.style], l.speaker === 'c01' ? [C01, 'him'] : [PH, 'neutral'], `${name} line ${l.id}`);
+    await assertBubbles(b, (name === 'A1' ? SCENES.A1() : SCENES.A2()).scenes[0].cast, name);
   }
-  assert.deepEqual(a1.report.scenes[0].lines.map(l => [l.style, l.side]), a2.report.scenes[0].lines.map(l => [l.style, l.side]), 'swapping positions does not change styling');
+  // Original positions: Character 01 left, placeholder right. Swapped: the bubbles swap with them; the styles do not.
+  assert.deepEqual(a1.report.scenes[0].lines.map(l => [l.speaker, l.side]), expected.map(id => [id, id === 'c01' ? 'left' : 'right']));
+  assert.deepEqual(a2.report.scenes[0].lines.map(l => [l.speaker, l.side]), expected.map(id => [id, id === 'c01' ? 'right' : 'left']));
+  assert.deepEqual(a1.report.scenes[0].lines.map(l => l.style), a2.report.scenes[0].lines.map(l => l.style), 'swapping positions does not change styling');
   // The drawn bubble's fill is the speaker's style.
   const ppu = a1.project.width / 1280;
-  for (const l of a1.report.scenes[0].lines) {
-    const layer = a1.project.shots[0].layers.find(x => x.path.includes(`/line-${l.id}-`));
-    const img = await canvas.loadImage(path.join(a1.dir, layer.path)), c = canvas.createCanvas(img.width, img.height), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+  for (const b of [a1, a2]) for (const l of b.report.scenes[0].lines) {
+    const layer = b.project.shots[0].layers.find(x => x.path.includes(`/line-${l.id}-`));
+    const img = await canvas.loadImage(path.join(b.dir, layer.path)), c = canvas.createCanvas(img.width, img.height), ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
     const px = ctx.getImageData(Math.round(img.width / 2), Math.round((BUBBLE_DEFAULTS.outline + 4) * ppu), 1, 1).data;
     const fill = BUBBLE_STYLES[l.style].fill.match(/[0-9a-f]{2}/gi).map(h => parseInt(h, 16));
     assert.ok(fill.every((v, i) => Math.abs(px[i] - v) <= 3), `bubble ${l.id} is drawn in the ${l.style} style`);
   }
-  // Text chat: a speaker linked to a cast member takes that member's style, whatever side it is on.
+  // A declared side is a constraint, never a silent override: it holds where it agrees and fails where it does not.
+  const agreeing = SCENES.A1(); agreeing.scenes[0].cast[0].speech.side = 'left'; agreeing.scenes[0].cast[1].speech.side = 'right';
+  assert.equal(sha(fs.readFileSync((await build(agreeing)).projectFile)), sha(fs.readFileSync(a1.projectFile)), 'a declared side that agrees changes nothing');
+  const contradicting = SCENES.A2(); contradicting.scenes[0].cast.find(c => c.id === 'c01').speech.side = 'left';
+  await assert.rejects(build(contradicting), /line 1: speaker "c01" stands on the right of the frame, but its speech\.side is "left"/);
+  // Text chat is unchanged: a speaker linked to a cast member takes that member's style, on the speaker's own side.
   const chat = {schema: 'oddly-relatable/story@1', id: 'chat-linked', endCard: {duration: 1, caption: 'Technical test'}, scenes: [{id: 'chat', format: 'text-chat', environment: 'living-room-empty-03',
     cast: [{...c01(), speech: {style: 'him', side: 'right'}}], reactionCast: 'c01', speakers: {me: {side: 'left', cast: 'c01'}, them: {side: 'right', style: 'neutral'}},
     events: [{type: 'message', speaker: 'me', text: 'Linked to the cast member.', duration: 2, pose: '02'}, {type: 'message', speaker: 'them', text: 'Explicit style.', duration: 2}]}]};
@@ -323,23 +399,85 @@ test('A-6 speaker attribution: each line is spoken by its cast member; style and
 });
 
 // ---------------------------------------------------------------------------------------------------- A-7
-test('A-7 camera: each shot frames the declared member, including reaction shots; the focus member\'s head top holds the pivot', async () => {
+test('A-7 camera: each shot frames its declared member; singles show only that member; nobody is cut by the frame edge; positions and scale are kept', async () => {
   const s = SCENES.A4(), b = await build(s), shots = shotsOf(b.report), cast = s.scenes[0].cast;
-  assert.deepEqual(shots.map(x => [x.speaker, x.focus, x.zoom]), [['c01', null, 1], ['ph', 'ph', 1.3], ['c01', 'c01', 1.3], ['ph', 'c01', 1.5], ['c01', 'ph', 1.5], ['ph', null, 1]]);
+  assert.deepEqual(shots.map(x => [x.speaker, x.focus, x.zoom, x.single]), [['c01', null, 1, false], ['ph', 'ph', 1.3, true], ['c01', 'c01', 1.3, true], ['ph', 'c01', 1.5, true], ['c01', 'ph', 1.5, true], ['ph', null, 1, false]]);
   assert.deepEqual(shots.filter(x => x.focus && x.focus !== x.speaker).map(x => x.focus), ['c01', 'ph'], 'reaction shots frame the declared reactor, not the speaker');
-  for (const x of shots.filter(y => y.focus)) {
-    const m = cast.find(c => c.id === x.focus);
-    assert.deepEqual(x.pivot, {x: m.placement.feetX, y: m.placement.feetY - m.placement.figureHeight}, `pivot of line ${x.line}`);
+  const seen = {};
+  for (const x of shots) for (const dt of [0.05, 0.75, 1.45]) {
+    const t = +(x.start + dt).toFixed(4), fr = await framedAt(b, cast, t);
+    assertFraming(fr, x, `A4 line ${x.line} t ${t}`);
+    seen[x.line] = Object.keys(fr).filter(id => fr[id] && fr[id].x1 > 1 && fr[id].x0 < 1279);
+    // Vertical framing as before: the focus member's head top stays where the pivot holds it.
+    if (x.focus) assert.ok(Math.abs(fr[x.focus].top - x.pivot.y) <= 1, `line ${x.line}: ${x.focus}'s head top holds the pivot height`);
   }
-  const by = await layersByMember(b.project, b.report, cast);
+  // Distinct medium shots: the single on the placeholder and the single on Character 01 show different members.
+  assert.deepEqual([seen[2], seen[3]], [['ph'], ['c01']]);
+  assert.deepEqual([seen[4], seen[5]], [['c01'], ['ph']], 'each close reaction shot shows only its subject');
+  assert.deepEqual([seen[1], seen[6]], [['c01', 'ph'], ['c01', 'ph']], 'wide shots show both');
+  // The focus member is nearer the frame centre than in the previous head-pivot camera, which left it where it stood.
   for (const x of shots.filter(y => y.focus)) {
-    const t = +(x.start + 0.5).toFixed(4);
-    const cur = by[x.focus].find(({layer}) => t >= layer.from && t < layer.to), key = cur.layer.keys.reduce((a, k) => (k.t <= t + 1e-6 ? k : a));
-    const k = key.w / cur.info.width, topY = key.y + (cur.info.feet.y - cur.info.figureHeight) * k, feetX = key.x + cur.info.feet.x * k;
-    assert.ok(Math.abs(topY - x.pivot.y) <= 1 && Math.abs(feetX - x.pivot.x) <= 1, `line ${x.line}: ${x.focus}'s head top stays on the pivot`);
+    const m = cast.find(c => c.id === x.focus), fr = await framedAt(b, cast, +(x.start + 0.75).toFixed(4));
+    const oldX = (m.placement.feetX - m.placement.feetX) * x.zoom + m.placement.feetX;   // head pivot: feet x unchanged on screen
+    assert.ok(Math.abs(fr[x.focus].feetX - 640) < Math.abs(oldX - 640) - 50, `line ${x.line}: ${x.focus} is framed towards the centre`);
   }
   assert.ok(b.report.checks.ok, JSON.stringify(b.report.checks.issues));
   assert.deepEqual(b.report.camera[0].cuts.map(c => [c.t, c.to, c.focus]), [[1.5, 1.3, 'ph'], [3, 1.3, 'c01'], [4.5, 1.5, 'c01'], [6, 1.5, 'ph'], [7.5, 1, null]]);
+});
+
+// ---------------------------------------------------------------------------------------------------- review corrections
+// Owner review of A2 and A4: the same rules on stagings other than the test scenes (positions, heights, depth, facing,
+// three members), every focus, medium and close, two-shot and single. Nothing here depends on A2 or A4 coordinates.
+test('Review corrections: bubble side and framing rules hold for other stagings, cast sizes and shot types', async () => {
+  const STAGINGS = {
+    apart: [c01({x: 260, h: 640}), ph({x: 1020, h: 640, facing: 'left'})],
+    swapped: [c01({x: 900, z: 1}), ph({x: 380, z: 0, facing: 'right'})],
+    close: [c01({x: 520}), ph({x: 760, facing: 'left'})],
+    depth: [c01({x: 480, z: 1}), ph({x: 840, feetY: 1950, h: 600, z: 0})],
+    three: [c01({x: 330, h: 700}), ph({id: 'ph-a', x: 700, h: 600, z: 1, style: 'neutral'}), ph({id: 'ph-b', x: 1020, h: 600, z: 2, style: 'her'})],
+    // Small figures near the left edge: the background stops the camera centring Character 01, so the placeholder would
+    // be the more central figure in a two-shot on Character 01 (nothing is cut, so only the clear-subject rule can refuse).
+    edge: [c01({x: 170, h: 420}), ph({x: 470, h: 420, facing: 'left'})],
+  };
+  const FRAMING_ERROR = /would cut "[\w-]+" at the frame edge|would not be the clear subject|does not fit inside this frame/;
+  const tally = {built: 0, singles: 0, twoShots: 0, refused: 0}, refusals = [];
+  for (const [name, cast] of Object.entries(STAGINGS)) {
+    const firstPoses = Object.fromEntries(cast.map(m => [m.id, m.character === C01 ? '02' : 'p1']));
+    for (const focus of cast.map(m => m.id)) for (const camera of ['Medium 1.3x', 'Close']) for (const single of [false, true]) {
+      const other = cast.find(m => m.id !== focus).id;
+      const lines = [
+        {speaker: cast[0].id, text: 'Wide first.', duration: 1.5, poses: firstPoses, shot: {camera: 'Wide'}},
+        {speaker: focus, text: 'On the focus.', duration: 1.5, shot: {camera, focus, ...(single ? {single} : {})}},
+        {speaker: other, text: 'Reaction.', duration: 1.5, shot: {camera: 'Hold', focus, ...(single ? {single} : {})}},
+      ];
+      const where = `${name} ${camera} on ${focus}${single ? ' (single)' : ''}`, sc = story(`rc-${name}`, structuredClone(cast), lines);
+      let b;
+      try { b = await build(sc); } catch (e) {
+        assert.match(e.message, FRAMING_ERROR, `${where}: refused only for a framing reason`);
+        assert.ok(!single, `${where}: a single never needs refusing`);
+        tally.refused++; refusals.push(`${where}: ${e.message}`); continue;
+      }
+      tally.built++; tally[single ? 'singles' : 'twoShots']++;
+      assert.ok(b.report.checks.ok, `${where}: ${JSON.stringify(b.report.checks.issues)}`);
+      const shots = shotsOf(b.report);
+      for (const x of shots) for (const dt of [0.05, 0.75, 1.45]) assertFraming(await framedAt(b, sc.scenes[0].cast, +(x.start + dt).toFixed(4)), x, `${where} line ${x.line}`);
+      await assertBubbles(b, sc.scenes[0].cast, where);
+      // Positions and relative scale are kept in every shot.
+      const by = await layersByMember(b.project, b.report, sc.scenes[0].cast);
+      for (const m of sc.scenes[0].cast) for (const {layer, info} of by[m.id]) for (const key of layer.keys) {
+        const w = worldOf(key, info, shots);
+        assert.ok(Math.abs(w.feetX - m.placement.feetX) <= 1 && Math.abs(w.figureHeight - m.placement.figureHeight) <= 1, `${where}: ${m.id} keeps its place and height at ${key.t}s`);
+      }
+    }
+  }
+  assert.equal(tally.singles, 2 * (2 + 2 + 2 + 2 + 3 + 2), 'every single builds');
+  assert.ok(tally.twoShots >= 4, `some two-shots build with a clear subject (${tally.twoShots})`);
+  assert.ok(tally.refused >= 4, `framings that would cut a member or blur the subject are refused (${tally.refused})`);
+  assert.ok(refusals.some(r => /^edge Medium 1\.3x on c01: .*"c01" would not be the clear subject \("ph" is about as central/.test(r)), 'a two-shot whose subject is not the most central figure is refused');
+  assert.ok(refusals.some(r => /would cut "[\w-]+" at the frame edge/.test(r)), 'a two-shot that would cut a member is refused');
+  // The owner's A4 shot 5 case (close on the placeholder, Character 01 at the edge) is refused as a two-shot, with a reason.
+  const a4 = SCENES.A4(); delete a4.scenes[0].lines[4].shot.single;
+  await assert.rejects(build(a4), /line 5 \(Close on ph\): .*(would cut "c01" at the frame edge|would not be the clear subject)/);
 });
 
 // ---------------------------------------------------------------------------------------------------- A-8
@@ -380,6 +518,9 @@ test('A-8 no silent defaults: missing or invalid characters, registries, facings
   await assert.rejects(build(chat({a: {side: 'left', style: 'her'}}, {camera: {focus: 'ghost'}})), /camera focus "ghost" is not a cast member/);
   await assert.rejects(build(chat({a: {side: 'left', style: 'her'}}, {reactionCast: 'ghost'})), /reactionCast "ghost" is not a cast member/);
   await bad(sc => { sc.lines[1].shot = {camera: 'Medium 1.3x'}; }, /line 2: a medium or close shot needs a "focus" cast member/);
+  await bad(sc => { sc.lines[1].shot = {camera: 'Wide', single: true}; }, /line 2: "single" applies to medium and close shots only/);
+  await bad(sc => { sc.lines[1].shot = {camera: 'Close', focus: 'ph', single: 'yes'}; }, /line 2: shot "single" must be true or false/);
+  await bad(sc => { sc.cast[0].speech.side = 'right'; }, /line 1: speaker "c01" stands on the left of the frame, but its speech\.side is "right"/);
   await bad(sc => { sc.lines[1].shot = {camera: 'Close', focus: 'ghost'}; }, /shot focus "ghost" is not a cast member/);
   await bad(sc => { sc.lines[1].shot = {camera: 'Slow push-in to 1.2x', focus: 'ph'}; }, /wide \/ medium N× \/ close \/ hold framings only/);
   await bad(sc => { delete sc.lines[0].shot; }, /line 1: "shot" with a camera framing is required/);

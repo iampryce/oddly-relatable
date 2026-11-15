@@ -1,6 +1,6 @@
 # AP-85: multi-character validation plan
 
-**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3); Track A NOT YET ACCEPTED: the required owner contact-sheet review is pending. M3 to M8 OPEN; Track B not started.**
+**Status (2026-11-15): M1 and M2 APPROVED; Phase 1 (Track A) IMPLEMENTED (§5.3); Track A NOT YET ACCEPTED: first owner review done (A1 passes; A3a/A3b pass the technical layer-order checks; A2 and A4 needed corrections, now made); the owner's review of the corrected A2 and A4 sheets is pending. M3 to M8 OPEN; Track B not started.**
 - No Character 02 artwork exists or is created by this plan. No existing character asset, registry, story or renderer is changed.
 - No GPU, account, spending, model download or image generation. AP-84B3 and its approved locks are not touched or extended, and AP-84B3 D1-7 remains NOT AUTHORISED.
 - Every phase below needs its own owner approval (§9). Only P0 (M1) and P1 (M2) are approved.
@@ -120,7 +120,19 @@ Tests: `production/tests/ap85-track-a.test.mjs`, 14 tests, all passing (renderer
 | A-9 | Pass | all (byte-identical plan, report and assets twice) |
 | A-10 | Pass | Short 001, AP-78 fixture, AP-79 fixture byte-identical to the baseline at `2b480b3`; Short 001 renderer frames identical |
 
-Other suites: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity. The required owner contact-sheet review is **pending**; the sheets are in `production/evidence/ap85/review/` (README there lists what to inspect, including how the A4 "focus" pivot frames shots). Track A is not accepted until the owner completes it.
+**Owner review 1 (2026-11-15) and corrections.** A1 passes; A3a and A3b pass the technical layer-order checks. The owner asked for two corrections before acceptance:
+- **A2:** bubbles stayed on their configured screen side after positions were swapped. Bubbles now go on the side where the speaker stands in each shot, tail included; style still comes only from the speaker's configuration. A declared `speech.side` is a checked constraint.
+- **A4:** shots 2 and 3 were not distinct, and shot 5 cut Character 01 at the edge. Medium and close shots are now composed, with zoom, positions and scale unchanged:
+  - the camera pans to centre the focus member within the background;
+  - no member is cut by the frame edge;
+  - the focus member must be clearly the most central figure;
+  - an explicit `"single": true` shows only the focus member.
+
+  A4's shots 2 to 5 now declare the singles their captions describe. Framings that cannot meet the rules are refused with a reason.
+
+A1, A3a, A3b, A5 and A6 render byte-identically: the render plan, the generated assets and every frame at 0.1 s steps (`production/evidence/ap85/review/unchanged-check.json`). The corrected A2 and A4 sheets are in `production/evidence/ap85/review/`. Track A remains **not accepted** until the owner reviews them.
+
+At P1: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure). Track A says nothing about Character 02's identity. The required owner contact-sheet review is **pending**; the sheets are in `production/evidence/ap85/review/` (README there lists what to inspect, including how the A4 "focus" pivot frames shots). Track A is not accepted until the owner completes it.
 
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 

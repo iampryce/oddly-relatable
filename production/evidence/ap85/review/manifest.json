@@ -2,16 +2,10 @@
   "schema": "oddly-relatable/ap85-track-a-review@1",
   "track": "A (composition architecture only; not identity evidence)",
   "placeholder": "SYNTHETIC PLACEHOLDER, NOT ARTWORK. Test fixture only; not Character 02.",
-  "generatedFromCommit": "910e877eae3bfff20dfa771dc10945e848555e42",
-  "sceneDefinitions": {
-    "file": "production/tests/ap85-track-a.test.mjs",
-    "sha256": "0ac9cf109a0b583d7db0c017e5ee3d3d69f61bf1fecf3e69f2cb95efb8a89ee7"
-  },
-  "generator": {
-    "file": "production/evidence/ap85/review/generate-review-sheets.mjs",
-    "sha256": "ecf2c0d5d55ddcbef113df5652386479dc609cd2f865f6ada12fd84d1d0823d2"
-  },
   "ownerAcceptance": "NOT GIVEN. These sheets are for the owner review; nothing here records acceptance.",
+  "generator": {
+    "file": "production/evidence/ap85/review/generate-review-sheets.mjs"
+  },
   "scenes": {
     "A1": {
       "purpose": "Two-shot. Character 01 left, placeholder right, 8 alternating lines, a pose change on every line.",
@@ -152,10 +146,31 @@
             1746
           ]
         }
-      ]
+      ],
+      "generatedFrom": {
+        "commit": "910e877eae3bfff20dfa771dc10945e848555e42",
+        "sceneDefinitions": {
+          "file": "production/tests/ap85-track-a.test.mjs",
+          "sha256": "0ac9cf109a0b583d7db0c017e5ee3d3d69f61bf1fecf3e69f2cb95efb8a89ee7"
+        },
+        "generator": {
+          "file": "production/evidence/ap85/review/generate-review-sheets.mjs",
+          "sha256": "ecf2c0d5d55ddcbef113df5652386479dc609cd2f865f6ada12fd84d1d0823d2"
+        }
+      }
     },
     "A2": {
-      "purpose": "A1's lines with positions swapped and z order reversed. Speakers and styles must follow the members, not the sides.",
+      "generatedFrom": {
+        "baseCommit": "e624a91b9b6348f0cd49192454ec750837d9cba6",
+        "uncommittedEngineChanges": true,
+        "sources": {
+          "production/lib/formats/face-to-face.mjs": "b52c177b56cf73948109b711d9f70da98e4658cab55355647b38f5629b685a4f",
+          "production/lib/cast.mjs": "9ee9eaef72dc909e685cfafca7a6ad97357f7d05ca78bf5113519990562735c1",
+          "production/tests/ap85-track-a.test.mjs": "b38983e251ab1af5752ffa6de79876c017b32486f4686cfe469d542baba5650c",
+          "production/evidence/ap85/review/generate-review-sheets.mjs": "e2850fe04abcb4359509dd72aab537bd4a1bacb412378fcbbabe7e26b38f068a"
+        }
+      },
+      "purpose": "A1's lines with positions swapped and z order reversed. Styles follow the members; bubbles go on the side where the speaker stands.",
       "times": [
         0.9,
         2.4,
@@ -166,11 +181,11 @@
         9.9,
         11.4
       ],
-      "projectSha256": "49eafa69a3e4a2b7f8525306a3aa2a39f0616fcae990f73ef53feb41da266b74",
+      "projectSha256": "55ce06efd7cc0d57058613e2f4be4e7cad7e4a0558d2230eaa2e8da942267092",
       "layoutIssues": [],
       "sheets": {
-        "A2-annotated.png": "f30157072c494da904ff6c9aaaf332e3c9a5d7f25de194841567ba4abf6ed4c6",
-        "A2-clean.png": "30a35f9b35b6a5beea5264c7fffb7c444886747b52684269aa262f549d95f704"
+        "A2-annotated.png": "96ba51f9da8e0b5a7da3bbf4f409ad36add73465fc6f6c549377f7e0394397d6",
+        "A2-clean.png": "98203236cde3daf805f331462b00f7545b6c25402536f444a27a4bca8249c594"
       },
       "memberBoxesPx": [
         {
@@ -338,7 +353,18 @@
             1746
           ]
         }
-      ]
+      ],
+      "generatedFrom": {
+        "commit": "910e877eae3bfff20dfa771dc10945e848555e42",
+        "sceneDefinitions": {
+          "file": "production/tests/ap85-track-a.test.mjs",
+          "sha256": "0ac9cf109a0b583d7db0c017e5ee3d3d69f61bf1fecf3e69f2cb95efb8a89ee7"
+        },
+        "generator": {
+          "file": "production/evidence/ap85/review/generate-review-sheets.mjs",
+          "sha256": "ecf2c0d5d55ddcbef113df5652386479dc609cd2f865f6ada12fd84d1d0823d2"
+        }
+      }
     },
     "A3b": {
       "purpose": "Overlap: the placeholder (z 0) stands partly BEHIND Character 01 (z 1).",
@@ -383,10 +409,31 @@
             1746
           ]
         }
-      ]
+      ],
+      "generatedFrom": {
+        "commit": "910e877eae3bfff20dfa771dc10945e848555e42",
+        "sceneDefinitions": {
+          "file": "production/tests/ap85-track-a.test.mjs",
+          "sha256": "0ac9cf109a0b583d7db0c017e5ee3d3d69f61bf1fecf3e69f2cb95efb8a89ee7"
+        },
+        "generator": {
+          "file": "production/evidence/ap85/review/generate-review-sheets.mjs",
+          "sha256": "ecf2c0d5d55ddcbef113df5652386479dc609cd2f865f6ada12fd84d1d0823d2"
+        }
+      }
     },
     "A4": {
-      "purpose": "Shot sequence: wide, single on placeholder, single on Character 01, reaction on Character 01, reaction on placeholder, wide.",
+      "generatedFrom": {
+        "baseCommit": "e624a91b9b6348f0cd49192454ec750837d9cba6",
+        "uncommittedEngineChanges": true,
+        "sources": {
+          "production/lib/formats/face-to-face.mjs": "b52c177b56cf73948109b711d9f70da98e4658cab55355647b38f5629b685a4f",
+          "production/lib/cast.mjs": "9ee9eaef72dc909e685cfafca7a6ad97357f7d05ca78bf5113519990562735c1",
+          "production/tests/ap85-track-a.test.mjs": "b38983e251ab1af5752ffa6de79876c017b32486f4686cfe469d542baba5650c",
+          "production/evidence/ap85/review/generate-review-sheets.mjs": "e2850fe04abcb4359509dd72aab537bd4a1bacb412378fcbbabe7e26b38f068a"
+        }
+      },
+      "purpose": "Shot sequence: wide, single on placeholder, single on Character 01, reaction single on Character 01, reaction single on placeholder, wide.",
       "times": [
         0.9,
         2.4,
@@ -395,11 +442,11 @@
         6.9,
         8.4
       ],
-      "projectSha256": "66dd1d9ab90c79761c193329f7805ed5ff0607ba5b0f27704f5b97621ec0e0fd",
+      "projectSha256": "153eeb09e8d3a5d40796569b0781b4aa24f7b0f50e87af6c8f20a69072ce4a50",
       "layoutIssues": [],
       "sheets": {
-        "A4-annotated.png": "c875df056b8a9e2bcb95a29b017907a4661091f9d152bb05871c8a25b564a20b",
-        "A4-clean.png": "fc9b1f32423de36cb7e32631f516e64e8784cc6bf1769468cb81c450454706de"
+        "A4-annotated.png": "a41ccdf09fec4f8272cd34915b309acf4189fe747813d683e71e810ddb539d21",
+        "A4-clean.png": "fcb9df0a6d4ba1e7f6187327cd32c8620406a1860f99778feef34bf08882ec28"
       },
       "memberBoxesPx": [
         {
@@ -419,61 +466,41 @@
         },
         {
           "t": 2.4,
-          "c01": [
-            76,
-            1103,
-            454,
-            1919
-          ],
+          "c01": null,
           "ph": [
-            588,
+            486,
             1119,
-            860,
+            758,
             1919
           ]
         },
         {
           "t": 3.9,
           "c01": [
-            151,
+            253,
             1105,
-            518,
+            619,
             1919
           ],
-          "ph": [
-            709,
-            1119,
-            982,
-            1919
-          ]
+          "ph": null
         },
         {
           "t": 5.4,
           "c01": [
-            127,
+            296,
             1106,
-            569,
+            738,
             1919
           ],
-          "ph": [
-            766,
-            1121,
-            1079,
-            1919
-          ]
+          "ph": null
         },
         {
           "t": 6.9,
-          "c01": [
-            0,
-            1104,
-            349,
-            1919
-          ],
+          "c01": null,
           "ph": [
-            564,
+            395,
             1121,
-            878,
+            709,
             1919
           ]
         },
@@ -483,7 +510,7 @@
             197,
             1104,
             480,
-            1747
+            1746
           ],
           "ph": [
             623,

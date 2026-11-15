@@ -143,22 +143,23 @@ Transitions only move, scale or fade existing artwork; no in-between drawings ar
   "id": "two-shot", "format": "face-to-face", "environment": "living-room-empty-03",
   "cast": [
     {"id": "a", "character": "character-01", "placement": {"feetX": 400, "feetY": 2070, "figureHeight": 800}, "z": 0,
-     "speech": {"style": "him", "side": "left"}},
+     "speech": {"style": "him"}},
     {"id": "b", "character": "character-02", "placement": {"feetX": 880, "feetY": 2070, "figureHeight": 760}, "z": 1,
-     "facing": "left", "speech": {"style": "her", "side": "right"}}
+     "facing": "left", "speech": {"style": "her"}}
   ],
   "lines": [
     {"speaker": "a", "text": "Wide.", "duration": 1.5, "poses": {"a": "02", "b": "p1"}, "shot": {"camera": "Wide"}},
-    {"speaker": "b", "text": "Single on b.", "duration": 1.5, "pose": "p2", "shot": {"camera": "Medium 1.3×", "focus": "b"}},
-    {"speaker": "b", "text": "Reaction on a.", "duration": 1.5, "poses": {"a": "05"}, "shot": {"camera": "Close", "focus": "a"}}
+    {"speaker": "b", "text": "Single on b.", "duration": 1.5, "pose": "p2", "shot": {"camera": "Medium 1.3×", "focus": "b", "single": true}},
+    {"speaker": "b", "text": "Reaction on a.", "duration": 1.5, "poses": {"a": "05"}, "shot": {"camera": "Close", "focus": "a", "single": true}}
   ]
 }
 ```
 
 (`character-02` above is illustrative: no Character 02 registry or artwork exists.)
 
-- Every speaker is a cast member with `speech: {style, side}`. Every member needs a pose on the first line; `pose` targets the speaker.
-- Every line has a `shot`. Medium and close shots need a `focus` (a cast member); the pivot is the focus member's head top. Camera moves, shake and drift are refused in this format. Bubbles are screen-space.
+- Every speaker is a cast member with `speech: {style}`. Every member needs a pose on the first line; `pose` targets the speaker.
+- **Bubble side follows the speaker** (AP-85 owner review): each bubble, and its tail, goes on the side of the screen where its speaker stands in that line's shot, including a speaker who is off camera. A declared `speech.side` is checked against that, and a contradiction is an error. Bubbles are screen-space.
+- Every line has a `shot`. Medium and close shots need a `focus` (a cast member) and are **composed**: zoom levels are unchanged, and the camera pans to centre the focus member within the background. Every other member must be fully in frame or fully out, never cut by the frame edge, and the focus member must be clearly the most central figure. `"single": true` shows only the focus member for that shot. A framing that cannot meet these rules is an error with a reason. Positions and scale are never changed. Camera moves, shake and drift are refused in this format.
 
 ### No silent defaults (AP-85 P1)
 
