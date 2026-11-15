@@ -1,8 +1,13 @@
-# AP-86 (proposed): next-generation production architecture
+# AP-86: next-generation production architecture
 
-**Status (2026-11-15): PROPOSED. Planning only. Nothing in this document is approved or implemented.**
-- The milestone ID "AP-86" is itself a proposal (decision O1).
-- No code, registry, story, test, artwork or renderer file is changed by this document.
+**Status (2026-11-15): PROPOSAL APPROVED (O1 to O4); S1 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S2 TO S7 NOT AUTHORISED.**
+- **Approved by the owner on 2026-11-15:**
+  - **O1:** this proposal and the milestone ID AP-86;
+  - **O2:** the phase order and the S1 scope (data-model work only, local, $0, no artwork); every later phase needs its own approval;
+  - **O3:** named marks and actions in set coordinates are the default placement model, and explicit placement overrides;
+  - **O4:** depth-derived layering is the default, and explicit `z` overrides.
+- **Still OPEN:** O5 to O13 (§13). Nothing in this document chooses set dimensions, layer, pose or prop standards, a first real set, an artwork route or budget, a facing strategy, framing formats, a movement method or an audio approach.
+- **S1 (data models and validation) is implemented:** see §11.1. No later phase has started.
 - No Character 02 is created or designed. AP-85 decisions M3 to M8 stay open and are not decided here.
 - No GPU, external service, spending, model download or image generation. AP-84B3, its locks and its D1-7 gate are untouched; D1-7 stays NOT AUTHORISED.
 - **The visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md`) is not changed.** Everything here is engineering that serves it: flat, bold-outlined characters in rich, layered, warmly lit three-quarter environments.
@@ -419,8 +424,8 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 
 | Phase | Scope | Exit criteria | Cost |
 |---|---|---|---|
-| **S0** | Approve this proposal, the milestone ID and the decisions in §13 | Owner approval recorded | $0 |
-| **S1 Data model** | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
+| **S0** ✅ | Approve this proposal, the milestone ID and the decisions in §13 | **Done 2026-11-15:** O1 to O4 approved; O5 to O13 open | $0 |
+| **S1 Data model** ✅ implemented | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
 | **S2 Sets and depth** | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
 | **S3 Staging and props** | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
 | **S4 Framing and camera** | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
@@ -428,6 +433,34 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 | **S6 First real set (art)** | One approved set and plate kit, plus Character 01's sitting and contact poses, via an approved production route | Owner visual approval of the assets; one produced test scene | **Depends on route (§12)** |
 | **S7 Pipeline** | External audio mix (stems → one master), post-render caption burn-in per profile, export presets | Produced test episode passes QA in both profiles | $0 (local tools) |
 | **Track B (AP-85)** | Character 02 identity work, as already planned | M3 to M8 decided by the owner | As decided there |
+
+### 11.1 S1 implementation (2026-11-15)
+
+S1 adds data models and validation only. It renders, stages, layers and moves nothing.
+
+| Model | Module | What is validated |
+|---|---|---|
+| Shared rules | `production/lib/schema.mjs` | Identifiers, anchor and tag names, plate fractions, image-pixel points, repository-relative asset paths and SHA-256 values, unknown fields, supported schema versions |
+| Character registry v2 | `production/lib/character.mjs` | Version-aware loading (v1 unchanged). v2 adds optional pose `tags` and `anchors` and registry `proportions`; v2 fields in a v1 file are refused; `anchors.feet` must equal `feet`; `verifyRegistryAssets` checks files, hashes and that anchors lie inside the image |
+| Environments and sets | `production/lib/sets.mjs` | The v1 `environments.json` loader (same data, now validated). Set v2: plates; back-to-front layers with optional parallax and occluder baseline; optional floor model; marks (`stand`, `seat`, `entry`); surfaces; action-safe area; marks and surfaces share one namespace per plate; synthetic sets refused in production |
+| Props | `production/lib/props.mjs` | States with assets and anchors; a required `defaultState`; affordances (`seat`, `grip`, `rest`), each needing its anchor in every state; optional front and back splits; synthetic props refused in production |
+| Actions | `production/lib/actions.mjs` | At most one target (`mark` kind, `surface` or prop affordance); every `align`, `attach` and `scaleFrom` reference must agree with that target; pose selectors by tags and anchors |
+| Story@2 | `production/lib/story-v2.mjs`, `story.mjs` | Scene `set`/`plate` (never together with `environment`), `props` (exactly one of `on`, `mark` or `placement`), `blocking` (one entry per member). Cross-references are checked against the set, prop and action registries |
+
+**O3 and O4 in the data model:**
+- `placementMode` returns `explicit` (an explicit placement always wins, even over blocking), then `blocking`, then `unplaced`.
+- `layeringMode` returns `explicit-z`, otherwise `depth` in story@2.
+- story@1 keeps its existing rules: explicit or default placement, and `z` defaulting to 0.
+
+**Compile gate:** a story@2 scene that relies on a set, props, blocking, an unplaced member or depth-derived layering is refused, naming the phase it needs (S2 or S3). Everything else compiles exactly as story@1; Short 001 written as story@2 produces a byte-identical project.
+
+**Not created:** no production set, prop or action-library data, because their standards are O5 to O7. Tests use labelled synthetic fixtures (`production/tests/fixtures/ap86-synthetic.mjs`), written only to temporary folders and refused by every production path.
+
+**Tests:**
+- `production/tests/ap86-s1-data-model.test.mjs`: 8/8;
+- production suite 91/91 with FFmpeg (77 pass and 14 skipped without it);
+- Short 001 and AP-85 Track A unchanged (byte and frame baselines);
+- eight deliberate rule breaks were each caught.
 
 **Ordering:** S1 → S2 → S3 is the critical path. S4 can follow S2. S5 follows S3. S6 can be prepared in parallel as decisions only, but no art is produced until approved. Track B stays independent; when Character 02 exists, it is simply another registry the system already supports.
 
@@ -476,10 +509,10 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 
 | # | Decision | Notes |
 |---|---|---|
-| O1 | Approve this proposal and the milestone ID AP-86 | Planning approval only |
-| O2 | Approve phase order and the scope of S1 (data model only, $0, no artwork) | Each later phase is approved separately |
-| O3 | Placement model: named marks and actions in set coordinates as the default, with explicit placement as the override | Recommended. Keeps every current story valid |
-| O4 | Depth-derived layering as the default, with explicit `z` as the override | Recommended. AP-85's explicit z keeps working |
+| O1 | Approve this proposal and the milestone ID AP-86 | **APPROVED 2026-11-15** |
+| O2 | Approve phase order and the scope of S1 (data model only, $0, no artwork) | **APPROVED 2026-11-15.** Each later phase is approved separately |
+| O3 | Placement model: named marks and actions in set coordinates as the default, with explicit placement as the override | **APPROVED 2026-11-15** |
+| O4 | Depth-derived layering as the default, with explicit `z` as the override | **APPROVED 2026-11-15** |
 | O5 | Set standard: square superframe master size, layer split (back, mid, occluders, fore), floor model, marks | Bible proposals: 3840 square master, three depth layers; to confirm |
 | O6 | Pose standard for new art: canvas size, required anchors (feet, seat, hands), tags, minimum action set per recurring character | The canvas is already approved at 1024×1536 for new character poses (2026-11-13) |
 | O7 | Prop standard: anchors, states, splits; which props are separate and which are painted into plates | |

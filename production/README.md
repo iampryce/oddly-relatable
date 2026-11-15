@@ -168,6 +168,22 @@ Transitions only move, scale or fade existing artwork; no in-between drawings ar
 - **Facing is data.** `native` (the default) uses each pose as drawn. `left`, `right` or `front` resolves each pose to artwork the registry declares as facing that way (the pose's own `facing`, or its `facingVariants`), or fails. Artwork is never mirrored, and `mirror` is refused.
 - **Synthetic registries** (`"synthetic": true`, labelled test placeholders) are refused unless the caller passes `allowSynthetic`, which only tests do. `produce` and the CLI never pass it.
 
+## AP-86 S1: data models (validation only)
+
+S1 adds schemas and validation for the approved AP-86 architecture. **Nothing here renders a set, places a prop, runs an action, computes depth or moves a camera:** those are phases S2 to S5, each needing its own approval.
+
+| Data | Module | Notes |
+|---|---|---|
+| Character registry v2 | `lib/character.mjs` | `"schemaVersion": 2` allows optional pose `tags` (e.g. `{stance, action, expression}`) and `anchors` (named image-pixel points such as `seat` or `handRight`), and registry `proportions`. v1 registries are unchanged. `verifyRegistryAssets` checks files, hashes and that anchors lie inside each image |
+| Environments and sets | `lib/sets.mjs` | `environments.json` (v1) loads as before. A set registry (`environments/<set-id>.json`, v2) has plates with back-to-front layers, an optional floor model, marks (`stand`, `seat`, `entry`), surfaces and occluder baselines, all in plate fractions (0 to 1) |
+| Props | `lib/props.mjs` | `props/<prop-id>.json`: states (asset, facing, anchors), `defaultState`, affordances (`seat`, `grip`, `rest`, each needing its anchor), optional front and back splits |
+| Actions | `lib/actions.mjs` | An action library: what each action needs (a mark kind, a surface or a prop affordance) and which anchors it aligns. References must agree with the need |
+| Story@2 | `lib/story-v2.mjs` | `"schema": "oddly-relatable/story@2"`: scene `set`/`plate`, `props`, `blocking`; `validateStoryReferences` checks every reference against the registries |
+
+- **Precedence (owner decisions O3 and O4, 2026-11-15):** named marks and actions are the default placement and an explicit `placement` wins; depth-derived layering is the default and an explicit `z` wins. story@1 keeps its existing rules.
+- **Compile gate:** a story@2 scene that uses a set, props, blocking, an unplaced member or depth-derived layering fails with the phase it needs. Otherwise story@2 compiles exactly like story@1.
+- **No production set, prop or action data exists yet:** their standards are open owner decisions O5 to O7. Synthetic sets and props (`"synthetic": true`) are refused unless a test passes `allowSynthetic`.
+
 ## Fixtures and evidence
 
 - **`stories/short-001-v2.story.json`:** Short 001. Its dialogue is identical to `fixtures/short-001-v2.conversation.json`, and its camera notes are verbatim from `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (tests enforce both). Character 01 only; pose changes stay hard cuts, because the script specifies none.

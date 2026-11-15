@@ -6,20 +6,32 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {canvas, PRODUCTION_ROOT, REPO_ROOT} from './runtime.mjs';
 import {formatFor} from './formats/index.mjs';
+import {STORY_SCHEMA_V2, V2_SCENE_FIELDS, validateSceneV2} from './story-v2.mjs';
+import {loadEnvironmentRegistry} from './sets.mjs';
 
+export {STORY_SCHEMA_V2};
 export const STORY_SCHEMA = 'oddly-relatable/story@1';
 export const EPISODE_SCHEMA = 'oddly-relatable/conversation-episode@1';
 const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
+// story@1 keeps its exact meaning. story@2 (AP-86 S1) adds sets, props, blocking and an action library reference;
+// those fields are an error in a story@1 file, so a story never silently mixes versions.
+export const STORY_SCHEMAS = Object.freeze([STORY_SCHEMA, STORY_SCHEMA_V2]);
+
 export function validateStory(story) {
-  if (story?.schema !== STORY_SCHEMA) throw new Error(`Story schema must be "${STORY_SCHEMA}"`);
+  if (!STORY_SCHEMAS.includes(story?.schema)) throw new Error(`Story schema must be "${STORY_SCHEMA}" or "${STORY_SCHEMA_V2}"`);
+  const v2 = story.schema === STORY_SCHEMA_V2;
   if (!Array.isArray(story.scenes) || !story.scenes.length) throw new Error('story: at least one scene is required');
+  if (story.actionLibrary !== undefined && !v2) throw new Error(`story: "actionLibrary" needs "${STORY_SCHEMA_V2}"`);
+  if (story.actionLibrary !== undefined && (typeof story.actionLibrary !== 'string' || !story.actionLibrary)) throw new Error('story: "actionLibrary" must be a path');
   const ids = new Set();
   for (const [i, s] of story.scenes.entries()) {
     if (!s.id || ids.has(s.id)) throw new Error(`scene ${i + 1}: a unique id is required`);
     ids.add(s.id);
     if (typeof s.format !== 'string' || !s.format) throw new Error(`scene ${s.id}: "format" is required`);
     formatFor(s.format);                       // unknown formats fail here; planned ones fail when compiled
+    if (v2) validateSceneV2(s, `scene ${s.id}`);
+    else for (const k of V2_SCENE_FIELDS) if (s[k] !== undefined) throw new Error(`scene ${s.id}: "${k}" needs "${STORY_SCHEMA_V2}"`);
   }
   return story;
 }
@@ -54,7 +66,7 @@ export async function resolveEnvironment(env, plane, repoRoot = REPO_ROOT) {
   let file, focusX = env.focusX ?? 0.5, focusY = env.focusY ?? 0.5;
   if (typeof env === 'string' || env.id) {
     const id = typeof env === 'string' ? env : env.id;
-    const reg = JSON.parse(fs.readFileSync(path.join(PRODUCTION_ROOT, 'environments', 'environments.json'), 'utf8'));
+    const reg = loadEnvironmentRegistry(path.join(PRODUCTION_ROOT, 'environments', 'environments.json'));   // v1 registry, validated (AP-86 S1)
     const e = reg.environments[id];
     if (!e) throw new Error(`Unknown environment "${id}" (registry has: ${Object.keys(reg.environments).join(', ')})`);
     file = path.resolve(repoRoot, e.file);

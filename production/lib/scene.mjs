@@ -11,6 +11,7 @@ import {renderTitleCard} from './graphics.mjs';
 import {PALETTE} from './palette.mjs';
 import {silentWav} from './wav.mjs';
 import {STORY_SCHEMA, EPISODE_SCHEMA, validateStory, episodeToStory, resolveEnvironment} from './story.mjs';
+import {assertCompilable} from './story-v2.mjs';
 import {formatFor} from './formats/index.mjs';
 import {assertRenderable} from './text.mjs';
 
@@ -34,6 +35,7 @@ export const compileEpisode = compileProject;   // AP-78 name, kept for compatib
 // The production run (produce.mjs) never passes it, so a placeholder can never reach a produced episode.
 export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIssues = false, allowSynthetic = false, sourceFile = null, sourceData = story} = {}) {
   validateStory(story);
+  assertCompilable(story);   // story@2 (AP-86 S1): only what needs no later phase; story@1 is unaffected
   if (!outDir) throw new Error('outDir is required');
   const dir = assertWritableOutput(outDir);
   if (fs.existsSync(path.join(dir, 'project.json')) && !fs.existsSync(path.join(dir, MARKER))) throw new Error(`${dir} holds a project not created by this toolkit; refusing to overwrite`);
