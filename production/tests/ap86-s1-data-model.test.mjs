@@ -174,7 +174,10 @@ test('S1 action definitions: requirements and references must agree; invalid req
     [l => { l.actions['sit-on'].align = {seat: 'prop.seat'}; }, /"prop\.seat" needs "needs\.prop"/],
     [l => { l.actions['sit-on'].align = {seat: 'chair'}; }, /unknown reference "chair"/],
     [l => { l.actions['sit-on'].align = {}; }, /align: must not be empty when given/],
-    [l => { l.actions['sit-on'].attach = {'prop.grip': 'pose.handRight'}; }, /attach: needs "needs\.prop"/],
+    [l => { l.actions['sit-on'].attach = {'prop.grip': 'pose.handRight'}; }, /either places the member \("align"\) or attaches a prop \("attach"\), not both/],
+    [l => { delete l.actions['sit-on'].align; l.actions['sit-on'].attach = {'prop.grip': 'pose.handRight'}; }, /attach: needs "needs\.prop"/],
+    [l => { l.actions.hold.attach['prop.base'] = 'pose.handLeft'; }, /attaches exactly one prop anchor to one pose anchor/],
+    [l => { delete l.actions['stand-at'].scaleFrom; }, /scaleFrom: is required: which floor line sets the size of a member placed at a mark/],
     [l => { l.actions.hold.attach = {grip: 'pose.handRight'}; }, /key "grip" must be "prop\.<anchor>"/],
     [l => { l.actions.hold.attach = {'prop.grip': 'handRight'}; }, /must be "pose\.<anchor>"/],
     [l => { l.actions['sit-on'].scaleFrom = 'surface.line'; }, /"surface\.line" needs "needs\.surface"/],
@@ -208,15 +211,16 @@ test('S1 story@2 structure: sets, props and blocking are validated; story@1 cann
     [s => { sc(s).environment = 'living-room-empty-03'; }, /uses both "environment" and "set"/],
     [s => { delete sc(s).plate; }, /plate: "undefined" is not a valid identifier/],
     [s => { delete sc(s).set; delete sc(s).props; delete sc(s).blocking; }, /"plate" needs "set"/],
-    [s => { sc(s).props[0].on = 'counter-top'; }, /needs exactly one of "on" \(a surface\), "mark" or "placement"/],
-    [s => { delete sc(s).props[0].mark; }, /needs exactly one of "on" \(a surface\), "mark" or "placement"/],
+    [s => { sc(s).props[0].on = 'counter-top'; }, /has more than one of "on" \(a surface\), "mark" and "placement"/],
+    [s => { sc(s).props[0].placement = {x: 0.5, y: 0.5}; }, /has more than one of "on" \(a surface\), "mark" and "placement"/],
     [s => { sc(s).props[0].at = 0.5; }, /at: needs "on"/],
     [s => { sc(s).props[1].at = 2; }, /at: must be a number >= 0 and <= 1/],
     [s => { sc(s).props[1].id = 'a'; }, /id "a" is already used by another prop or cast member/],
     [s => { sc(s).props[0].colour = 'x'; }, /unknown field "colour"/],
     [s => { sc(s).props[0].placement = {x: 0.5, y: 1.5}; delete sc(s).props[0].mark; }, /placement\.y: must be a number >= 0 and <= 1/],
     [s => { sc(s).blocking[0].who = 'ghost'; }, /"who": "ghost" is not a cast member/],
-    [s => { sc(s).blocking.push({who: 'a', do: 'shrug'}); }, /"a" is already blocked/],
+    [s => { sc(s).blocking[0].at = 0.5; }, /blocking 1 at: needs "surface"/],
+    [s => { sc(s).blocking[0] = {who: 'a', do: 'lean-on', surface: 'counter-top', at: 1.5}; }, /at: must be a number >= 0 and <= 1/],
     [s => { sc(s).blocking[0].surface = 'counter-top'; }, /names more than one target \(mark, surface\)/],
     [s => { sc(s).blocking[0] = {who: 'a', do: 'hold', prop: 'cup'}; }, /"prop": "cup" is not a prop of this scene/],
     [s => { sc(s).blocking[0].speed = 3; }, /unknown field "speed"/],
@@ -252,9 +256,21 @@ test('S1 story@2 references: every set, plate, mark, surface, prop, state and ac
   bad(sc => { sc.blocking[0] = {who: 'a', do: 'hold', prop: 'stool-a'}; }, /prop "stool-a" \(synthetic-stool\) does not offer "grip"/);
   bad(sc => { sc.blocking[0] = {who: 'a', do: 'lean-on', surface: 'shelf'}; }, /plate "wide" has no surface "shelf"/);
   bad((sc, s) => { delete s.actionLibrary; }, /No production action library exists yet/);
-  // Holding and sitting on a prop resolve when the prop offers the affordance.
+  // Holding and sitting on a prop resolve when the prop offers the affordance. A held prop has no placement of its own;
+  // "hold" attaches a prop but does not place the member (S3 rule: one placing action per member, any number of holds).
   const ok = barStory(kit); ok.scenes[0].blocking = [{who: 'a', do: 'sit-on-prop', prop: 'stool-a'}, {who: 'b', do: 'hold', prop: 'glass-a'}];
-  assert.deepEqual(validateStoryReferences(ok, {allowSynthetic: true}).scenes[0].members.map(m => m.placement), ['blocking', 'blocking']);
+  delete ok.scenes[0].props[1].on; delete ok.scenes[0].props[1].at;
+  const okd = validateStoryReferences(ok, {allowSynthetic: true}).scenes[0];
+  assert.deepEqual(okd.members.map(m => m.placement), ['blocking', 'unplaced']);
+  assert.deepEqual(okd.props.map(p => [p.id, p.placement, p.layering]), [['stool-a', 'mark', 'depth'], ['glass-a', 'held-by:b', 'with-holder']]);
+  // S3 reference rules.
+  bad(sc => { sc.blocking.push({who: 'b', do: 'hold', prop: 'glass-a'}); }, /prop glass-a: is held by "b", so it cannot also be placed/);
+  bad(sc => { delete sc.props[1].on; delete sc.props[1].at; }, /prop glass-a: is neither placed \("on", "mark" or "placement"\) nor held/);
+  bad(sc => { sc.blocking.push({who: 'a', do: 'stand-at', mark: 'counter-2'}); }, /cast member "a" already has a placing action \("sit-on"\)/);
+  bad(sc => { delete sc.props[1].on; delete sc.props[1].at; sc.blocking.push({who: 'a', do: 'hold', prop: 'glass-a'}, {who: 'b', do: 'hold', prop: 'glass-a'}); }, /prop "glass-a" is already held by "a"/);
+  bad(sc => { sc.blocking[0] = {who: 'a', do: 'lean-on', surface: 'counter-top'}; }, /needs "at": where along the surface/);
+  bad(sc => { delete sc.props[1].at; }, /prop glass-a: needs "at": where along the surface/);
+  bad(sc => { sc.blocking[0] = {who: 'a', do: 'sit-on-prop', prop: 'stool-a'}; sc.props[0].z = 0.5; }, /prop stool-a: is used by a cast member and is drawn with it; remove its "z"/);
   // Synthetic sets and props are refused without allowSynthetic.
   assert.throws(() => validateStoryReferences(barStory(kit)), /set "synthetic-bar" is a SYNTHETIC test fixture/);
 });
@@ -263,18 +279,18 @@ test('S1 story@2 references: every set, plate, mark, surface, prop, state and ac
 test('S1 compile gate: story@2 compiles only what needs no later phase; anything else is refused with the phase it needs', async () => {
   const kit = writeSyntheticKit(tmp('gate'));
   const refuse = (s, pattern) => assert.throws(() => assertCompilable(s), pattern, String(pattern));
-  // After S2 (2026-11-16) sets compile in face-to-face scenes and depth layering is implemented (see the AP-86 S2
-  // tests); what still needs a later phase is refused, naming it.
-  refuse(barStory(kit), /uses props; placing props needs AP-86 S3/);
+  // After S2 (2026-11-16) sets compile in face-to-face scenes and depth layering is implemented; after S3 (2026-11-16)
+  // props and blocking are resolved by the staging resolver (see the AP-86 S2 and S3 tests).
+  assert.doesNotThrow(() => assertCompilable(barStory(kit)));
   const chatSet = barStory(kit); chatSet.scenes[0].format = 'text-chat'; chatSet.scenes[0].props = []; chatSet.scenes[0].blocking = [];
   refuse(chatSet, /uses a set in a "text-chat" scene; AP-86 S2 renders sets in face-to-face scenes only/);
   const noSet = s => { const sc = s.scenes[0]; delete sc.set; delete sc.plate; delete sc.setRegistry; return s; };
   const p = noSet(barStory(kit)); p.scenes[0].blocking = []; p.scenes[0].props = [{id: 'x', prop: 'y', placement: {x: 0.5, y: 0.5}}];
-  refuse(p, /uses props; placing props needs AP-86 S3/);
+  refuse(p, /props and blocking need a "set"/);
   const b = noSet(barStory(kit)); b.scenes[0].props = [];
-  refuse(b, /uses blocking; the staging resolver needs AP-86 S3/);
+  refuse(b, /props and blocking need a "set"/);
   const u = noSet(barStory(kit)); u.scenes[0].props = []; u.scenes[0].blocking = [];
-  refuse(u, /cast member "a" has no placement\. In story@2 members are placed by marks and actions \(O3, needs AP-86 S3\)/);
+  refuse(u, /cast member "a" has no placement\. In story@2 a member is placed by a placing action at a mark, surface or prop \(O3\) or by an explicit "placement"/);
   for (const m of u.scenes[0].cast) m.placement = {feetX: 640, feetY: 2070, figureHeight: 760};
   assert.doesNotThrow(() => assertCompilable(u), 'placed members without z compile after S2 (depth-derived layering)');
 

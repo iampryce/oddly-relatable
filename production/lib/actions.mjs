@@ -25,6 +25,9 @@ const MARK_REFS = ['mark.point', 'mark.floor'];
 
 // Which target an action needs: 'mark' | 'surface' | 'prop' | null.
 export const targetOf = action => Object.keys(action.needs)[0] ?? null;
+// What an action does (AP-86 S3): 'place' (aligns the member to its target), 'attach' (attaches a prop to the member)
+// or 'pose' (only constrains the pose). A member has at most one placing action.
+export const actionKind = action => (action.align ? 'place' : action.attach ? 'attach' : 'pose');
 
 // The pose anchors an action requires (align keys, attach targets, hasAnchor), for later pose checks.
 export function requiredAnchors(action) {
@@ -70,9 +73,11 @@ export function validateAction(a, where) {
     if (!Object.keys(a.align).length) fail(`${where}.align`, 'must not be empty when given');
     for (const [k, r] of Object.entries(a.align)) { name(k, `${where}.align key`); ref(r, `${where}.align.${k}`); }
   }
+  if (a.align !== undefined && a.attach !== undefined) fail(where, 'an action either places the member ("align") or attaches a prop ("attach"), not both');
   if (a.attach !== undefined) {
     object(a.attach, `${where}.attach`);
     if (target !== 'prop') fail(`${where}.attach`, 'needs "needs.prop"');
+    if (Object.keys(a.attach).length !== 1) fail(`${where}.attach`, 'attaches exactly one prop anchor to one pose anchor');
     for (const [k, v] of Object.entries(a.attach)) {
       if (!k.startsWith('prop.')) fail(`${where}.attach`, `key "${k}" must be "prop.<anchor>"`);
       name(k.slice(5), `${where}.attach key anchor`);
@@ -84,6 +89,9 @@ export function validateAction(a, where) {
     if (!['mark.point', 'mark.floor', 'surface.line'].includes(a.scaleFrom)) fail(`${where}.scaleFrom`, 'must be "mark.point", "mark.floor" or "surface.line"');
     ref(a.scaleFrom, `${where}.scaleFrom`);
   }
+  // A member placed at a mark or a surface needs to know which floor line sets its size (S3); a member placed on a prop
+  // takes the prop's floor line.
+  if (a.align !== undefined && (target === 'mark' || target === 'surface') && a.scaleFrom === undefined) fail(`${where}.scaleFrom`, `is required: which floor line sets the size of a member placed at a ${target}`);
   return a;
 }
 

@@ -4,7 +4,9 @@
 //   scene:  every story@1 scene field, plus
 //     set?, plate?, setRegistry?          a v2 set and one of its plates (instead of "environment", never both)
 //     props?: [{id, prop, registry?, state?, on?: <surface>, at?: 0–1, mark?: <mark>, placement?: {x, y}, z?, note?}]
-//     blocking?: [{who: <cast id>, do: <action id>, mark? | surface? | prop?: <scene prop id>, note?}]
+//             (at most one of on / mark / placement; a prop with none must be held by a "hold" action)
+//     blocking?: [{who: <cast id>, do: <action id>, mark? | surface? | prop?: <scene prop id>, at?: 0–1, note?}]
+//             (at most one placing action per member; any number of attaching actions such as "hold")
 //
 // Precedence (owner decisions, 2026-11-15):
 //   O3  named marks and actions are the default placement; an explicit placement wins over blocking.
@@ -16,7 +18,7 @@
 // need the staging resolver (S3) and are refused by assertCompilable() with that phase named.
 import {loadSet, plateOf} from './sets.mjs';
 import {loadProp} from './props.mjs';
-import {loadActionLibrary, targetOf, ACTIONS_FILE} from './actions.mjs';
+import {loadActionLibrary, targetOf, actionKind, ACTIONS_FILE} from './actions.mjs';
 import {object, onlyKeys, id, finite, fraction, point01, fail} from './schema.mjs';
 import {placementKind} from './depth.mjs';
 
@@ -57,7 +59,7 @@ export function validateSceneV2(scene, where) {
       if (p.registry !== undefined) regPath(p.registry, `${w} registry`);
       if (p.state !== undefined) id(p.state, `${w} state`);
       const where_ = ['on', 'mark', 'placement'].filter(k => p[k] !== undefined);
-      if (where_.length !== 1) fail(w, 'needs exactly one of "on" (a surface), "mark" or "placement"');
+      if (where_.length > 1) fail(w, 'has more than one of "on" (a surface), "mark" and "placement"');
       if (p.on !== undefined) id(p.on, `${w} on`);
       if (p.at !== undefined) { if (p.on === undefined) fail(`${w} at`, 'needs "on"'); fraction(p.at, `${w} at`); }
       if (p.mark !== undefined) id(p.mark, `${w} mark`);
@@ -68,14 +70,12 @@ export function validateSceneV2(scene, where) {
 
   if (scene.blocking !== undefined) {
     if (!Array.isArray(scene.blocking)) fail(`${where} blocking`, 'must be a list');
-    const blocked = new Set();
     scene.blocking.forEach((b, i) => {
       const w = `${where} blocking ${i + 1}`;
-      object(b, w); onlyKeys(b, ['who', 'do', 'mark', 'surface', 'prop', 'note'], w);
+      object(b, w); onlyKeys(b, ['who', 'do', 'mark', 'surface', 'prop', 'at', 'note'], w);
       if (!castIds.has(b.who)) fail(w, `"who": "${b.who}" is not a cast member of this scene`);
-      if (blocked.has(b.who)) fail(w, `cast member "${b.who}" is already blocked in this scene`);
-      blocked.add(b.who);
       id(b.do, `${w} do`);
+      if (b.at !== undefined) { if (b.surface === undefined) fail(`${w} at`, 'needs "surface"'); fraction(b.at, `${w} at`); }
       const targets = ['mark', 'surface', 'prop'].filter(k => b[k] !== undefined);
       if (targets.length > 1) fail(w, `names more than one target (${targets.join(', ')})`);
       for (const k of targets) id(b[k], `${w} ${k}`);
@@ -123,7 +123,7 @@ export function validateStoryReferences(story, {allowSynthetic = false} = {}) {
       if (p.mark !== undefined && !marks[p.mark]) fail(w, `plate "${scene.plate}" has no mark "${p.mark}"`);
       props.set(p.id, {...p, registryData: reg});
     }
-    const blockingOf = new Map();
+    const blockingOf = new Map(), heldBy = new Map(), usedAsTarget = new Set();
     for (const [i, b] of (scene.blocking || []).entries()) {
       const w = `${where} blocking ${i + 1} (${b.who} ${b.do})`;
       const action = lib().actions[b.do];
@@ -136,35 +136,55 @@ export function validateStoryReferences(story, {allowSynthetic = false} = {}) {
         if (action.needs.mark !== 'any' && m.kind !== action.needs.mark) fail(w, `mark "${b.mark}" is a ${m.kind} mark; action "${b.do}" needs a ${action.needs.mark} mark`);
       }
       if (need === 'surface' && !surfaces[b.surface]) fail(w, `plate "${scene.plate}" has no surface "${b.surface}"`);
+      if (need === 'surface' && actionKind(action) === 'place' && b.at === undefined) fail(w, 'needs "at": where along the surface (0 to 1)');
       if (need === 'prop') {
         const p = props.get(b.prop);
         if (!(p.registryData.affordances || []).includes(action.needs.prop)) fail(w, `prop "${b.prop}" (${p.prop}) does not offer "${action.needs.prop}"`);
       }
-      blockingOf.set(b.who, b);
+      // S3 rules: one placing action per member; a prop is held by at most one member; a held prop is not also placed,
+      // sat on or given a z (it is drawn with its holder).
+      if (actionKind(action) === 'place') {
+        if (blockingOf.has(b.who)) fail(w, `cast member "${b.who}" already has a placing action ("${blockingOf.get(b.who).do}")`);
+        blockingOf.set(b.who, b);
+        if (need === 'prop') usedAsTarget.add(b.prop);
+      }
+      if (actionKind(action) === 'attach') {
+        if (heldBy.has(b.prop)) fail(w, `prop "${b.prop}" is already held by "${heldBy.get(b.prop)}"`);
+        heldBy.set(b.prop, b.who);
+      }
+    }
+    for (const [pid, p] of props) {
+      const w = `${where} prop ${pid}`, placed = ['on', 'mark', 'placement'].some(k => p[k] !== undefined);
+      if (heldBy.has(pid) && placed) fail(w, `is held by "${heldBy.get(pid)}", so it cannot also be placed ("on", "mark" or "placement")`);
+      if (!heldBy.has(pid) && !placed) fail(w, 'is neither placed ("on", "mark" or "placement") nor held');
+      if (heldBy.has(pid) && usedAsTarget.has(pid)) fail(w, 'cannot be both held and used as a placing target');
+      if ((heldBy.has(pid) || usedAsTarget.has(pid)) && p.z !== undefined) fail(w, 'is used by a cast member and is drawn with it; remove its "z"');
+      if (p.on !== undefined && p.at === undefined) fail(w, 'needs "at": where along the surface (0 to 1)');
     }
     return {
       id: scene.id, set: set?.set ?? null, plate: scene.plate ?? null,
       members: (scene.cast || []).map(m => ({id: m.id, placement: placementMode(m, blockingOf.get(m.id), story.schema),
         ...(m.placement !== undefined && blockingOf.has(m.id) ? {blockingOverriddenByExplicitPlacement: true} : {}), layering: layeringMode(m, story.schema)})),
-      props: [...props.values()].map(p => ({id: p.id, prop: p.prop, placement: p.placement !== undefined ? 'explicit' : p.on !== undefined ? 'surface' : 'mark', layering: layeringMode(p, story.schema)})),
+      props: [...props.values()].map(p => ({id: p.id, prop: p.prop, placement: heldBy.has(p.id) ? `held-by:${heldBy.get(p.id)}` : p.placement !== undefined ? 'explicit' : p.on !== undefined ? 'surface' : 'mark', layering: heldBy.has(p.id) ? 'with-holder' : layeringMode(p, story.schema)})),
     };
   })};
 }
 
 // ------------------------------------------------------------------------------------------ compile gate
-// What can be compiled from a story@2 after S2: explicit placement (world units or plate coordinates), depth-derived
-// or explicit-z layering, and sets in face-to-face scenes. Everything that needs a later phase is refused, naming
-// that phase, rather than approximated.
+// What can be compiled from a story@2 after S3: explicit placement, depth-derived or explicit-z layering, sets in
+// face-to-face scenes, and (S3, approved 2026-11-16) props and blocking resolved by the staging resolver. A member with
+// neither an explicit placement nor any blocking is refused here; one whose blocking places nothing is refused by the
+// resolver. Everything that needs a later phase is refused rather than approximated.
 export const SET_FORMATS = Object.freeze(['face-to-face']);
 export function assertCompilable(story) {
   if (story.schema !== STORY_SCHEMA_V2) return;
   for (const s of story.scenes) {
     const where = `story@2 scene ${s.id}`;
     if (s.set !== undefined && !SET_FORMATS.includes(s.format)) fail(where, `uses a set in a "${s.format}" scene; AP-86 S2 renders sets in ${SET_FORMATS.join(', ')} scenes only`);
-    if (s.props?.length) fail(where, 'uses props; placing props needs AP-86 S3 (not implemented)');
-    if (s.blocking?.length) fail(where, 'uses blocking; the staging resolver needs AP-86 S3 (not implemented)');
+    if ((s.props?.length || s.blocking?.length) && s.set === undefined) fail(where, 'props and blocking need a "set"');
+    const blocked = new Set((s.blocking || []).map(b => b.who));
     for (const m of Array.isArray(s.cast) ? s.cast : []) {
-      if (placementMode(m, null, story.schema) === 'unplaced') fail(where, `cast member "${m.id}" has no placement. In story@2 members are placed by marks and actions (O3, needs AP-86 S3) or by an explicit "placement"`);
+      if (placementMode(m, blocked.has(m.id) ? true : null, story.schema) === 'unplaced') fail(where, `cast member "${m.id}" has no placement. In story@2 a member is placed by a placing action at a mark, surface or prop (O3) or by an explicit "placement"`);
     }
   }
 }

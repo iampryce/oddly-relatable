@@ -1,6 +1,6 @@
 # AP-86: next-generation production architecture
 
-**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1 and S2 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S3 TO S7 NOT AUTHORISED.**
+**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1, S2 and S3 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S4 TO S7 NOT AUTHORISED.**
 - **Approved by the owner on 2026-11-15:**
   - **O1:** this proposal and the milestone ID AP-86;
   - **O2:** the phase order and the S1 scope (data-model work only, local, $0, no artwork); every later phase needs its own approval;
@@ -8,7 +8,8 @@
   - **O4:** depth-derived layering is the default, and explicit `z` overrides.
 - **Still OPEN:** O5 to O13 (§13). Nothing in this document chooses set dimensions, layer, pose or prop standards, a first real set, an artwork route or budget, a facing strategy, framing formats, a movement method or an audio approach.
 - **S1 (data models and validation) is implemented:** see §11.1.
-- **S2 (sets and depth) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU or paid services) **and is implemented:** see §11.2. S3 to S7 have not started; each needs its own approval.
+- **S2 (sets and depth) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU or paid services) **and is implemented:** see §11.2.
+- **S3 (staging and props) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU, image generation or paid services, no renderer changes) **and is implemented:** see §11.3. S4 to S7 have not started; each needs its own approval.
 - No Character 02 is created or designed. AP-85 decisions M3 to M8 stay open and are not decided here.
 - No GPU, external service, spending, model download or image generation. AP-84B3, its locks and its D1-7 gate are untouched; D1-7 stays NOT AUTHORISED.
 - **The visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md`) is not changed.** Everything here is engineering that serves it: flat, bold-outlined characters in rich, layered, warmly lit three-quarter environments.
@@ -428,7 +429,7 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 | **S0** ✅ | Approve this proposal, the milestone ID and the decisions in §13 | **Done 2026-11-15:** O1 to O4 approved; O5 to O13 open | $0 |
 | **S1 Data model** ✅ implemented | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
 | **S2 Sets and depth** ✅ implemented (approved 2026-11-16) | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
-| **S3 Staging and props** | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
+| **S3 Staging and props** ✅ implemented (approved 2026-11-16) | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
 | **S4 Framing and camera** | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
 | **S5 Movement** | Paths on the floor model, entrances and exits, walk-cycle stepping, door states; optional limb-rig spike | Movement tests (no foot slip beyond tolerance); regression gate | $0 |
 | **S6 First real set (art)** | One approved set and plate kit, plus Character 01's sitting and contact poses, via an approved production route | Owner visual approval of the assets; one produced test scene | **Depends on route (§12)** |
@@ -495,6 +496,35 @@ story@1 takes exactly its old path. story@2 uses depth layering, and with explic
 - Each member keeps one depth for the whole scene; movement is S5.
 - The backdrop-coverage check under parallax is defensive, and no test triggered it.
 - The manifest's set-registry entry is untested end to end: no real set exists, and production refuses synthetic sets.
+
+### 11.3 S3 implementation (approved 2026-11-16)
+
+| Capability | Where | Behaviour |
+|---|---|---|
+| Staging resolver | `staging.mjs` `resolveStaging` | Turns explicit placements and blocking into world placements, contacts and a draw order. Deterministic; every missing mark, surface, prop, state, anchor, floor line or size is an error. Explicit placement wins (O3; the overridden action is reported) and explicit `z` wins (O4) |
+| Placing actions | `staging.mjs` | The first `align` entry puts that pose anchor exactly on its target: a mark point or floor, a point along a surface (blocking `at`), or a prop anchor. The size comes from the floor model at `scaleFrom`, or at the prop's floor line for prop targets. A member's depth is the nearer of its feet and that floor line; a member whose feet do not reach it (sitting) gets no feet shadow |
+| Poses | `staging.mjs` `poseMatches` | Lines still name poses (no guessing). Every pose a member uses under an action must match the action's pose selector (tags) and have the anchors it needs |
+| Anchor-alignment QA | `staging.mjs` `ALIGN_TOLERANCE` = 1 design unit | Every align entry, for every pose used, must land within the tolerance (on a surface line: the height exactly, and the anchor within the line), or the build fails with the distance |
+| Props | `staging.mjs`, `props.mjs` | Registered states with hash-verified files and in-bounds anchors. Front and back splits must match the state image's size and are drawn as extra layers. Placed on a mark (`floor` anchor), on a surface at `at` (`base` anchor) or explicitly (`floor`, else `base`). `height` is plate fraction at the floor model's reference line, scaled by depth |
+| Held props | `staging.mjs`, `formats/face-to-face.mjs` | `hold` attaches the prop's `grip` to the hand anchor in each pose segment; each segment is its own layer, visible only for that pose and only while the holder is on camera |
+| Draw order | `staging.mjs` | Occluders, members and free props by depth. A prop sat on is drawn just before its sitter, with its front split just after; held props come just after their holder |
+| Rules | `story-v2.mjs`, `actions.mjs` | One placing action per member, plus any number of attaching actions (`hold`). A held prop has no placement of its own and no `z`. Surface placement and props on surfaces need `at`. Mark and surface placing actions must declare `scaleFrom`. An action either places or attaches |
+| Examples | `production/tests/fixtures/ap86-s3-examples.mjs` | §6 bar: sit on a stool prop, hold a glass, lean on the counter, a glass on the counter. §7 office: sit at a desk mark behind the desk front, a mug on the desk, a visitor at a stand mark. Synthetic and labelled; temporary folders only |
+
+**Tests:**
+- `production/tests/ap86-s3-staging.test.mjs`: 7/7. Positions are worked out independently from the fixture numbers and compared with the render plan's layer keys; rendered pixels show the stool rim over the sitter, the glass in the hand and the desk front over the sitter;
+- ten deliberate rule breaks were each caught;
+- production 106/106 with FFmpeg (89 pass, 17 skipped without it); studio 64/64 (of 10 studio runs on the S3 tree, 8 were fully clean and 2 each had one intermittent environmental failure in a different test: a random test port landing on Windows-reserved port 5357, and a 1.5 s wall-clock assertion; S3 changes no studio code, the timed request measures about 20 ms with and without S3, and the pre-S3 commit passed 6 of 6 runs); renderer 134/135 (the pre-existing Jensen baseline failure, identical to the pre-S3 run);
+- Short 001 byte and pixel baselines pass; AP-85 Track A 15/15; the AP-85 review scenes are byte-identical.
+- The S1 and S2 tests were updated where they encoded rules S3 changes: holds and held props, props and blocking now compiling, and the unplaced-member message.
+
+**Limitations and deferred work:**
+- Blocking applies to the whole scene: no timing, entrances or movement (S5).
+- Poses are named by the lines; the resolver checks them but never chooses them.
+- One `hold` attaches one prop anchor to one pose anchor. Held props do not follow pop-transition scaling.
+- The face-crop check still assumes a standing figure, so for seated poses its face box is conservative.
+- Occlusion is by draw order with cut-outs, as in S2.
+- **Pre-existing defect found (not caused by S3, not fixed):** since the AP-85 review corrections (`305a504`), a member shadow is drawn by `worldLayer`, which sets no visibility window, so shadow layers split for `single` shots stay on screen for the whole shot: in single shots the off-camera member's shadow still shows, and scenes with singles draw extra shadow copies (measured on the accepted AP-85 A4 scene). Fixing it would change the accepted AP-85 A4 render and evidence, so it needs an owner decision; S3's own prop layers set their windows explicitly and are not affected.
 
 **Ordering:** S1 → S2 → S3 is the critical path. S4 can follow S2. S5 follows S3. S6 can be prepared in parallel as decisions only, but no art is produced until approved. Track B stays independent; when Character 02 exists, it is simply another registry the system already supports.
 

@@ -203,7 +203,7 @@ export async function resolvePlate(set, plateId, {plane, registryFile = null, re
   });
   const marks = Object.fromEntries(Object.entries(plate.marks || {}).map(([k, m]) => [k, {kind: m.kind, point: plateToWorld(R, m.point), ...(m.floor ? {floor: plateToWorld(R, m.floor)} : {})}]));
   const surfaces = Object.fromEntries(Object.entries(plate.surfaces || {}).map(([k, sf]) => [k, {x0: R.x + sf.line.x0 * R.w, x1: R.x + sf.line.x1 * R.w, y: R.y + sf.line.y * R.h}]));
-  return {set: set.set, plate: plateId, size, rect: R, floor: plate.floor ?? null, layers, marks, surfaces,
+  return {set: set.set, plate: plateId, plateData: plate, size, rect: R, floor: plate.floor ?? null, layers, marks, surfaces,
     toWorld: p => plateToWorld(R, p), toPlate: p => worldToPlate(R, p),
     heightAt: (feetY, w) => floorHeightAt(plate.floor, feetY, w) * R.h};
 }

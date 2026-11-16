@@ -146,7 +146,7 @@ test('S2 depth order: back to front by the feet line, occluders between members 
 });
 
 // ------------------------------------------------------------------------------------------------ precedence
-test('S2 precedence: explicit z overrides depth (O4); explicit placement overrides blocking (O3), which still needs S3', async () => {
+test('S2 precedence: explicit z overrides depth (O4); explicit placement overrides blocking (O3)', async () => {
   const {file, art} = writeS2Set(tmp('prec'));
   // ph stands behind the counter (0.72) but has an explicit z of 0.9: it is drawn in front of the counter.
   const b = await build(setStory(file, [ph({plateX: 0.4, plateY: 0.72}, {z: 0.9}), c01({plateX: 0.6, plateY: 0.92})]));
@@ -168,9 +168,11 @@ test('S2 precedence: explicit z overrides depth (O4); explicit placement overrid
   blocked.scenes[0].blocking = [{who: 'c01', do: 'stand-at', mark: 'spot'}];
   const d = validateStoryReferences(blocked, {allowSynthetic: true}).scenes[0];
   assert.deepEqual(d.members.find(m => m.id === 'c01'), {id: 'c01', placement: 'explicit', blockingOverriddenByExplicitPlacement: true, layering: 'depth'});
-  assert.throws(() => assertCompilable(blocked), /uses blocking; the staging resolver needs AP-86 S3/);
+  // Since S3 the blocking is compiled; the explicit placement still wins and the overridden action is reported.
+  const ob = await build(blocked), obm = ob.report.scenes[0].staging.members.find(m => m.id === 'c01');
+  assert.deepEqual([obm.placement, obm.overriddenAction, obm.world.feetY], ['explicit-plate', 'stand-at', +(0.9 * PLANE.height).toFixed(3)]);
   const unplaced = setStory(file, [ph({plateX: 0.4, plateY: 0.72}), {...c01(undefined)}]); delete unplaced.scenes[0].cast[1].placement;
-  assert.throws(() => assertCompilable(unplaced), /cast member "c01" has no placement\. In story@2 members are placed by marks and actions \(O3, needs AP-86 S3\)/);
+  assert.throws(() => assertCompilable(unplaced), /cast member "c01" has no placement\. In story@2 a member is placed by a placing action at a mark, surface or prop \(O3\)/);
   assert.ok(art.counter.sha256);
 });
 

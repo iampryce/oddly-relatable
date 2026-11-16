@@ -11,7 +11,8 @@ import {renderTitleCard} from './graphics.mjs';
 import {PALETTE} from './palette.mjs';
 import {silentWav} from './wav.mjs';
 import {STORY_SCHEMA, EPISODE_SCHEMA, validateStory, episodeToStory, resolveEnvironment} from './story.mjs';
-import {assertCompilable, STORY_SCHEMA_V2} from './story-v2.mjs';
+import {assertCompilable, validateStoryReferences, STORY_SCHEMA_V2} from './story-v2.mjs';
+import {loadActionLibrary, ACTIONS_FILE} from './actions.mjs';
 import {loadSet, resolvePlate} from './sets.mjs';
 import {formatFor} from './formats/index.mjs';
 import {assertRenderable} from './text.mjs';
@@ -37,6 +38,10 @@ export const compileEpisode = compileProject;   // AP-78 name, kept for compatib
 export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIssues = false, allowSynthetic = false, sourceFile = null, sourceData = story} = {}) {
   validateStory(story);
   assertCompilable(story);   // story@2 (AP-86 S1): only what needs no later phase; story@1 is unaffected
+  // story@2 (AP-86 S3): every reference (set, plate, marks, surfaces, props, states, actions) is checked before compiling,
+  // and the action library is loaded once when a scene has blocking.
+  const actionLibrary = story.schema === STORY_SCHEMA_V2 && story.scenes.some(s => s.blocking?.length) ? loadActionLibrary(story.actionLibrary ?? ACTIONS_FILE) : null;
+  if (story.schema === STORY_SCHEMA_V2) validateStoryReferences(story, {allowSynthetic});
   if (!outDir) throw new Error('outDir is required');
   const dir = assertWritableOutput(outDir);
   if (fs.existsSync(path.join(dir, 'project.json')) && !fs.existsSync(path.join(dir, MARKER))) throw new Error(`${dir} holds a project not created by this toolkit; refusing to overwrite`);
@@ -97,7 +102,7 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
       ? await resolvePlate(loadSet(x.scene.set, {file: x.scene.setRegistry ?? null, allowSynthetic}), x.scene.plate, {plane, registryFile: x.scene.setRegistry ?? null, repoRoot})
       : null;
     const env = stage ? null : await resolveEnvironment(x.scene.environment, plane, repoRoot);
-    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, ...(v2 ? {stage, layering: 'depth'} : {}), writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
+    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, ...(v2 ? {stage, layering: 'depth', actionLibrary} : {}), writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
     const layers = [...out.world, ...out.screen];
     if (i === 0 && hookLayer) layers.push(hookLayer);
     if (i === scenes.length - 1 && endCard) {

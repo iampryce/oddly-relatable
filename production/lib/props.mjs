@@ -25,7 +25,8 @@ export const propFile = propId => path.join(PRODUCTION_ROOT, 'props', `${id(prop
 
 export function validateProp(prop, where = `prop ${prop?.prop ?? '?'}`) {
   object(prop, where);
-  onlyKeys(prop, ['prop', 'schemaVersion', 'displayName', 'synthetic', 'note', 'defaultState', 'states', 'affordances', 'height', 'splits'], where);
+  onlyKeys(prop, ['prop', 'schemaVersion', 'displayName', 'synthetic', 'note', 'assetRoot', 'defaultState', 'states', 'affordances', 'height', 'splits'], where);
+  if (prop.assetRoot !== undefined && !['repository', 'registry'].includes(prop.assetRoot)) fail(`${where}.assetRoot`, 'must be "repository" or "registry"');
   id(prop.prop, `${where} "prop"`);
   schemaVersion(prop.schemaVersion, [PROP_SCHEMA_VERSION], where);
   if (prop.synthetic !== undefined && typeof prop.synthetic !== 'boolean') fail(`${where}.synthetic`, 'must be true or false');

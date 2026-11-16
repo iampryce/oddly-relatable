@@ -31,7 +31,8 @@ import {bubbleX, LAYOUT_DEFAULTS} from '../layout.mjs';
 import {resolveCast, validateCast} from '../cast.mjs';
 import {cameraAt, applyCamera, parseCameraNote, CAMERA_DEFAULTS} from '../camera.mjs';
 import {planPoseLayers, castLayers, worldLayer, poseRect, scaleAt, alphaAt} from '../timeline.mjs';
-import {worldPlacement, layeringKey, drawOrder, parallaxCamera, placementKind} from '../depth.mjs';
+import {parallaxCamera} from '../depth.mjs';
+import {resolveStaging} from '../staging.mjs';
 
 export const FACE_TO_FACE_DEFAULTS = Object.freeze({bubbleY: 300, marginX: LAYOUT_DEFAULTS.marginX, safe: LAYOUT_DEFAULTS.safe});
 // edgeMargin: design units kept between a framed member and the frame edge. subjectMargin: when several members are in
@@ -86,28 +87,22 @@ export const faceToFace = {
 
   // stage: a resolved set plate (AP-86 S2) instead of env. layering: 'legacy' (story@1: z, default 0, declaration order,
   // exactly as before) or 'depth' (story@2: O4, depth-derived with explicit z winning; see depth.mjs).
-  async compile({scene, seq, shotDuration, plane, ppu, fps, env, stage = null, layering = 'legacy', writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
+  async compile({scene, seq, shotDuration, plane, ppu, fps, env, stage = null, layering = 'legacy', actionLibrary = null, writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
     const o = {...FACE_TO_FACE_DEFAULTS, ...(scene.layout || {}), safe: {...FACE_TO_FACE_DEFAULTS.safe, ...(scene.layout?.safe || {})}};
     const bubbleOpts = {...BUBBLE_DEFAULTS, ...(scene.bubbles || {})};
     const world = [], screen = [], issues = [];
 
     // 1. Cast (resolved by character ID, facing resolved to declared artwork) and their pose segments.
     for (const list of Object.values(seq.castPoses)) for (const p of list) if (!Number.isFinite(p.end) || p.end > shotDuration) p.end = shotDuration;
-    // S2: in story@2, explicit placements may be in plate coordinates (resolved to world units, height from the floor
-    // model unless given), and the draw order is depth-derived unless a member has an explicit z. The depth key is
-    // handed to the existing z sort, which is stable, so ties keep declaration order.
-    let castInput = scene.cast, staging = null;
+    // story@2 (AP-86 S2/S3): the staging resolver turns explicit placements and blocking (marks, surfaces, props,
+    // actions) into world placements, contacts and a depth-derived draw order (explicit placement and z win). The depth
+    // key is handed to the existing z sort, which is stable, so ties keep declaration order.
+    let castInput = scene.cast, staging = null, staged = null;
     if (layering === 'depth') {
-      staging = {layering: 'depth', ...(stage ? {set: stage.set, plate: stage.plate} : {}), members: []};
-      castInput = scene.cast.map((m, index) => {
-        const where = `cast member "${m.id}" placement`;
-        const kind = placementKind(m.placement, where);
-        const placement = worldPlacement(m.placement, stage, where);
-        const lk = layeringKey(m, placement, {stage, plane});
-        staging.members.push({id: m.id, placement: kind === 'plate' ? 'explicit-plate' : 'explicit-world', layering: lk.mode, key: +lk.key.toFixed(6), index,
-          world: {feetX: +placement.feetX.toFixed(3), feetY: +placement.feetY.toFixed(3), figureHeight: +placement.figureHeight.toFixed(3)}});
-        return {...m, placement, z: lk.key};
-      });
+      staged = await resolveStaging({scene, seq, stage, plane, library: actionLibrary, repoRoot, allowSynthetic});
+      staging = staged.report;
+      const byMember = new Map(staged.members.map(x => [x.id, x]));
+      castInput = scene.cast.map(m => ({...m, placement: byMember.get(m.id).placement, z: byMember.get(m.id).key}));
     } else if (stage) throw new Error('a set needs depth layering (story@2)');
     const cast = await resolveCast(castInput, seq.castPoses, repoRoot, {allowSynthetic});
     const byId = new Map(cast.map(m => [m.id, m]));
@@ -137,12 +132,33 @@ export const faceToFace = {
     if (stage) for (const l of stage.layers) if (!l.occluder) pushSetLayer(l);
     const diagnostics = [], members = [];
     const zMax = Math.max(...shots.map(s => s.zoom));
-    const order = stage
-      ? drawOrder(staging.members.map(m => ({id: m.id, key: m.key, index: m.index})), stage.layers.map((l, index) => ({...l, index})).filter(l => l.occluder).map(l => ({id: l.id, baselineY: l.occluder.baselineY, index: l.index})))
-      : cast.map(m => ({kind: 'member', id: m.id}));
-    if (staging) staging.drawOrder = order.map(o => `${o.kind}:${o.id}`);
+    // Props (S3): drawn as world layers at their resolved rectangles; splits are extra layers aligned with the state
+    // image. A held prop follows its holder's hand pose by pose and is off camera whenever its holder is.
+    const propOf = id => staged.props.get(id);
+    // worldLayer samples keys only inside [from, to); the visibility window is set here so a prop shows only then.
+    const propLayer = (file, label, rect, from, to) => world.push({...worldLayer({path: copySource(file, label), rect: {x: rect.x, y: rect.y, w: rect.w}, cameraFor, from, to, fps}), from: +from.toFixed(4), to: +to.toFixed(4)});
+    const pushProp = (id, part = 'main') => {
+      const pr = propOf(id), label = `prop-${pr.reg.prop}-${pr.stateId}`;
+      if (pr.segments) {
+        const visible = visibleIntervals(pr.heldBy, shots, shotDuration);
+        for (const sg of pr.segments) for (const [a, b] of visible) {
+          const from = Math.max(a, sg.from), to = Math.min(b, Math.min(sg.to, shotDuration));
+          if (to <= from + EPS) continue;
+          propLayer(pr.file, label, sg.rect, from, to);
+          if (pr.splits.front) propLayer(pr.splits.front, `${label}-front`, sg.rect, from, to);
+        }
+        return;
+      }
+      if (part === 'front') { propLayer(pr.splits.front, `${label}-front`, pr.rect, 0, shotDuration); return; }
+      if (pr.splits.back) propLayer(pr.splits.back, `${label}-back`, pr.rect, 0, shotDuration);
+      propLayer(pr.file, label, pr.rect, 0, shotDuration);
+      if (pr.splits.front && !pr.seatOf) propLayer(pr.splits.front, `${label}-front`, pr.rect, 0, shotDuration);
+    };
+    const order = staged ? staged.order.map(o => { const i = o.indexOf(':'); return {kind: o.slice(0, i), id: o.slice(i + 1)}; }) : cast.map(m => ({kind: 'member', id: m.id}));
     for (const item of order) {
       if (item.kind === 'occluder') { pushSetLayer(stage.layers.find(l => l.id === item.id)); continue; }
+      if (item.kind === 'prop') { pushProp(item.id); continue; }
+      if (item.kind === 'prop-front') { pushProp(item.id, 'front'); continue; }
       const m = byId.get(item.id);
       // A member is off camera during single shots on someone else; otherwise it is visible for the whole scene.
       const visible = visibleIntervals(m.id, shots, shotDuration);

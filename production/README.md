@@ -197,6 +197,20 @@ Approved 2026-11-16 (local, $0, synthetic fixtures only). A **story@2 face-to-fa
 - **Report:** `layout-report.json` lists each story@2 scene's `staging`: every member's placement kind, layering mode, depth key, world placement, and the draw order.
 - **Limitations:** face-to-face scenes only; plates are centred (framing windows are S4); no movement (S5); occlusion is by draw order, not per-pixel depth.
 
+## AP-86 S3: staging and props
+
+Approved 2026-11-16 (local, $0, synthetic fixtures only). In a story@2 face-to-face scene with a set, members can be placed by **blocking** and props can be placed and held. The staging resolver (`lib/staging.mjs`) works out where everything goes.
+
+- **Placing actions** (`stand-at`, `sit-on` at a seat mark or on a prop, `lean-on` a surface at `at`): the first `align` anchor of the pose is put exactly on its target, and the size comes from the floor model at the action's `scaleFrom` line (or the prop's floor line). One placing action per member.
+- **Attaching actions** (`hold`): the prop's `grip` follows the member's hand anchor in every pose.
+- **Precedence:** an explicit `placement` wins over blocking (O3; the overridden action is reported), and an explicit `z` wins over depth (O4).
+- **Poses** are named by the lines as before. Each must match the action's pose tags and have the anchors it needs.
+- **QA:** every pose a member uses must land its anchors within 1 design unit of the target, or the build fails with the distance.
+- **Props** (`props/<id>.json`): placed on a mark (`floor` anchor), on a surface at `at` (`base` anchor) or explicitly. `height` (plate fraction at the floor model's reference line) sizes them by depth. Front and back splits are extra aligned layers. A prop sat on is drawn around its sitter, and a held prop after its holder.
+- **Report:** `layout-report.json` `staging` lists each member's placement source, action, target and contacts (the anchor error per pose), each prop's placement, and the full draw order.
+- **Examples:** `tests/fixtures/ap86-s3-examples.mjs` builds the synthetic bar conversation and office desk scenes used by the tests. They are not artwork and never production assets.
+- **Limitations:** no timing or movement for blocking (S5); one hold attaches one anchor pair; see the AP-86 proposal §11.3.
+
 ## Fixtures and evidence
 
 - **`stories/short-001-v2.story.json`:** Short 001. Its dialogue is identical to `fixtures/short-001-v2.conversation.json`, and its camera notes are verbatim from `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (tests enforce both). Character 01 only; pose changes stay hard cuts, because the script specifies none.
