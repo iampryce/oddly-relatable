@@ -1,6 +1,6 @@
 # AP-86 S4: framing and camera — approval request
 
-**Status (2026-11-16): REQUEST PREPARED; S4 IS NOT AUTHORISED.** Nothing in this request is implemented. S4 starts only after the owner approves it. S5 to S7 stay unauthorised, and O5 to O13 stay open unless the owner decides them separately.
+**Status (2026-11-16): APPROVED; NOT YET IMPLEMENTED.** **S4 APPROVED by the owner** (confirmed 2026-11-16; the owner states it was given in an earlier discussion that this repository had not recorded): (1) S4 implementation approved, scope as in §1 to §3; (2) 1080×1920 and 1920×1080 approved as engineering test resolutions (O11 and D18 stay open); (3) provisional safe margins approved; (4) a character switching screen side between shots is **reported, not a build failure**. Implementation has not started. S5 to S7 stay unauthorised; O5 to O13 stay open.
 
 **Context:** AP-86 proposal §8 (camera workflow, items 1 to 5) and §11 (roadmap row S4). S1, S2 and S3 are implemented; S4 depends on S2 (sets, plates, parallax), which is done. The AP-85 shadow correction (`59e6f3e`) was accepted by the owner on 2026-11-16, so S4 starts from a clean Track A baseline.
 
@@ -40,7 +40,7 @@
 - Deliberate rule breaks are each caught (mutation checks, as in S1 to S3).
 - **Unchanged:** Short 001 byte and pixel baselines; AP-85 Track A A1 to A6 byte-identical, including the accepted corrected A4; the S1, S2 and S3 tests; studio 64/64; renderer 134/135 (only the pre-existing Jensen baseline failure).
 
-## 4. Decisions the owner is asked to make
+## 4. Decisions (all four decided by the owner; see the status above)
 1. **Approve S4** with the scope above: local engineering, $0, synthetic fixtures only, no artwork, no GPU, image generation, external or paid services, no renderer changes.
 2. **Profile sizes for engineering only:** use 1080×1920 (P-916) and 1920×1080 (P-169) as test profiles. This does **not** decide O11 (framing formats) or D18 (master format); AP-20 (9:16 primary, 16:9 secondary) is the only format direction assumed.
 3. **Safe areas and caption zone:** use the bible's action-safe square (0.5625 S × 0.5625 S, centred; `MULTI_PLATFORM_ARCHITECTURE.md` §4) as the default. The bible records platform UI-safe margins and the caption zone as **unverified** (§5), so S4 uses conservative, configurable placeholder margins, labelled provisional; locking real platform values stays with O11.

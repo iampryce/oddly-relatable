@@ -11,7 +11,7 @@
 | Script size | `script_schema.py` | At most 12 scenes, 24 lines per scene, 4 characters |
 | Writer | `writer.py` | Asks for 2–6 scenes and returns the whole script in one answer |
 | Format | `scene.mjs`, `face-to-face.mjs` | 1080×1920 (9:16). Framing rules, bubbles and safe areas are tuned for vertical |
-| Composition | AP-86 S4 (not authorised) | 16:9 framing profiles from one staged scene are S4 work |
+| Composition | AP-86 S4 (approved, not yet implemented) | 16:9 framing profiles from one staged scene are S4 work |
 | Storyboard review | Episode page | One long page; fine for 4 scenes, unwieldy for 40 |
 
 ## 2. Measured performance (this PC, CPU only)
@@ -55,7 +55,7 @@ An episode gets a **format**: `short` (default; everything exactly as today) or 
    - Voices as today.
    - A music bed: the engine already supports a licensed music track with fades, but it needs a music source decision (D-L4).
    - Loudness normalised to the platform target, YouTube about −14 LUFS, as a final FFmpeg pass.
-6. **Format 16:9.** Long YouTube episodes follow AP-20, with 9:16 primary and 16:9 secondary. That depends on AP-86 S4 framing profiles: its approval request is prepared but not authorised, and O11/D18 are open. Until then, long-form can be produced in 9:16 for testing.
+6. **Format 16:9.** Long YouTube episodes follow AP-20, with 9:16 primary and 16:9 secondary. That depends on AP-86 S4 framing profiles: S4 is approved (1080×1920 and 1920×1080 as test resolutions) but not yet implemented, and O11/D18 are open. Until then, long-form can be produced in 9:16 for testing.
 7. **QA and review.**
    - Chapter markers from the acts, used in the YouTube description.
    - Per-segment QA plus whole-file QA: duration, frame count and audio continuity at joins.

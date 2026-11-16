@@ -1,6 +1,6 @@
 # AP-86: next-generation production architecture
 
-**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1, S2 and S3 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S4 TO S7 NOT AUTHORISED.**
+**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1, S2 and S3 AUTHORISED AND IMPLEMENTED; S4 APPROVED (NOT YET IMPLEMENTED); O5 TO O13 OPEN; S5 TO S7 NOT AUTHORISED.**
 - **Approved by the owner on 2026-11-15:**
   - **O1:** this proposal and the milestone ID AP-86;
   - **O2:** the phase order and the S1 scope (data-model work only, local, $0, no artwork); every later phase needs its own approval;
@@ -10,7 +10,7 @@
 - **S1 (data models and validation) is implemented:** see §11.1.
 - **S2 (sets and depth) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU or paid services) **and is implemented:** see §11.2.
 - **S3 (staging and props) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU, image generation or paid services, no renderer changes) **and is implemented:** see §11.3. S4 to S7 have not started; each needs its own approval.
-- **S4 approval request prepared (2026-11-16):** `AP-86-S4-APPROVAL-REQUEST.md`. S4 is **not authorised** until the owner approves it.
+- **S4 APPROVED by the owner** (confirmed 2026-11-16; the owner states it was given in an earlier discussion that this repository had not recorded): (1) S4 implementation approved, scope as in §1 to §3; (2) 1080×1920 and 1920×1080 approved as engineering test resolutions (O11 and D18 stay open); (3) provisional safe margins approved; (4) a character switching screen side between shots is **reported, not a build failure**. Implementation has not started. Details: `AP-86-S4-APPROVAL-REQUEST.md`.
 - No Character 02 is created or designed. AP-85 decisions M3 to M8 stay open and are not decided here.
 - No GPU, external service, spending, model download or image generation. AP-84B3, its locks and its D1-7 gate are untouched; D1-7 stays NOT AUTHORISED.
 - **The visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md`) is not changed.** Everything here is engineering that serves it: flat, bold-outlined characters in rich, layered, warmly lit three-quarter environments.
@@ -431,7 +431,7 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 | **S1 Data model** ✅ implemented | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
 | **S2 Sets and depth** ✅ implemented (approved 2026-11-16) | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
 | **S3 Staging and props** ✅ implemented (approved 2026-11-16) | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
-| **S4 Framing and camera** | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
+| **S4 Framing and camera** (approved; not yet implemented) | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
 | **S5 Movement** | Paths on the floor model, entrances and exits, walk-cycle stepping, door states; optional limb-rig spike | Movement tests (no foot slip beyond tolerance); regression gate | $0 |
 | **S6 First real set (art)** | One approved set and plate kit, plus Character 01's sitting and contact poses, via an approved production route | Owner visual approval of the assets; one produced test scene | **Depends on route (§12)** |
 | **S7 Pipeline** | External audio mix (stems → one master), post-render caption burn-in per profile, export presets | Produced test episode passes QA in both profiles | $0 (local tools) |
