@@ -1,6 +1,6 @@
 # Long-form episodes (5–7 minutes): investigation and plan
 
-**Status (2026-11-16): PLAN ONLY.** Nothing here is implemented, and the short-form workflow is unchanged. The owner decisions in §6 come before any implementation.
+**Status (2026-11-16): APPROVED AT THE PLANNING LEVEL; DECISIONS D-L1 TO D-L5 SETTLED (§6); NOT IMPLEMENTED.** Implementation starts only on the owner's go, and the short-form workflow is unchanged.
 
 ## 1. What limits episode length today (verified in the code)
 
@@ -46,21 +46,18 @@ An episode gets a **format**: `short` (default; everything exactly as today) or 
    - The segments are joined with FFmpeg's concat demuxer: same codec and settings, no re-encode. The audio bed is continuous per segment, with crossfades at joins.
    - A failed segment is retried alone, and a revision re-renders only the affected segments, as scene revisions already do for Shorts.
    - The worker renders segments in parallel within its CPU limit.
-4. **Renderer approval.** Two options for the owner (D-L2):
-   - (a) segments of 60 s or less each render in full under the renderer's preview path;
-   - (b) one full render, with the owner's dashboard approval passed as the renderer's approval note.
-
-   Option (a) gives retries and speed. Option (b) keeps the renderer's single-file approval semantics.
+4. **Renderer approval (decided, D-L2 A).** Segments of 60 s or less each render in full under the renderer's preview path, and the approved segments are joined. The owner's approval gates (outline, storyboard, final video) stay in the dashboard.
 5. **Audio.**
    - Voices as today.
-   - A music bed: the engine already supports a licensed music track with fades, but it needs a music source decision (D-L4).
+   - No music at first (D-L4 A): voices and sound effects only. A licensed music bed (the engine supports one with fades) comes later, after the owner chooses a library.
    - Loudness normalised to the platform target, YouTube about −14 LUFS, as a final FFmpeg pass.
 6. **Format 16:9.** Long YouTube episodes follow AP-20, with 9:16 primary and 16:9 secondary. That depends on AP-86 S4 framing profiles: S4 is approved (1080×1920 and 1920×1080 as test resolutions) but not yet implemented, and O11/D18 are open. Until then, long-form can be produced in 9:16 for testing.
 7. **QA and review.**
    - Chapter markers from the acts, used in the YouTube description.
    - Per-segment QA plus whole-file QA: duration, frame count and audio continuity at joins.
    - The review page jumps to each act.
-8. **Production limits:** a per-format `max_seconds`, with 60 for Shorts and 480 for long-form.
+8. **Production limits:** a per-format `max_seconds`, with 60 for Shorts and 450 (7½-minute cap, D-L3) for long-form.
+9. **Continuation of a Short (D-L5 B).** A long episode is standalone by default. Optionally, the owner can start it from a published or approved Short, whose script and cast are then given to the outline step as the premise.
 
 ## 4. Implementation phases and effort
 
@@ -69,8 +66,8 @@ An episode gets a **format**: `short` (default; everything exactly as today) or 
 | L1 | Episode format field; long-format schema limits; outline step and gate; act-by-act writer | 2–3 days |
 | L2 | Segmented production and FFmpeg concat; per-segment retry and revision; progress per segment | 2–3 days |
 | L3 | Act-grouped storyboard and review UI; chapters | 1–2 days |
-| L4 | Music bed and loudness normalisation | 1 day (plus D-L4) |
-| L5 | 16:9 profile | Depends on AP-86 S4 approval |
+| L4 | Loudness normalisation; continuation of a Short (D-L5); music bed later, once a library is chosen | 1 day |
+| L5 | 16:9 profile | After AP-86 S4 is implemented (approved) |
 | Test | A real 5-minute episode end to end; measure time and memory on the server | 1 day |
 
 ## 5. Costs per long episode
@@ -80,10 +77,26 @@ Estimates; see `VOICE-AND-CASTING.md`.
 - **Writing:** about $0.05–$0.30 with an API writer, or $0 with Codex.
 - **Rendering:** CPU only, $0.
 
-## 6. Owner decisions before implementation
+## 6. Owner decisions (SETTLED 2026-11-16; do not reopen)
 
-- **D-L1:** long-form aspect ratio: 9:16 now and 16:9 after AP-86 S4, or wait for S4.
-- **D-L2:** renderer approval: segments of 60 s or less (recommended), or a full render with the owner's dashboard approval passed as the renderer approval note.
-- **D-L3:** target length and structure: for example 3 acts, 5–7 minutes, number of characters on screen (the engine caps it at 4).
-- **D-L4:** music: a licensed library, or none.
-- **D-L5:** whether long episodes reuse Short storylines (for example "part 2" of an interactive Short) or are always standalone.
+| Decision | Owner's choice | Meaning for implementation |
+|---|---|---|
+| **D-L1** Aspect ratio | **A** | Long-form starts in 9:16 (1080×1920). 16:9 is added once AP-86 S4 (approved, not yet implemented) is built |
+| **D-L2** Rendering | **A** | Segments of 60 s or less, each rendered in full by the unchanged engine; individual retries; a final join of the approved segments |
+| **D-L3** Structure | **3 acts, 5–7 minutes, 7½-minute cap** | `max_seconds` 450 for long-form; at most 4 characters on screen at once (engine limit); the episode's total cast is not capped |
+| **D-L4** Music | **A initially** | Voices and sound effects only. Licensed music is added later, as its own decision on the library |
+| **D-L5** Relationship to Shorts | **B** | Standalone by default; optionally continues a successful Short (for example the winning choice of an interactive Short) |
+
+**Owner requirements for the implementation (binding):**
+1. **Story quality over duration.** Never stretch a weak story to reach five minutes.
+   - The 5–7 minute target guides the outline. It is not a quota the writer must fill.
+   - The outline step reports the estimated runtime and flags padding.
+   - A strong story that runs short is offered to the owner as it is, or as a Short, rather than lengthened.
+2. **Segment continuity.** Characters, backgrounds, voices, camera direction and audio stay consistent across segments.
+   - Every segment is built from the same approved character registries, environment, voice assignments, voice settings and framing defaults.
+   - Segment boundaries fall on scene cuts, never inside a line.
+   - The audio of adjacent segments is checked at each join (level and silence gaps).
+   - The joined file is checked as a whole: duration, frame count and continuous audio.
+3. **Selective regeneration.** Editing one scene re-renders only the segment or segments containing it. The other approved segments are reused unchanged, identified by the hash of their inputs, and the final join is redone.
+
+**Status:** approved at the planning level. **Implementation has not started and needs the owner's go.** Shorts are unchanged.
