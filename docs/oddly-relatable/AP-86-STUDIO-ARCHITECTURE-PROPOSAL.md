@@ -499,6 +499,8 @@ story@1 takes exactly its old path. story@2 uses depth layering, and with explic
 
 ### 11.3 S3 implementation (approved 2026-11-16)
 
+Implemented at commit `226ea7a1432dcacff9b094a4995cc0c8d28d998a`.
+
 | Capability | Where | Behaviour |
 |---|---|---|
 | Staging resolver | `staging.mjs` `resolveStaging` | Turns explicit placements and blocking into world placements, contacts and a draw order. Deterministic; every missing mark, surface, prop, state, anchor, floor line or size is an error. Explicit placement wins (O3; the overridden action is reported) and explicit `z` wins (O4) |
