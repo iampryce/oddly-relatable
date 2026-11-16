@@ -157,6 +157,15 @@ At P1: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-exi
 - **What this accepts:** the composition engine only. It is not identity evidence for any character (§1). It does not approve Track B, Character 02, or any later phase, each of which keeps its own owner gate (§8, §9).
 - **Still open:** M3 to M8. Track B has not started. No Character 02 artwork or registry exists.
 
+### 5.5 Shadow correction (2026-11-16): awaiting owner visual review
+
+The owner approved a narrowly scoped corrective task on 2026-11-16.
+- **Defect:** in a `single` shot, the off-camera member's shadow still showed, and shadows were duplicated across shots. The split shadow layers had no visibility window, so the renderer showed each one for the whole shot.
+- **Correction:** `production/lib/formats/face-to-face.mjs` now shows each shadow layer only while its member is on camera. Composition, shadow positions and appearance, dialogue and bubbles are unchanged.
+- **Scope of the change:** only A4, the accepted scene with singles, changes, and only in shadow pixels. A1, A2, A3a, A3b, A5 and A6 are byte-identical.
+- **Evidence:** the corrected A4 sheets and a before/after comparison are in `production/evidence/ap85/shadow-correction/`. The original accepted A4 evidence is unchanged in `production/evidence/ap85/review/`.
+- **Status:** the corrected A4 evidence **awaits owner visual review**. Track A's acceptance (§5.4) is not changed by this record.
+
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 
 Track B starts only when an owner-approved Character 02 master and pose set exist (Phase 3). It applies to artwork however it was made. If the owner chooses AI generation for Character 02, that is a **separate experiment with its own lock, budget and approval gates**; AP-84B3 locks and approvals do not carry over.

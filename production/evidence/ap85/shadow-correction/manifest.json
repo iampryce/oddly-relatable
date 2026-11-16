@@ -1,0 +1,110 @@
+{
+  "schema": "oddly-relatable/ap85-track-a-review@1",
+  "track": "A (composition architecture only; not identity evidence)",
+  "placeholder": "SYNTHETIC PLACEHOLDER, NOT ARTWORK. Test fixture only; not Character 02.",
+  "ownerAcceptance": "NOT GIVEN. These sheets are for the owner review; nothing here records acceptance.",
+  "generator": {
+    "file": "production/evidence/ap85/review/generate-review-sheets.mjs"
+  },
+  "scenes": {
+    "A4": {
+      "generatedFrom": {
+        "baseCommit": "81fc4c03eb20c69a649fd8940943f2b6eed9c35c",
+        "uncommittedEngineChanges": true,
+        "sources": {
+          "production/lib/formats/face-to-face.mjs": "cdbf51e5134feceee6c8be9ed2a3c19830ed05054a9a16e8d43a30bf9b5d7911",
+          "production/lib/cast.mjs": "9ee9eaef72dc909e685cfafca7a6ad97357f7d05ca78bf5113519990562735c1",
+          "production/tests/ap85-track-a.test.mjs": "b38983e251ab1af5752ffa6de79876c017b32486f4686cfe469d542baba5650c",
+          "production/evidence/ap85/review/generate-review-sheets.mjs": "009938f7d76a297a1ced94a7829fa05ca62e73b5bf7fcc08c492d51701ba3c9c"
+        }
+      },
+      "purpose": "Shot sequence: wide, single on placeholder, single on Character 01, reaction single on Character 01, reaction single on placeholder, wide.",
+      "times": [
+        0.9,
+        2.4,
+        3.9,
+        5.4,
+        6.9,
+        8.4
+      ],
+      "projectSha256": "f120416d05fa7c8b1c9ec951f7b8c1ea201bc5622806e06400c7271500cc8634",
+      "layoutIssues": [],
+      "sheets": {
+        "A4-annotated.png": "80357838da6aa3c3a40f1db249960468de60fef2ca6eae4045af5c50d20f29d0",
+        "A4-clean.png": "cfcb569e0115090b5ed4b8f087c7dc92b51fe8e569ed364a131b7f9aecca208a"
+      },
+      "memberBoxesPx": [
+        {
+          "t": 0.9,
+          "c01": [
+            230,
+            1104,
+            520,
+            1746
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        },
+        {
+          "t": 2.4,
+          "c01": null,
+          "ph": [
+            486,
+            1119,
+            758,
+            1919
+          ]
+        },
+        {
+          "t": 3.9,
+          "c01": [
+            253,
+            1105,
+            619,
+            1919
+          ],
+          "ph": null
+        },
+        {
+          "t": 5.4,
+          "c01": [
+            296,
+            1106,
+            738,
+            1919
+          ],
+          "ph": null
+        },
+        {
+          "t": 6.9,
+          "c01": null,
+          "ph": [
+            395,
+            1121,
+            709,
+            1919
+          ]
+        },
+        {
+          "t": 8.4,
+          "c01": [
+            197,
+            1104,
+            480,
+            1747
+          ],
+          "ph": [
+            623,
+            1116,
+            833,
+            1746
+          ]
+        }
+      ]
+    }
+  }
+}

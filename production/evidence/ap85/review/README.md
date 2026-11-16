@@ -18,6 +18,7 @@
    - **A4 needs correcting:** shots 2 and 3 did not show distinct subjects, shot 5 cut Character 01 at the left edge, and the head-pivot camera did not protect the composition.
 2. **Corrections (`305a504`).** The engine was corrected (see below). The **A2 and A4** sheets were regenerated. The A1, A3a and A3b sheets were not regenerated: their scenes render byte-identically (`unchanged-check.json`), so their files are unchanged from `e624a91`.
 3. **Owner acceptance (2026-11-15).** After reviewing the original and the corrected sheets, the owner formally accepted Track A. A1, A2, A3a, A3b and A4 passed owner review. This was recorded in commit `310a747`.
+4. **Shadow correction (2026-11-16, awaiting owner visual review).** A defect was found: in `single` shots the off-camera member's shadow still showed, and shadows were duplicated. It was corrected with the owner's approval. The A4 sheets in this folder are the accepted originals and are unchanged. The corrected A4 sheets and a before/after comparison are in `../shadow-correction/`. No other scene changed.
 
 ## What changed
 

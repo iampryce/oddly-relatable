@@ -164,7 +164,16 @@ export const faceToFace = {
       const visible = visibleIntervals(m.id, shots, shotDuration);
       if (m.placement.shadow) {
         const sw = m.placement.figureHeight * 0.36, sh = sw * 0.2, shadowPath = writeGen('shadow', renderShadow({width: sw, height: sh, ppu}));
-        for (const [from, to] of visible) world.push(worldLayer({path: shadowPath, rect: {x: m.placement.feetX - sw / 2, y: m.placement.feetY - sh * 0.55, w: sw}, cameraFor, from, to, fps}));
+        // One shadow layer per visible interval, shown only during that interval (AP-85 shadow correction, 2026-11-16).
+        // worldLayer sets no visibility window, so without one the renderer showed every interval's layer for the whole
+        // shot: an off-camera member's shadow stayed visible in other members' singles, and shadows were duplicated.
+        // A shadow visible for the whole shot keeps its exact previous form (no window), so scenes without singles are
+        // unchanged byte for byte.
+        for (const [from, to] of visible) {
+          const layer = worldLayer({path: shadowPath, rect: {x: m.placement.feetX - sw / 2, y: m.placement.feetY - sh * 0.55, w: sw}, cameraFor, from, to, fps});
+          const whole = from <= EPS && to >= shotDuration - EPS;
+          world.push(whole ? layer : {type: layer.type, path: layer.path, x: layer.x, y: layer.y, w: layer.w, from: +from.toFixed(4), to: +to.toFixed(4), keys: layer.keys});
+        }
       }
       const plans = splitPlans(planPoseLayers(m.segments, scene.transitions || {}), visible);
       const copied = new Map();

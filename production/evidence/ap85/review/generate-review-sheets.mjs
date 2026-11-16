@@ -16,6 +16,7 @@
 //   6. Each scene gets an annotated sheet (outlines, tags, captions) and a clean sheet (same frames, no overlays).
 //
 // Run (needs FFMPEG/FFPROBE, local, $0):  node production/evidence/ap85/review/generate-review-sheets.mjs
+// REVIEW_OUT=<folder> writes the sheets and a manifest there instead of this folder.
 // SCENES=A2,A4 regenerates only those scenes; the manifest keeps the entries of the others. Existing sheets are never
 // overwritten unless REPLACE=1 is set.
 import fs from 'node:fs';
@@ -27,6 +28,8 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..', '..', '..');
+// Output folder: this folder by default; REVIEW_OUT writes elsewhere (e.g. corrective evidence) and leaves these sheets untouched.
+const OUT = process.env.REVIEW_OUT ? path.resolve(process.env.REVIEW_OUT) : HERE;
 const imp = p => import(pathToFileURL(path.join(REPO, p)).href);
 const {writePlaceholder, PLACEHOLDER_CHARACTER} = await imp('production/tests/fixtures/ap85-placeholder.mjs');
 const {compileProject} = await imp('production/lib/scene.mjs');
@@ -37,7 +40,7 @@ const ALL_SCENES = ['A1', 'A2', 'A3a', 'A3b', 'A4'];
 const SCENE_IDS = process.env.SCENES ? process.env.SCENES.split(',') : ALL_SCENES;
 for (const id of SCENE_IDS) if (!ALL_SCENES.includes(id)) throw new Error(`Unknown review scene ${id} (known: ${ALL_SCENES.join(', ')})`);
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
-const sheetFile = (id, kind) => path.join(HERE, `${id}-${kind}.png`);
+const sheetFile = (id, kind) => path.join(OUT, `${id}-${kind}.png`);
 if (process.env.REPLACE !== '1') {
   const existing = SCENE_IDS.flatMap(id => ['annotated', 'clean'].map(k => sheetFile(id, k))).filter(f => fs.existsSync(f));
   if (existing.length) throw new Error(`Refusing to overwrite existing review sheets (set REPLACE=1): ${existing.map(f => path.basename(f)).join(', ')}`);
@@ -109,7 +112,7 @@ const commit = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: REPO, encoding: 
 const SOURCES = ['production/lib/formats/face-to-face.mjs', 'production/lib/cast.mjs', 'production/tests/ap85-track-a.test.mjs', 'production/evidence/ap85/review/generate-review-sheets.mjs'];
 const sources = Object.fromEntries(SOURCES.map(f => [f, sha(fs.readFileSync(path.join(REPO, f)))]));
 const dirty = execFileSync('git', ['status', '--porcelain', '--', ...SOURCES], {cwd: REPO, encoding: 'utf8'}).trim() !== '';
-const MANIFEST = path.join(HERE, 'manifest.json'), previous = fs.existsSync(MANIFEST) ? JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) : null;
+const MANIFEST = path.join(OUT, 'manifest.json'), previous = fs.existsSync(MANIFEST) ? JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) : null;
 const manifest = {
   schema: 'oddly-relatable/ap85-track-a-review@1', track: 'A (composition architecture only; not identity evidence)',
   placeholder: 'SYNTHETIC PLACEHOLDER, NOT ARTWORK. Test fixture only; not Character 02.',
@@ -230,4 +233,4 @@ for (const id of SCENE_IDS) {
 for (const [id, e] of Object.entries(manifest.scenes)) if (!e.generatedFrom && previous?.generatedFromCommit) e.generatedFrom = {commit: previous.generatedFromCommit, sceneDefinitions: previous.sceneDefinitions, generator: previous.generator};
 manifest.scenes = Object.fromEntries(ALL_SCENES.filter(id => manifest.scenes[id]).map(id => [id, manifest.scenes[id]]));
 fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + '\n');
-console.log('written', path.relative(REPO, HERE));
+console.log('written', path.relative(REPO, OUT));

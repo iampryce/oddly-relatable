@@ -1,0 +1,127 @@
+{
+  "scene": "AP-85 A4 (accepted scene definition, production/tests/ap85-track-a.test.mjs)",
+  "before": "commit 81fc4c0 (pre-fix)",
+  "after": "the corrected code",
+  "projects": {
+    "identicalApartFromShadowWindows": true,
+    "shadowWindowsBefore": [
+      [
+        "none",
+        "none"
+      ],
+      [
+        "none",
+        "none"
+      ],
+      [
+        "none",
+        "none"
+      ],
+      [
+        "none",
+        "none"
+      ],
+      [
+        "none",
+        "none"
+      ]
+    ],
+    "shadowWindowsAfter": [
+      [
+        0,
+        1.5
+      ],
+      [
+        3,
+        6
+      ],
+      [
+        7.5,
+        10
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        6,
+        10
+      ]
+    ]
+  },
+  "frames": [
+    {
+      "t": 0.9,
+      "shot": "1 Wide",
+      "changedPixels": 7833,
+      "changedBox": {
+        "x0": 224,
+        "y0": 1721,
+        "x1": 561,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    },
+    {
+      "t": 2.4,
+      "shot": "2 Medium single on ph",
+      "changedPixels": 10859,
+      "changedBox": {
+        "x0": 223,
+        "y0": 1721,
+        "x1": 562,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    },
+    {
+      "t": 3.9,
+      "shot": "3 Medium single on c01",
+      "changedPixels": 10259,
+      "changedBox": {
+        "x0": 223,
+        "y0": 1721,
+        "x1": 764,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    },
+    {
+      "t": 5.4,
+      "shot": "4 Close single on c01",
+      "changedPixels": 9604,
+      "changedBox": {
+        "x0": 224,
+        "y0": 1721,
+        "x1": 764,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    },
+    {
+      "t": 6.9,
+      "shot": "5 Close single on ph",
+      "changedPixels": 10129,
+      "changedBox": {
+        "x0": 223,
+        "y0": 1721,
+        "x1": 764,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    },
+    {
+      "t": 8.4,
+      "shot": "6 Wide",
+      "changedPixels": 7566,
+      "changedBox": {
+        "x0": 224,
+        "y0": 1721,
+        "x1": 763,
+        "y1": 1919
+      },
+      "framesWithoutShadowsIdentical": true
+    }
+  ],
+  "summary": "Only shadow pixels differ. With every shadow layer removed, the before and after frames are pixel-identical at every sample time, and the projects are identical apart from the visibility windows of shadow layers."
+}
