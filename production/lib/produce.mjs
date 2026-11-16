@@ -159,6 +159,8 @@ export async function produceEpisode(storyFile, {outDir, replace = false, allowI
         story: fileEntry(storyPath, REPO_ROOT),
         characterRegistries: [...regs].filter(f => fs.existsSync(f)).map(f => fileEntry(f, REPO_ROOT)),
         environmentRegistry: fs.existsSync(envs) ? fileEntry(envs, REPO_ROOT) : null,
+        // AP-86 S2: set registries used by story@2 scenes (listed only when a scene uses a set; layer files are in "artwork").
+        ...(story.scenes?.some(sc => sc.set !== undefined) ? {setRegistries: [...new Set(story.scenes.filter(sc => sc.set !== undefined).map(sc => sc.setRegistry ? path.resolve(REPO_ROOT, sc.setRegistry) : path.join(REPO_ROOT, 'production', 'environments', `${sc.set}.json`)))].filter(f => fs.existsSync(f)).map(f => fileEntry(f, REPO_ROOT))} : {}),
         artwork: compiled.sources, audio: (story.audio ? [...(story.audio.voice || []), ...(story.audio.music ? [story.audio.music] : [])].map(a => ({source: a.source, sha256: a.sha256, licence: a.licence})) : []),
       },
       generatedGraphics: compiled.generated, outputs, rendererScripts,

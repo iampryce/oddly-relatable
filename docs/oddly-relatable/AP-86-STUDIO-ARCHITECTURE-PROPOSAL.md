@@ -1,13 +1,14 @@
 # AP-86: next-generation production architecture
 
-**Status (2026-11-15): PROPOSAL APPROVED (O1 to O4); S1 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S2 TO S7 NOT AUTHORISED.**
+**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1 and S2 AUTHORISED AND IMPLEMENTED; O5 TO O13 OPEN; S3 TO S7 NOT AUTHORISED.**
 - **Approved by the owner on 2026-11-15:**
   - **O1:** this proposal and the milestone ID AP-86;
   - **O2:** the phase order and the S1 scope (data-model work only, local, $0, no artwork); every later phase needs its own approval;
   - **O3:** named marks and actions in set coordinates are the default placement model, and explicit placement overrides;
   - **O4:** depth-derived layering is the default, and explicit `z` overrides.
 - **Still OPEN:** O5 to O13 (§13). Nothing in this document chooses set dimensions, layer, pose or prop standards, a first real set, an artwork route or budget, a facing strategy, framing formats, a movement method or an audio approach.
-- **S1 (data models and validation) is implemented:** see §11.1. No later phase has started.
+- **S1 (data models and validation) is implemented:** see §11.1.
+- **S2 (sets and depth) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU or paid services) **and is implemented:** see §11.2. S3 to S7 have not started; each needs its own approval.
 - No Character 02 is created or designed. AP-85 decisions M3 to M8 stay open and are not decided here.
 - No GPU, external service, spending, model download or image generation. AP-84B3, its locks and its D1-7 gate are untouched; D1-7 stays NOT AUTHORISED.
 - **The visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md`) is not changed.** Everything here is engineering that serves it: flat, bold-outlined characters in rich, layered, warmly lit three-quarter environments.
@@ -426,7 +427,7 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 |---|---|---|---|
 | **S0** ✅ | Approve this proposal, the milestone ID and the decisions in §13 | **Done 2026-11-15:** O1 to O4 approved; O5 to O13 open | $0 |
 | **S1 Data model** ✅ implemented | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
-| **S2 Sets and depth** | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
+| **S2 Sets and depth** ✅ implemented (approved 2026-11-16) | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
 | **S3 Staging and props** | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
 | **S4 Framing and camera** | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
 | **S5 Movement** | Paths on the floor model, entrances and exits, walk-cycle stepping, door states; optional limb-rig spike | Movement tests (no foot slip beyond tolerance); regression gate | $0 |
@@ -461,6 +462,37 @@ S1 adds data models and validation only. It renders, stages, layers and moves no
 - production suite 91/91 with FFmpeg (77 pass and 14 skipped without it);
 - Short 001 and AP-85 Track A unchanged (byte and frame baselines);
 - eight deliberate rule breaks were each caught.
+
+### 11.2 S2 implementation (approved 2026-11-16)
+
+| Capability | Where | Behaviour |
+|---|---|---|
+| Plate → world mapping | `sets.mjs` `plateWorldRect`, `plateToWorld`, `worldToPlate`, `resolvePlate` | The plate (its `superframe`, or the backdrop image's size) is cover-fitted to the design plane, centred. Plate fractions map to world units and back; marks and surfaces are mapped too, for S3 |
+| Layered plates | `sets.mjs`, `formats/face-to-face.mjs` | Layers are drawn back to front. A layer is either full-plate (its image must have the plate's shape) or a cut-out with a plate `rect` (`x`, `y`, `w`; its height follows the image). Files are hash-verified. `assetRoot: "registry"` resolves files from the registry's folder (fixtures); the default is the repository |
+| Layer-order rules | `sets.mjs` `validateSet` | The first layer is the full-plate backdrop. Backdrop layers come before occluder layers. Occluder baselines never move back up the plate |
+| Floor model | `sets.mjs` `floorHeightAt` | Height = `refFigureHeight × (feetY − horizonY) / (refFeetY − horizonY)`. Feet on or above the horizon are an error |
+| Explicit placement | `depth.mjs` `placementKind`, `worldPlacement` | World units (`feetX`, `feetY`, `figureHeight`) as before, or plate coordinates (`plateX`, `plateY`, optional `plateHeight`). The height comes from the floor model unless `plateHeight` is given (explicit wins). Mixing the two kinds is an error |
+| Depth order (O4) | `depth.mjs` `layeringKey`, `drawOrder` | A member's depth is its feet line: a plate fraction in a set, or a frame fraction without a set. An explicit `z` is a depth on the same scale and wins. Occluders are drawn between members by baseline. Ties: an occluder comes before a member exactly on its baseline, and equal depths keep declaration order. Shadows are drawn with their member |
+| Parallax | `depth.mjs` `parallaxCamera` | A layer with factor p zooms `1 + (zoom − 1) × p` and offsets × p about the shot's pivot. Members use factor 1. Wide shots are unchanged for every factor |
+| Compile gate | `story-v2.mjs` | Sets compile in face-to-face scenes. Props, blocking and unplaced members still need S3 |
+| Provenance | `produce.mjs` | Set registries are listed in the production manifest when a scene uses one; layer files appear under artwork |
+
+story@1 takes exactly its old path. story@2 uses depth layering, and with explicit `z` it orders exactly as story@1.
+
+**Tests:**
+- `production/tests/ap86-s2-sets-depth.test.mjs`: 8/8, including rendered-pixel checks that a counter occluder hides a member behind its baseline but not one in front, that a foreground occluder hides everyone, that explicit `z` lifts a member over the counter, and that parallax changes only the zoomed shot;
+- nine deliberate rule breaks were each caught;
+- production 99/99 with FFmpeg (83 pass, 16 skipped without it); studio 64/64; renderer 134/135 (the pre-existing Jensen baseline failure, identical to the pre-S2 run);
+- Short 001 byte and pixel baselines pass; AP-85 Track A 15/15; the AP-85 review scenes are byte-identical.
+
+**Limitations and deferred work:**
+- Sets render in face-to-face scenes only; text-chat is unchanged.
+- Plates are centred; framing windows and profiles on the plate are S4.
+- Parallax only shows in zoomed shots until camera moves exist (S4). A layer that carries the floor should keep factor 1, or feet appear to slide against it in zoomed shots. Which layers carry the floor is part of the open set standard (O5).
+- Occlusion is by draw order with cut-out layers; there are no per-pixel depth masks.
+- Each member keeps one depth for the whole scene; movement is S5.
+- The backdrop-coverage check under parallax is defensive, and no test triggered it.
+- The manifest's set-registry entry is untested end to end: no real set exists, and production refuses synthetic sets.
 
 **Ordering:** S1 → S2 → S3 is the critical path. S4 can follow S2. S5 follows S3. S6 can be prepared in parallel as decisions only, but no art is produced until approved. Track B stays independent; when Character 02 exists, it is simply another registry the system already supports.
 

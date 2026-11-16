@@ -11,12 +11,14 @@
 //   O4  depth-derived layering is the default; an explicit z wins.
 // story@1 keeps its existing meaning exactly: explicit or default placement, explicit z (default 0).
 //
-// S1 validates and describes; it does not stage, render or layer anything. A story@2 scene that relies on a set,
-// props, blocking or depth-derived layering is refused by assertCompilable() with the phase it needs.
+// S1 validates and describes. S2 (approved 2026-11-16) compiles sets (face-to-face scenes), explicit placement in
+// plate coordinates and depth-derived layering (see depth.mjs, sets.mjs). Props, blocking and unplaced members still
+// need the staging resolver (S3) and are refused by assertCompilable() with that phase named.
 import {loadSet, plateOf} from './sets.mjs';
 import {loadProp} from './props.mjs';
 import {loadActionLibrary, targetOf, ACTIONS_FILE} from './actions.mjs';
 import {object, onlyKeys, id, finite, fraction, point01, fail} from './schema.mjs';
+import {placementKind} from './depth.mjs';
 
 export const STORY_SCHEMA_V1 = 'oddly-relatable/story@1';
 export const STORY_SCHEMA_V2 = 'oddly-relatable/story@2';
@@ -35,6 +37,12 @@ export function validateSceneV2(scene, where) {
     for (const k of ['plate', 'setRegistry']) if (scene[k] !== undefined) fail(where, `"${k}" needs "set"`);
   }
   if (scene.setRegistry !== undefined) regPath(scene.setRegistry, `${where} setRegistry`);
+  // Explicit placement (S2): world units, or plate coordinates (which need a set). z, when given, must be a number.
+  for (const m of Array.isArray(scene.cast) ? scene.cast : []) {
+    const w = `${where} cast member "${m?.id}" placement`;
+    if (placementKind(m?.placement, w) === 'plate' && scene.set === undefined) fail(w, 'plate coordinates need a scene "set"');
+    if (m?.z !== undefined) finite(m.z, `${where} cast member "${m.id}" z`);
+  }
 
   const propIds = new Set();
   if (scene.props !== undefined) {
@@ -144,19 +152,19 @@ export function validateStoryReferences(story, {allowSynthetic = false} = {}) {
 }
 
 // ------------------------------------------------------------------------------------------ compile gate
-// What S1 can compile from a story@2: exactly what story@1 can (explicit placement; explicit z when several members
-// share a scene). Everything that needs a later phase is refused, naming that phase, rather than approximated.
+// What can be compiled from a story@2 after S2: explicit placement (world units or plate coordinates), depth-derived
+// or explicit-z layering, and sets in face-to-face scenes. Everything that needs a later phase is refused, naming
+// that phase, rather than approximated.
+export const SET_FORMATS = Object.freeze(['face-to-face']);
 export function assertCompilable(story) {
   if (story.schema !== STORY_SCHEMA_V2) return;
   for (const s of story.scenes) {
     const where = `story@2 scene ${s.id}`;
-    if (s.set !== undefined) fail(where, 'uses a set; rendering sets needs AP-86 S2 (not implemented)');
+    if (s.set !== undefined && !SET_FORMATS.includes(s.format)) fail(where, `uses a set in a "${s.format}" scene; AP-86 S2 renders sets in ${SET_FORMATS.join(', ')} scenes only`);
     if (s.props?.length) fail(where, 'uses props; placing props needs AP-86 S3 (not implemented)');
     if (s.blocking?.length) fail(where, 'uses blocking; the staging resolver needs AP-86 S3 (not implemented)');
-    const cast = Array.isArray(s.cast) ? s.cast : [];
-    for (const m of cast) {
+    for (const m of Array.isArray(s.cast) ? s.cast : []) {
       if (placementMode(m, null, story.schema) === 'unplaced') fail(where, `cast member "${m.id}" has no placement. In story@2 members are placed by marks and actions (O3, needs AP-86 S3) or by an explicit "placement"`);
-      if (cast.length > 1 && layeringMode(m, story.schema) === 'depth') fail(where, `cast member "${m.id}" has no "z". In story@2 layering is derived from depth by default (O4, needs AP-86 S2); give an explicit "z"`);
     }
   }
 }

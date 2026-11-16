@@ -263,7 +263,11 @@ test('S1 story@2 references: every set, plate, mark, surface, prop, state and ac
 test('S1 compile gate: story@2 compiles only what needs no later phase; anything else is refused with the phase it needs', async () => {
   const kit = writeSyntheticKit(tmp('gate'));
   const refuse = (s, pattern) => assert.throws(() => assertCompilable(s), pattern, String(pattern));
-  refuse(barStory(kit), /uses a set; rendering sets needs AP-86 S2/);
+  // After S2 (2026-11-16) sets compile in face-to-face scenes and depth layering is implemented (see the AP-86 S2
+  // tests); what still needs a later phase is refused, naming it.
+  refuse(barStory(kit), /uses props; placing props needs AP-86 S3/);
+  const chatSet = barStory(kit); chatSet.scenes[0].format = 'text-chat'; chatSet.scenes[0].props = []; chatSet.scenes[0].blocking = [];
+  refuse(chatSet, /uses a set in a "text-chat" scene; AP-86 S2 renders sets in face-to-face scenes only/);
   const noSet = s => { const sc = s.scenes[0]; delete sc.set; delete sc.plate; delete sc.setRegistry; return s; };
   const p = noSet(barStory(kit)); p.scenes[0].blocking = []; p.scenes[0].props = [{id: 'x', prop: 'y', placement: {x: 0.5, y: 0.5}}];
   refuse(p, /uses props; placing props needs AP-86 S3/);
@@ -272,9 +276,9 @@ test('S1 compile gate: story@2 compiles only what needs no later phase; anything
   const u = noSet(barStory(kit)); u.scenes[0].props = []; u.scenes[0].blocking = [];
   refuse(u, /cast member "a" has no placement\. In story@2 members are placed by marks and actions \(O3, needs AP-86 S3\)/);
   for (const m of u.scenes[0].cast) m.placement = {feetX: 640, feetY: 2070, figureHeight: 760};
-  refuse(u, /cast member "a" has no "z"\. In story@2 layering is derived from depth by default \(O4, needs AP-86 S2\)/);
+  assert.doesNotThrow(() => assertCompilable(u), 'placed members without z compile after S2 (depth-derived layering)');
 
-  // What S1 can compile from story@2 compiles exactly as story@1: Short 001 as a story@2 file gives the same project.
+  // story@2 with explicit placement and z compiles exactly as story@1: Short 001 as a story@2 file gives the same project.
   const short = json(path.join(PRODUCTION_ROOT, 'stories', 'short-001-v2.story.json'));
   const v2 = {...structuredClone(short), schema: STORY_SCHEMA_V2};
   const a = await compileProject(short, {outDir: tmp('short-v1')}), c = await compileProject(v2, {outDir: tmp('short-v2')});

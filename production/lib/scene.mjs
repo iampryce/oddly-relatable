@@ -11,7 +11,8 @@ import {renderTitleCard} from './graphics.mjs';
 import {PALETTE} from './palette.mjs';
 import {silentWav} from './wav.mjs';
 import {STORY_SCHEMA, EPISODE_SCHEMA, validateStory, episodeToStory, resolveEnvironment} from './story.mjs';
-import {assertCompilable} from './story-v2.mjs';
+import {assertCompilable, STORY_SCHEMA_V2} from './story-v2.mjs';
+import {loadSet, resolvePlate} from './sets.mjs';
 import {formatFor} from './formats/index.mjs';
 import {assertRenderable} from './text.mjs';
 
@@ -89,8 +90,14 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
   // 3. Compile each scene with its strategy; layers are shot-relative, SFX absolute.
   const shots = [], sfx = [], sceneReports = [];
   for (const [i, x] of scenes.entries()) {
-    const env = await resolveEnvironment(x.scene.environment, plane, repoRoot);
-    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
+    // AP-86 S2: a story@2 scene may use a set plate instead of an environment, and story@2 layering is depth-derived
+    // (O4). story@1 scenes take exactly the path they always took.
+    const v2 = story.schema === STORY_SCHEMA_V2;
+    const stage = v2 && x.scene.set !== undefined
+      ? await resolvePlate(loadSet(x.scene.set, {file: x.scene.setRegistry ?? null, allowSynthetic}), x.scene.plate, {plane, registryFile: x.scene.setRegistry ?? null, repoRoot})
+      : null;
+    const env = stage ? null : await resolveEnvironment(x.scene.environment, plane, repoRoot);
+    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, ...(v2 ? {stage, layering: 'depth'} : {}), writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
     const layers = [...out.world, ...out.screen];
     if (i === 0 && hookLayer) layers.push(hookLayer);
     if (i === scenes.length - 1 && endCard) {
@@ -128,7 +135,7 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
     endCard: endCard && {start: endCard.start, duration: endCard.duration},
     character: diagnostics,
     camera: sceneReports.map(r => ({scene: r.id, ...r.out.camera})),
-    scenes: sceneReports.map(r => ({id: r.id, format: r.format, start: r.start, duration: r.duration, messages: r.seq.messages.length, typing: r.seq.typing.length, cast: Object.keys(r.seq.castPoses), ...(r.out.lines ? {lines: r.out.lines} : {})})),
+    scenes: sceneReports.map(r => ({id: r.id, format: r.format, start: r.start, duration: r.duration, messages: r.seq.messages.length, typing: r.seq.typing.length, cast: Object.keys(r.seq.castPoses), ...(r.out.lines ? {lines: r.out.lines} : {}), ...(r.out.staging ? {staging: r.out.staging} : {})})),
     ...(diagnostics.some(d => d.synthetic) ? {syntheticPlaceholder: 'This build uses a SYNTHETIC test placeholder registry. It is a technical test only, never artwork, never a production episode.'} : {}),
     checks: {ok: issues.length === 0, issues, warnings},
     storyboardTimes: storyboardTimes(sceneReports, hook, endCard, duration),

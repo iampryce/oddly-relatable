@@ -31,6 +31,7 @@ import {bubbleX, LAYOUT_DEFAULTS} from '../layout.mjs';
 import {resolveCast, validateCast} from '../cast.mjs';
 import {cameraAt, applyCamera, parseCameraNote, CAMERA_DEFAULTS} from '../camera.mjs';
 import {planPoseLayers, castLayers, worldLayer, poseRect, scaleAt, alphaAt} from '../timeline.mjs';
+import {worldPlacement, layeringKey, drawOrder, parallaxCamera, placementKind} from '../depth.mjs';
 
 export const FACE_TO_FACE_DEFAULTS = Object.freeze({bubbleY: 300, marginX: LAYOUT_DEFAULTS.marginX, safe: LAYOUT_DEFAULTS.safe});
 // edgeMargin: design units kept between a framed member and the frame edge. subjectMargin: when several members are in
@@ -83,20 +84,38 @@ export const faceToFace = {
     return {...seq, shots, reactionCast: null, duration: seq.conversationEnd};
   },
 
-  async compile({scene, seq, shotDuration, plane, ppu, fps, env, writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
+  // stage: a resolved set plate (AP-86 S2) instead of env. layering: 'legacy' (story@1: z, default 0, declaration order,
+  // exactly as before) or 'depth' (story@2: O4, depth-derived with explicit z winning; see depth.mjs).
+  async compile({scene, seq, shotDuration, plane, ppu, fps, env, stage = null, layering = 'legacy', writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
     const o = {...FACE_TO_FACE_DEFAULTS, ...(scene.layout || {}), safe: {...FACE_TO_FACE_DEFAULTS.safe, ...(scene.layout?.safe || {})}};
     const bubbleOpts = {...BUBBLE_DEFAULTS, ...(scene.bubbles || {})};
     const world = [], screen = [], issues = [];
 
     // 1. Cast (resolved by character ID, facing resolved to declared artwork) and their pose segments.
     for (const list of Object.values(seq.castPoses)) for (const p of list) if (!Number.isFinite(p.end) || p.end > shotDuration) p.end = shotDuration;
-    const cast = await resolveCast(scene.cast, seq.castPoses, repoRoot, {allowSynthetic});
+    // S2: in story@2, explicit placements may be in plate coordinates (resolved to world units, height from the floor
+    // model unless given), and the draw order is depth-derived unless a member has an explicit z. The depth key is
+    // handed to the existing z sort, which is stable, so ties keep declaration order.
+    let castInput = scene.cast, staging = null;
+    if (layering === 'depth') {
+      staging = {layering: 'depth', ...(stage ? {set: stage.set, plate: stage.plate} : {}), members: []};
+      castInput = scene.cast.map((m, index) => {
+        const where = `cast member "${m.id}" placement`;
+        const kind = placementKind(m.placement, where);
+        const placement = worldPlacement(m.placement, stage, where);
+        const lk = layeringKey(m, placement, {stage, plane});
+        staging.members.push({id: m.id, placement: kind === 'plate' ? 'explicit-plate' : 'explicit-world', layering: lk.mode, key: +lk.key.toFixed(6), index,
+          world: {feetX: +placement.feetX.toFixed(3), feetY: +placement.feetY.toFixed(3), figureHeight: +placement.figureHeight.toFixed(3)}});
+        return {...m, placement, z: lk.key};
+      });
+    } else if (stage) throw new Error('a set needs depth layering (story@2)');
+    const cast = await resolveCast(castInput, seq.castPoses, repoRoot, {allowSynthetic});
     const byId = new Map(cast.map(m => [m.id, m]));
 
     // 2. Camera: one shot per line. Wide shots: zoom 1 about the frame centre (unchanged). Medium and close shots are
     //    composed (see the header): the window is panned to centre the focus member within the background, and the
     //    vertical framing keeps the focus member's head top where it is in the wide shot.
-    const coverRect = env?.rect || null, camCache = new Map();
+    const coverRect = stage ? stage.rect : (env?.rect || null), camCache = new Map();
     const fr = {...FRAMING_DEFAULTS, ...(scene.framing || {})};
     const shots = seq.shots.map((s, i) => composeShot({...s, end: i === seq.shots.length - 1 ? shotDuration : s.end}, {cast, byId, plane, coverRect, fr}));
     const shotAt = t => shots.find(s => t >= s.start - EPS && t < s.end - EPS) || shots.at(-1);
@@ -109,11 +128,22 @@ export const faceToFace = {
       return camCache.get(key);
     };
 
-    // 3. World layers: environment, then cast members in z order (shadow under each).
+    // 3. World layers: environment (or the set's backdrop layers), then cast members in draw order (shadow under each).
+    //    In a set, occluder layers are drawn between members by depth: a member standing behind an occluder's baseline
+    //    is drawn before it, so the occluder covers it. Each set layer moves with its own parallax factor.
+    const layerCam = p => (p === 1 ? cameraFor : t => parallaxCamera(cameraFor(t), p));
+    const pushSetLayer = l => world.push(worldLayer({path: copySource(l.file, `set-${stage.set}-${stage.plate}-${l.id}`), rect: l.rect, cameraFor: layerCam(l.parallax), from: 0, to: shotDuration, fps}));
     if (env) world.push(worldLayer({path: copySource(env.file, 'background'), rect: env.rect, cameraFor, from: 0, to: shotDuration, fps}));
+    if (stage) for (const l of stage.layers) if (!l.occluder) pushSetLayer(l);
     const diagnostics = [], members = [];
     const zMax = Math.max(...shots.map(s => s.zoom));
-    for (const m of cast) {
+    const order = stage
+      ? drawOrder(staging.members.map(m => ({id: m.id, key: m.key, index: m.index})), stage.layers.map((l, index) => ({...l, index})).filter(l => l.occluder).map(l => ({id: l.id, baselineY: l.occluder.baselineY, index: l.index})))
+      : cast.map(m => ({kind: 'member', id: m.id}));
+    if (staging) staging.drawOrder = order.map(o => `${o.kind}:${o.id}`);
+    for (const item of order) {
+      if (item.kind === 'occluder') { pushSetLayer(stage.layers.find(l => l.id === item.id)); continue; }
+      const m = byId.get(item.id);
       // A member is off camera during single shots on someone else; otherwise it is visible for the whole scene.
       const visible = visibleIntervals(m.id, shots, shotDuration);
       if (m.placement.shadow) {
@@ -161,8 +191,13 @@ export const faceToFace = {
       if (hookRect && b.from < hookRect.to - EPS && hookRect.from < b.to - EPS && overlap(r, hookRect)) issues.push({t: b.from, id: b.id, problem: 'overlaps the hook'});
     }
     const frames = Math.ceil(shotDuration * fps - 1e-6);
+    const backdrop = stage?.layers[0];
     for (let f = 0; f < frames; f++) {
       const t = f / fps, cam = cameraFor(t), shot = shotAt(t);
+      if (backdrop && backdrop.parallax !== 1) {
+        const b = applyCamera(parallaxCamera(cam, backdrop.parallax), backdrop.rect), bh = backdrop.rect.h * b.w / backdrop.rect.w;
+        if (b.x > 0.5 || b.y > 0.5 || b.x + b.w < plane.width - 0.5 || b.y + bh < plane.height - 0.5) issues.push({t: +t.toFixed(3), id: backdrop.id, problem: `with parallax ${backdrop.parallax} the backdrop layer no longer covers the frame`});
+      }
       for (const {m, plans} of members) for (const plan of plans) {
         if (t < plan.from || t >= plan.to || alphaAt(plan, t) <= 0) continue;
         const info = m.infos.get(plan.pose), s = scaleAt(plan, t), rect = poseRect(info, m.placement, s);
@@ -186,6 +221,7 @@ export const faceToFace = {
       world, screen, sfx: seq.sfx, art, lines,
       layout: {zoneTop: o.bubbleY, zoneBottom: Math.max(o.bubbleY, ...bubbles.map(b => b.rect.y + b.rect.h))},
       checks: {ok: !issues.length, issues: dedupe(issues), safeZone: safe},
+      ...(staging ? {staging} : {}),
       diagnostics,
       camera: {shots: shots.map(s => ({line: s.line, start: s.start, end: s.end, speaker: s.speaker, focus: s.focus, zoom: s.zoom, single: s.single, note: s.note, pivot: s.pivot,
         window: s.window, visible: s.visible, hidden: s.hidden})),

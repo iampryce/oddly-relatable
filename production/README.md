@@ -184,6 +184,19 @@ S1 adds schemas and validation for the approved AP-86 architecture. **Nothing he
 - **Compile gate:** a story@2 scene that uses a set, props, blocking, an unplaced member or depth-derived layering fails with the phase it needs. Otherwise story@2 compiles exactly like story@1.
 - **No production set, prop or action data exists yet:** their standards are open owner decisions O5 to O7. Synthetic sets and props (`"synthetic": true`) are refused unless a test passes `allowSynthetic`.
 
+## AP-86 S2: sets and depth
+
+Approved 2026-11-16 (local, $0, synthetic fixtures only). A **story@2 face-to-face scene** can use a set plate (`"set"`, `"plate"`) instead of an environment.
+
+- **Mapping:** the plate is cover-fitted to the frame, centred. Plate fractions (0 to 1) map to world units.
+- **Layers:** drawn back to front. A full-plate layer must have the plate's shape; a cut-out gives a plate `rect` (`x`, `y`, `w`). The first layer is the backdrop; occluder layers (`occluder.baselineY`) come after backdrop layers, with baselines never moving back up the plate.
+- **Placement (explicit, O3 override):** `{"plateX", "plateY"}` with the height from the floor model, or `"plateHeight"` to set it; world units (`feetX`, `feetY`, `figureHeight`) still work. Marks and actions (the default) arrive with the S3 resolver.
+- **Floor model:** height = `refFigureHeight × (feetY − horizonY) / (refFeetY − horizonY)`.
+- **Draw order (O4):** by depth (the feet line), back to front; an explicit `z` is a depth on the same scale and wins. Occluders are drawn between members by baseline: a member standing behind an occluder's baseline is covered by it. Ties: an occluder comes before a member exactly on its baseline, and equal depths keep the cast's declaration order. In story@2 scenes without a set, depth is the feet line as a fraction of the frame height. story@1 keeps z (default 0) and declaration order.
+- **Parallax:** a layer's `parallax` factor p makes it zoom `1 + (zoom − 1) × p` in zoomed shots; wide shots are unchanged. Keep layers that carry the floor at 1.
+- **Report:** `layout-report.json` lists each story@2 scene's `staging`: every member's placement kind, layering mode, depth key, world placement, and the draw order.
+- **Limitations:** face-to-face scenes only; plates are centred (framing windows are S4); no movement (S5); occlusion is by draw order, not per-pixel depth.
+
 ## Fixtures and evidence
 
 - **`stories/short-001-v2.story.json`:** Short 001. Its dialogue is identical to `fixtures/short-001-v2.conversation.json`, and its camera notes are verbatim from `bible/episodes/short-001-we-need-to-talk/SCRIPT_V2.md` (tests enforce both). Character 01 only; pose changes stay hard cuts, because the script specifies none.

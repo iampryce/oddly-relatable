@@ -1,4 +1,4 @@
-// Environment and set registries (AP-86 S1: data model and validation only).
+// Environment and set registries (AP-86 S1 data model; AP-86 S2 plate-to-world mapping, floor model and layers).
 //
 // v1: production/environments/environments.json, {environments: {id: {file, sha256?, status?}}}. Every existing scene
 //     uses it through story.resolveEnvironment, unchanged in meaning (a flat plate, cover-fitted to the frame).
@@ -7,14 +7,19 @@
 //
 // O3 (approved 2026-11-15): named marks and actions in set coordinates are the default way to place people; explicit
 // placement overrides. Marks and surfaces are defined here; using them (the staging resolver) is AP-86 S3.
-// O4 (approved 2026-11-15): depth-derived layering is the default; explicit z overrides. Occluder baselines are
-// recorded here; computing depth and composing occlusion is AP-86 S2.
+// O4 (approved 2026-11-15): depth-derived layering is the default; explicit z overrides. Depth ordering and occluder
+// interleaving are in depth.mjs (S2).
 // NOT DECIDED (O5): superframe size, layer split and other set standards. They are optional and unconstrained here
-// beyond structural sanity; nothing in this file renders a set.
+// beyond structural sanity.
+//
+// S2 (approved 2026-11-16) adds resolvePlate(): the plate is cover-fitted to the design plane (centred, like a v1
+// environment), so plate fractions (0–1) map to world units; the floor model gives a figure height for any floor line;
+// layers are placed back to front (full plate, or a cut-out "rect" in plate fractions). Framing windows on the plate
+// (superframe profiles) are AP-86 S4; nothing here changes the camera.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {PRODUCTION_ROOT, REPO_ROOT} from './runtime.mjs';
+import {canvas, PRODUCTION_ROOT, REPO_ROOT} from './runtime.mjs';
 import {POSE_FACINGS} from './character.mjs';
 import {object, onlyKeys, id, finite, fraction, point01, asset, idMap, schemaVersion, fail, SHA256} from './schema.mjs';
 
@@ -49,7 +54,10 @@ export function setFile(setId) {
 
 export function validateSet(set, where = `set ${set?.set ?? '?'}`) {
   object(set, where);
-  onlyKeys(set, ['set', 'schemaVersion', 'displayName', 'kind', 'synthetic', 'note', 'plates', 'variants'], where);
+  onlyKeys(set, ['set', 'schemaVersion', 'displayName', 'kind', 'synthetic', 'note', 'assetRoot', 'plates', 'variants'], where);
+  // Where layer files are resolved from: the repository (default, like every other registry) or the registry's own
+  // folder (self-contained fixtures).
+  if (set.assetRoot !== undefined && !['repository', 'registry'].includes(set.assetRoot)) fail(`${where}.assetRoot`, 'must be "repository" or "registry"');
   id(set.set, `${where} "set"`);
   schemaVersion(set.schemaVersion, [SET_SCHEMA_VERSION], where);
   if (set.kind !== undefined && (typeof set.kind !== 'string' || !/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(set.kind))) fail(`${where}.kind`, 'must be like "interior/bar"');
@@ -75,7 +83,7 @@ function validatePlate(plate, where) {
   const layerIds = new Set();
   plate.layers.forEach((l, i) => {
     const w = `${where} layer ${l?.id ?? i + 1}`;
-    object(l, w); onlyKeys(l, ['id', 'file', 'sha256', 'parallax', 'occluder', 'note'], w);
+    object(l, w); onlyKeys(l, ['id', 'file', 'sha256', 'rect', 'parallax', 'occluder', 'note'], w);
     id(l.id, `${w} id`);
     if (layerIds.has(l.id)) fail(w, 'duplicate layer id');
     layerIds.add(l.id);
@@ -83,7 +91,23 @@ function validatePlate(plate, where) {
     if (l.parallax !== undefined) finite(l.parallax, `${w}.parallax`, {min: 0, exclusiveMin: true});
     // Occluder metadata: the floor line (plate fraction) behind which a member is drawn under this layer (used in S2).
     if (l.occluder !== undefined) { object(l.occluder, `${w}.occluder`); onlyKeys(l.occluder, ['baselineY'], `${w}.occluder`); fraction(l.occluder.baselineY, `${w}.occluder.baselineY`); }
+    // A cut-out layer (S2): its top-left corner and width in plate fractions; its height follows the image's aspect.
+    if (l.rect !== undefined) {
+      object(l.rect, `${w}.rect`, 'a rectangle {x, y, w} in plate fractions'); onlyKeys(l.rect, ['x', 'y', 'w'], `${w}.rect`);
+      for (const k of ['x', 'y', 'w']) fraction(l.rect[k], `${w}.rect.${k}`);
+      if (l.rect.w <= 0) fail(`${w}.rect.w`, 'must be greater than 0');
+    }
   });
+  // Order rules (S2): the first layer is the full-plate backdrop; backdrop layers (no occluder) come before occluder
+  // layers; occluder baselines never move back up the plate. So the declared order is always a true back-to-front order.
+  const first = plate.layers[0];
+  if (first.occluder !== undefined || first.rect !== undefined) fail(`${where} layer ${first.id}`, 'the first layer is the backdrop: it covers the whole plate (no "rect") and is not an occluder');
+  let lastBaseline = -1, seenOccluder = null;
+  for (const l of plate.layers) {
+    if (l.occluder === undefined) { if (seenOccluder) fail(`${where} layer ${l.id}`, `a backdrop layer cannot come after the occluder layer "${seenOccluder}" (layers are back to front)`); continue; }
+    if (l.occluder.baselineY < lastBaseline) fail(`${where} layer ${l.id}`, `occluder baseline ${l.occluder.baselineY} is behind the previous occluder's ${lastBaseline} (layers are back to front)`);
+    lastBaseline = l.occluder.baselineY; seenOccluder = l.id;
+  }
   // Floor model (optional): horizon, and the size of a reference figure at a reference floor line (plate fractions).
   if (plate.floor !== undefined) {
     const w = `${where}.floor`;
@@ -140,6 +164,48 @@ export function plateOf(set, plateId, where = `set ${set.set}`) {
   const plate = set.plates[plateId];
   if (!plate) throw new Error(`${where}: no plate "${plateId}" (plates: ${Object.keys(set.plates).join(', ')})`);
   return plate;
+}
+
+// ------------------------------------------------------------------------------------------------ S2: plate -> world
+// The world rectangle a plate of size (width × height) occupies when cover-fitted to the design plane, centred.
+export function plateWorldRect(size, plane) {
+  const s = Math.max(plane.width / size.width, plane.height / size.height), w = size.width * s, h = size.height * s;
+  return {x: (plane.width - w) / 2, y: (plane.height - h) / 2, w, h};
+}
+export const plateToWorld = (R, p) => ({x: R.x + p.x * R.w, y: R.y + p.y * R.h});
+export const worldToPlate = (R, p) => ({x: (p.x - R.x) / R.w, y: (p.y - R.y) / R.h});
+// Floor model: a standing figure's height (as a fraction of the plate height) is proportional to how far its feet are
+// below the horizon, calibrated by the reference figure. Feet on or above the horizon have no valid height.
+export function floorHeightAt(floor, feetY, where = 'floor model') {
+  if (!floor) fail(where, 'the plate has no floor model; give an explicit height');
+  if (!(feetY > floor.horizonY + 1e-9)) fail(where, `feet at plate y ${feetY} are on or above the horizon (${floor.horizonY}); no figure can stand there`);
+  return floor.refFigureHeight * (feetY - floor.horizonY) / (floor.refFeetY - floor.horizonY);
+}
+
+// Resolve one plate for compiling (S2): verify its files, read the image sizes, and place everything in world units.
+// root: the folder layer files are relative to (assetRoot "registry": the registry's folder; otherwise the repository).
+export async function resolvePlate(set, plateId, {plane, registryFile = null, repoRoot = REPO_ROOT} = {}) {
+  const plate = plateOf(set, plateId);
+  const root = set.assetRoot === 'registry' ? path.dirname(path.resolve(repoRoot, registryFile ?? setFile(set.set))) : repoRoot;
+  verifySetAssets({...set, plates: {[plateId]: plate}, variants: {}}, root);
+  const imgs = await Promise.all(plate.layers.map(l => canvas.loadImage(path.resolve(root, l.file))));
+  const size = plate.superframe ?? {width: imgs[0].width, height: imgs[0].height};
+  const aspect = size.width / size.height, where = `set ${set.set} plate ${plateId}`;
+  const R = plateWorldRect(size, plane);
+  const layers = plate.layers.map((l, i) => {
+    const ia = imgs[i].width / imgs[i].height;
+    const r = l.rect ?? {x: 0, y: 0, w: 1};
+    // A full-plate layer must have the plate's shape, or it would be stretched or misaligned.
+    if (!l.rect && Math.abs(ia - aspect) > aspect * 0.005) fail(`${where} layer ${l.id}`, `its image is ${imgs[i].width}×${imgs[i].height}, which does not match the plate's ${size.width}×${size.height} shape; give it a "rect" or a matching image`);
+    const w = r.w * R.w, h = w / ia, x = R.x + r.x * R.w, y = R.y + r.y * R.h;
+    if (r.x + r.w > 1 + 1e-9 || (y + h) > R.y + R.h + 1e-6) fail(`${where} layer ${l.id}`, 'its rectangle extends outside the plate');
+    return {id: l.id, file: path.resolve(root, l.file), rect: {x, y, w, h}, parallax: l.parallax ?? 1, occluder: l.occluder ? {baselineY: l.occluder.baselineY} : null};
+  });
+  const marks = Object.fromEntries(Object.entries(plate.marks || {}).map(([k, m]) => [k, {kind: m.kind, point: plateToWorld(R, m.point), ...(m.floor ? {floor: plateToWorld(R, m.floor)} : {})}]));
+  const surfaces = Object.fromEntries(Object.entries(plate.surfaces || {}).map(([k, sf]) => [k, {x0: R.x + sf.line.x0 * R.w, x1: R.x + sf.line.x1 * R.w, y: R.y + sf.line.y * R.h}]));
+  return {set: set.set, plate: plateId, size, rect: R, floor: plate.floor ?? null, layers, marks, surfaces,
+    toWorld: p => plateToWorld(R, p), toPlate: p => worldToPlate(R, p),
+    heightAt: (feetY, w) => floorHeightAt(plate.floor, feetY, w) * R.h};
 }
 
 // Asset checks that need the files: every layer and overlay exists and matches its recorded SHA-256. Read-only.
