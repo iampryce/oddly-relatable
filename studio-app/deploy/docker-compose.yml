@@ -1,0 +1,88 @@
+# Oddly Relatable Studio: one Compose project, nothing shared with other projects on the host.
+#   cd studio-app/deploy && cp .env.example .env   (fill it in; never commit .env)
+#   docker compose up -d --build
+# Every port is bound to 127.0.0.1: reach the dashboard through an SSH tunnel
+#   ssh -L 3000:127.0.0.1:3000 <admin>@<server>   then open http://127.0.0.1:3000
+# Public HTTPS (domain + TLS reverse proxy) is a separate, owner-approved step.
+name: oddstudio
+
+x-app-env: &app-env
+  ODD_ENV: production
+  DATABASE_URL: postgresql+psycopg://oddstudio:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/oddstudio
+  REDIS_URL: redis://redis:6379/0
+  SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+  OWNER_EMAIL: ${OWNER_EMAIL:?set OWNER_EMAIL in .env}
+  OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set OWNER_PASSWORD_HASH in .env}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_PREFIX: ${S3_PREFIX:-oddly-relatable/}
+  AWS_REGION: ${AWS_REGION:-}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
+  YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
+  YOUTUBE_REFRESH_TOKEN: ${YOUTUBE_REFRESH_TOKEN:-}
+  ODD_WORK_DIR: /data/work
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: oddstudio
+      POSTGRES_USER: oddstudio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oddstudio -d oddstudio"]
+      interval: 10s
+      retries: 6
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 6
+
+  api:
+    build: {context: ../.., dockerfile: studio-app/api/Dockerfile}
+    image: oddstudio-api
+    restart: unless-stopped
+    environment: *app-env
+    volumes: [work_data:/data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["127.0.0.1:8000:8000"]
+
+  worker:
+    image: oddstudio-api
+    restart: unless-stopped
+    environment: *app-env
+    command: ["python", "-m", "oddstudio.worker"]
+    volumes: [work_data:/data]
+    depends_on:
+      api: {condition: service_started}
+    # Rendering is CPU-bound; keep the host responsive (4 vCPU / 8 GB server).
+    deploy:
+      resources:
+        limits: {cpus: "3.0", memory: 4g}
+
+  web:
+    build: {context: ../web, args: {API_URL: "http://api:8000"}}
+    image: oddstudio-web
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ["127.0.0.1:3000:3000"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  work_data:

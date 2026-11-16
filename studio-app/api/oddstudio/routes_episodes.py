@@ -1,0 +1,563 @@
+"""Ideas, episodes, scripts, storyboards, production, review and publishing routes.
+
+Every state change goes through workflow.require() first; gates are enforced here, not in the dashboard."""
+from __future__ import annotations
+
+import json
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from . import engine, serialize as S
+from .auth import current_user
+from .db import get_db
+from .models import Asset, Character, Episode, Event, Idea, Job, PublishRecord, Review, ScriptVersion, StoryboardScene, now
+from .queue import announce, enqueue
+from .script_schema import ScriptError, estimated_seconds, validate_script
+from .settings_store import get_section
+from .tasks import by_key, save_script
+from .workflow import GateError, REVISION_TARGETS, require, set_stage
+from .youtube import configured as youtube_configured
+
+router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
+
+
+def gate(ep: Episode, action: str) -> None:
+    try:
+        require(ep, action)
+    except GateError as e:
+        raise HTTPException(409, str(e))
+
+
+def get_episode(db: Session, eid: int) -> Episode:
+    ep = db.get(Episode, eid)
+    if ep is None:
+        raise HTTPException(404, "episode not found")
+    return ep
+
+
+def log_event(db: Session, ep_id, kind: str, msg: str) -> None:
+    db.add(Event(episode_id=ep_id, kind=kind, message=msg))
+
+
+def record(db: Session, ep: Episode, gate_name: str, decision: str, user: str, comment: str = "", target: dict | None = None) -> None:
+    db.add(Review(episode_id=ep.id, gate=gate_name, decision=decision, revision=ep.revision, target=target or {}, comment=comment, actor=user))
+
+
+# ------------------------------------------------------------------ ideas
+class IdeaIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    premise: str = Field(min_length=1, max_length=4000)
+    notes: str = Field(default="", max_length=4000)
+    characters: list[str] = Field(default_factory=list, max_length=4)
+    target_seconds: int = Field(default=45, ge=10, le=60)
+    interactive: Literal["none", "viewer-choice", "poll"] = "none"
+    status: Literal["draft", "submitted"] = "draft"
+
+
+@router.get("/ideas")
+def list_ideas(db: Session = Depends(get_db)):
+    return [S.idea(i) for i in db.query(Idea).order_by(Idea.updated_at.desc())]
+
+
+@router.post("/ideas", status_code=201)
+def create_idea(body: IdeaIn, db: Session = Depends(get_db)):
+    known = set(by_key(db))
+    unknown = [k for k in body.characters if k not in known]
+    if unknown:
+        raise HTTPException(422, f"unknown characters: {', '.join(unknown)}")
+    i = Idea(**body.model_dump())
+    db.add(i)
+    db.flush()
+    log_event(db, None, "idea", f"Idea saved: {i.title} ({i.status})")
+    db.commit()
+    return S.idea(i)
+
+
+@router.put("/ideas/{iid}")
+def update_idea(iid: int, body: IdeaIn, db: Session = Depends(get_db)):
+    i = db.get(Idea, iid)
+    if i is None:
+        raise HTTPException(404, "idea not found")
+    if i.status in ("in_production", "archived"):
+        raise HTTPException(409, f"an idea that is {i.status.replace('_', ' ')} cannot be edited")
+    for k, v in body.model_dump().items():
+        setattr(i, k, v)
+    db.commit()
+    return S.idea(i)
+
+
+@router.post("/ideas/{iid}/archive")
+def archive_idea(iid: int, db: Session = Depends(get_db)):
+    i = db.get(Idea, iid)
+    if i is None:
+        raise HTTPException(404, "idea not found")
+    if i.status == "in_production":
+        raise HTTPException(409, "this idea already has an episode")
+    i.status = "archived"
+    db.commit()
+    return S.idea(i)
+
+
+class StartIn(BaseModel):
+    generate_script: bool = True
+
+
+@router.post("/ideas/{iid}/start", status_code=201)
+def start_from_idea(iid: int, body: StartIn, db: Session = Depends(get_db)):
+    i = db.get(Idea, iid)
+    if i is None:
+        raise HTTPException(404, "idea not found")
+    if i.status in ("in_production", "archived"):
+        raise HTTPException(409, f"this idea is already {i.status.replace('_', ' ')}")
+    ep = Episode(idea_id=i.id, title=i.title, stage="script_pending")
+    db.add(ep)
+    db.flush()
+    i.status, i.episode_id = "in_production", ep.id
+    log_event(db, ep.id, "episode", f"Episode created from idea “{i.title}”")
+    db.commit()
+    if body.generate_script:
+        set_stage(ep, "script_generating")
+        db.commit()
+        enqueue(db, "generate_script", episode_id=ep.id, revision=ep.revision)
+    return S.episode_summary(ep)
+
+
+# ------------------------------------------------------------------ episodes
+@router.get("/episodes")
+def list_episodes(stage: str | None = None, db: Session = Depends(get_db)):
+    q = db.query(Episode)
+    if stage:
+        q = q.filter(Episode.stage.in_(stage.split(",")))
+    return [S.episode_summary(e) for e in q.order_by(Episode.updated_at.desc())]
+
+
+@router.get("/episodes/{eid}")
+def episode_detail(eid: int, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    script = None
+    if ep.script_version:
+        sv = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.script_version).one()
+        script = {"version": sv.version, "content": sv.content, "source": sv.source, "note": sv.note,
+                  "estimated_seconds": estimated_seconds(sv.content), "created_at": S.ts(sv.created_at)}
+    versions = [{"version": v.version, "source": v.source, "note": v.note, "created_at": S.ts(v.created_at)}
+                for v in db.query(ScriptVersion).filter_by(episode_id=ep.id).order_by(ScriptVersion.version.desc())]
+    assets = db.query(Asset).filter_by(episode_id=ep.id).order_by(Asset.id.desc()).all()
+    amap = {a.id: a for a in assets}
+    jobs = db.query(Job).filter_by(episode_id=ep.id).order_by(Job.id.desc()).limit(200).all()
+    idea = db.get(Idea, ep.idea_id) if ep.idea_id else None
+    return {**S.episode_summary(ep), "idea": S.idea(idea) if idea else None, "script": script, "script_versions": versions,
+            "scenes": [S.scene(s, amap.get(s.reference_asset_id) if s.reference_asset_id else None) for s in ep.scenes],
+            "jobs": [S.job(j) for j in jobs], "assets": [S.asset(a) for a in assets],
+            "video": S.asset(amap.get(ep.video_asset_id)) if ep.video_asset_id else None,
+            "reviews": [S.review(r) for r in db.query(Review).filter_by(episode_id=ep.id).order_by(Review.id.desc())],
+            "publish": S.publish(db.query(PublishRecord).filter_by(episode_id=ep.id).one_or_none()),
+            "events": [{"kind": e.kind, "message": e.message, "created_at": S.ts(e.created_at)}
+                       for e in db.query(Event).filter_by(episode_id=ep.id).order_by(Event.id.desc()).limit(50)]}
+
+
+# ------------------------------------------------------------------ script
+class InstructionIn(BaseModel):
+    instruction: str = Field(default="", max_length=2000)
+
+
+@router.post("/episodes/{eid}/script/generate")
+def generate_script(eid: int, body: InstructionIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "generate_script")
+    set_stage(ep, "script_generating")
+    db.commit()
+    job = enqueue(db, "generate_script", episode_id=ep.id, revision=ep.revision, payload={"instruction": body.instruction})
+    return S.job(job)
+
+
+@router.get("/episodes/{eid}/script/versions/{version}")
+def script_version(eid: int, version: int, db: Session = Depends(get_db)):
+    sv = db.query(ScriptVersion).filter_by(episode_id=eid, version=version).one_or_none()
+    if sv is None:
+        raise HTTPException(404, "no such script version")
+    return {"version": sv.version, "content": sv.content, "source": sv.source, "note": sv.note, "created_at": S.ts(sv.created_at)}
+
+
+class ScriptIn(BaseModel):
+    content: dict
+    note: str = Field(default="", max_length=500)
+
+
+@router.put("/episodes/{eid}/script")
+def edit_script(eid: int, body: ScriptIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "edit_script")
+    try:
+        content = validate_script(body.content, set(by_key(db)))
+    except ScriptError as e:
+        raise HTTPException(422, str(e))
+    sv = save_script(db, ep, content, "edited", body.note)
+    set_stage(ep, "script_review")
+    log_event(db, ep.id, "script", f"Script v{sv.version} saved (edited)")
+    db.commit()
+    return {"version": sv.version}
+
+
+class SectionIn(BaseModel):
+    section: str = Field(min_length=1, max_length=60)
+    instruction: str = Field(default="", max_length=2000)
+
+
+@router.post("/episodes/{eid}/script/regenerate-section")
+def regenerate_section(eid: int, body: SectionIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "regenerate_section")
+    return S.job(enqueue(db, "regenerate_section", episode_id=ep.id, revision=ep.revision, payload=body.model_dump()))
+
+
+class CommentIn(BaseModel):
+    comment: str = Field(default="", max_length=4000)
+
+
+@router.post("/episodes/{eid}/script/approve")
+def approve_script(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "approve_script")
+    if not ep.script_version:
+        raise HTTPException(409, "there is no script to approve")
+    ep.approved_script_version = ep.script_version
+    set_stage(ep, "script_approved")
+    record(db, ep, "script", "approved", user, body.comment, {"script_version": ep.script_version})
+    log_event(db, ep.id, "approval", f"Script v{ep.script_version} approved")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+@router.post("/episodes/{eid}/script/reject")
+def reject_script(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "reject_script")
+    record(db, ep, "script", "rejected", user, body.comment, {"script_version": ep.script_version})
+    log_event(db, ep.id, "review", f"Script v{ep.script_version} rejected: {body.comment[:200]}")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+# ------------------------------------------------------------------ storyboard
+@router.post("/episodes/{eid}/storyboard/generate")
+def generate_storyboard(eid: int, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "generate_storyboard")
+    if not ep.approved_script_version:
+        raise HTTPException(409, "approve the script first")
+    set_stage(ep, "storyboard_generating")
+    db.commit()
+    return S.job(enqueue(db, "generate_storyboard", episode_id=ep.id, revision=ep.revision))
+
+
+def get_scene(db: Session, ep: Episode, sid: int) -> StoryboardScene:
+    sc = db.get(StoryboardScene, sid)
+    if sc is None or sc.episode_id != ep.id:
+        raise HTTPException(404, "scene not found")
+    return sc
+
+
+class SceneIn(BaseModel):
+    heading: str = Field(min_length=1, max_length=200)
+    location: str = Field(default="", max_length=80)
+    description: str = Field(default="", max_length=2000)
+    action: str = Field(default="", max_length=2000)
+    camera: str = Field(default="", max_length=400)
+    lines: list[dict]
+
+
+@router.put("/episodes/{eid}/scenes/{sid}")
+def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "edit_scene")
+    sc = get_scene(db, ep, sid)
+    known = set(by_key(db))
+    trial = {"title": "t", "characters": [{"key": k} for k in known], "scenes": [{"id": sc.scene_key, **body.model_dump()}]}
+    try:
+        checked = validate_script(trial, known)["scenes"][0]
+    except ScriptError as e:
+        raise HTTPException(422, str(e).replace("script.scenes[0]", f"scene {sc.position}"))
+    for k in ("heading", "location", "description", "action", "camera", "lines"):
+        setattr(sc, k, checked[k])
+    sc.characters = list(dict.fromkeys(ln["speaker"] for ln in checked["lines"]))
+    sc.status, sc.revision_note = "draft", ""
+    log_event(db, ep.id, "storyboard", f"Scene {sc.position} edited")
+    db.commit()
+    return S.scene(sc, None)
+
+
+@router.post("/episodes/{eid}/scenes/{sid}/regenerate")
+def regenerate_scene(eid: int, sid: int, body: InstructionIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "regenerate_scene")
+    sc = get_scene(db, ep, sid)
+    return S.job(enqueue(db, "regenerate_scene", episode_id=ep.id, scene_id=sc.id, revision=ep.revision, payload=body.model_dump()))
+
+
+@router.post("/episodes/{eid}/scenes/{sid}/reference")
+def scene_reference(eid: int, sid: int, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "scene_reference")
+    sc = get_scene(db, ep, sid)
+    return S.job(enqueue(db, "scene_reference", episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
+
+
+@router.post("/episodes/{eid}/storyboard/approve")
+def approve_storyboard(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "approve_storyboard")
+    if not ep.scenes:
+        raise HTTPException(409, "the storyboard has no scenes")
+    pending = [s.position for s in ep.scenes if s.status == "needs_revision"]
+    if pending:
+        raise HTTPException(409, f"scenes {pending} are marked for revision; edit or regenerate them first")
+    for s in ep.scenes:
+        s.status = "ready"
+    ep.approved_storyboard_version = ep.storyboard_version
+    set_stage(ep, "storyboard_approved")
+    record(db, ep, "storyboard", "approved", user, body.comment, {"storyboard_version": ep.storyboard_version})
+    log_event(db, ep.id, "approval", f"Storyboard v{ep.storyboard_version} approved")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+class SceneRejectIn(BaseModel):
+    comment: str = Field(min_length=1, max_length=4000)
+    scene_ids: list[int] = Field(default_factory=list)
+
+
+@router.post("/episodes/{eid}/storyboard/reject")
+def reject_storyboard(eid: int, body: SceneRejectIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "reject_storyboard")
+    for sid in body.scene_ids:
+        sc = get_scene(db, ep, sid)
+        sc.status, sc.revision_note = "needs_revision", body.comment
+    record(db, ep, "storyboard", "rejected", user, body.comment, {"scene_ids": body.scene_ids})
+    db.commit()
+    return S.episode_summary(ep)
+
+
+# ------------------------------------------------------------------ production
+def enqueue_scene_jobs(db: Session, ep: Episode, scenes: list[StoryboardScene]) -> list[Job]:
+    jobs = []
+    for sc in scenes:
+        sc.production_status = "pending"
+    db.commit()
+    for sc in scenes:
+        jobs.append(enqueue(db, "scene_prepare", episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
+        jobs.append(enqueue(db, "scene_voice", episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
+    return jobs
+
+
+def preflight(db: Session, ep: Episode) -> None:
+    """Refuse to start production that cannot succeed (no fake runs): characters without art, or too long."""
+    chars = by_key(db)
+    keys = {k for s in ep.scenes for k in s.characters}
+    try:
+        engine.check_cast_ready([chars[k] for k in keys if k in chars])
+    except engine.EngineInputError as e:
+        raise HTTPException(409, str(e))
+    sv = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.approved_script_version).one()
+    est, limit = estimated_seconds(sv.content), get_section(db, "production")["max_seconds"]
+    if est > limit:
+        raise HTTPException(409, f"the script runs about {est} s; production renders up to {limit} s (shorten the script)")
+
+
+@router.post("/episodes/{eid}/production/start")
+def start_production(eid: int, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "start_production")
+    if ep.approved_storyboard_version != ep.storyboard_version:
+        raise HTTPException(409, "the storyboard changed after approval; approve it again")
+    preflight(db, ep)
+    set_stage(ep, "producing")
+    log_event(db, ep.id, "production", f"Production started (revision {ep.revision}) by {user}")
+    db.commit()
+    return [S.job(j) for j in enqueue_scene_jobs(db, ep, list(ep.scenes))]
+
+
+@router.post("/jobs/{jid}/retry")
+def retry_job(jid: int, db: Session = Depends(get_db)):
+    job = db.get(Job, jid)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.status != "failed":
+        raise HTTPException(409, f"only failed jobs can be retried (this one is {job.status})")
+    if job.episode_id:
+        ep = get_episode(db, job.episode_id)
+        if job.revision != ep.revision:
+            raise HTTPException(409, "this job belongs to an earlier revision")
+        if job.kind in ("scene_prepare", "scene_voice", "render_episode"):
+            gate(ep, "retry_job")
+            set_stage(ep, "producing")
+        elif job.kind == "generate_script":
+            gate(ep, "generate_script")
+            set_stage(ep, "script_generating")
+        elif job.kind == "generate_storyboard":
+            gate(ep, "generate_storyboard")
+            set_stage(ep, "storyboard_generating")
+        elif job.kind == "publish_youtube":
+            gate(ep, "publish")
+            rec = db.query(PublishRecord).filter_by(episode_id=ep.id).one()
+            if rec.status != "failed" or rec.approved_revision != ep.revision:
+                raise HTTPException(409, "publication is not approved for this revision")
+            rec.status = "approved"
+            set_stage(ep, "publishing")
+    job.status, job.error, job.finished_at = "queued", "", None
+    db.add(Event(episode_id=job.episode_id, kind="job", message=f"Retrying {job.kind} (job {job.id})"))
+    db.commit()
+    announce(job.id)
+    return S.job(job)
+
+
+@router.post("/episodes/{eid}/scenes/{sid}/rerun")
+def rerun_scene(eid: int, sid: int, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "rerun_scene")
+    sc = get_scene(db, ep, sid)
+    if ep.stage == "video_review":
+        raise HTTPException(409, "to change a finished video, request a revision for the scenes instead")
+    set_stage(ep, "producing")
+    db.commit()
+    return [S.job(j) for j in enqueue_scene_jobs(db, ep, [sc])]
+
+
+# ------------------------------------------------------------------ video review
+@router.post("/episodes/{eid}/video/approve")
+def approve_video(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "approve_video")
+    if not ep.video_asset_id:
+        raise HTTPException(409, "there is no video to approve")
+    set_stage(ep, "final_approved")
+    record(db, ep, "video", "approved", user, body.comment, {"video_asset_id": ep.video_asset_id})
+    rec = db.query(PublishRecord).filter_by(episode_id=ep.id).one_or_none()
+    yt = get_section(db, "youtube")
+    script = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.script_version).one().content
+    if rec is None:
+        rec = PublishRecord(episode_id=ep.id, title=ep.title[:100], description=script.get("logline", ""),
+                            tags=list(yt.get("default_tags", [])), category_id=yt.get("category_id", "23"), privacy=yt.get("default_privacy", "private"))
+        db.add(rec)
+    else:   # a new revision was approved: any earlier publication approval no longer applies
+        rec.status, rec.approved_revision, rec.approved_video_asset_id, rec.approved_at = "draft", None, None, None
+    log_event(db, ep.id, "approval", f"Final video (revision {ep.revision}) approved")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+class RevisionIn(BaseModel):
+    target: str
+    comment: str = Field(min_length=1, max_length=4000)
+    scene_ids: list[int] = Field(default_factory=list)
+
+
+@router.post("/episodes/{eid}/video/request-revision")
+def request_revision(eid: int, body: RevisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "request_revision")
+    if body.target not in REVISION_TARGETS:
+        raise HTTPException(422, f"target must be one of {', '.join(sorted(REVISION_TARGETS))}")
+    if body.target in ("storyboard", "scenes"):
+        for sid in body.scene_ids:
+            get_scene(db, ep, sid)
+    if body.target == "scenes" and not body.scene_ids:
+        raise HTTPException(422, "choose the scenes to re-produce")
+    record(db, ep, "video", "revision_requested", user, body.comment, {"target": body.target, "scene_ids": body.scene_ids})
+    ep.revision += 1
+    ep.video_asset_id = None
+    if body.target == "script":
+        ep.approved_script_version = None
+        ep.approved_storyboard_version = None
+        set_stage(ep, "script_review")
+    elif body.target == "storyboard":
+        ep.approved_storyboard_version = None
+        for s in ep.scenes:
+            s.production_status = "pending"
+            if s.id in body.scene_ids:
+                s.status, s.revision_note = "needs_revision", body.comment
+        set_stage(ep, "storyboard_review")
+    else:
+        targets = [s for s in ep.scenes if s.id in body.scene_ids]
+        for s in targets:
+            s.revision_note = body.comment
+        set_stage(ep, "producing")
+        db.commit()
+        enqueue_scene_jobs(db, ep, targets)
+    log_event(db, ep.id, "revision", f"Revision {ep.revision} requested ({body.target}): {body.comment[:200]}")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+# ------------------------------------------------------------------ publishing
+class PublishIn(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+    category_id: str = Field(default="23", max_length=10)
+    privacy: Literal["private", "unlisted", "public"] = "private"
+    made_for_kids: bool = False
+    thumbnail_asset_id: int | None = None
+
+
+def publish_record(db: Session, ep: Episode) -> PublishRecord:
+    rec = db.query(PublishRecord).filter_by(episode_id=ep.id).one_or_none()
+    if rec is None:
+        raise HTTPException(409, "approve the final video first")
+    return rec
+
+
+@router.put("/episodes/{eid}/publish")
+def edit_publish(eid: int, body: PublishIn, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "edit_publish")
+    rec = publish_record(db, ep)
+    if body.thumbnail_asset_id is not None:
+        a = db.get(Asset, body.thumbnail_asset_id)
+        if a is None or a.episode_id != ep.id or not a.content_type.startswith("image/"):
+            raise HTTPException(422, "thumbnail must be an image asset of this episode")
+    for k, v in body.model_dump().items():
+        setattr(rec, k, v)
+    # Any change after approval withdraws the approval: the owner approves exactly what will be published.
+    rec.status, rec.approved_at, rec.approved_revision, rec.approved_video_asset_id, rec.approved_by = "draft", None, None, None, ""
+    db.commit()
+    return S.publish(rec)
+
+
+class PublishApproveIn(BaseModel):
+    confirm: str
+
+
+@router.post("/episodes/{eid}/publish/approve")
+def approve_publish(eid: int, body: PublishApproveIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = get_episode(db, eid)
+    gate(ep, "approve_publish")
+    if body.confirm != "PUBLISH":
+        raise HTTPException(422, 'type PUBLISH to confirm')
+    rec = publish_record(db, ep)
+    if not rec.title.strip():
+        raise HTTPException(422, "a title is required")
+    rec.status, rec.approved_by, rec.approved_at = "approved", user, now()
+    rec.approved_revision, rec.approved_video_asset_id = ep.revision, ep.video_asset_id
+    record(db, ep, "publish", "approved", user, f"privacy={rec.privacy}", {"video_asset_id": ep.video_asset_id, "title": rec.title})
+    log_event(db, ep.id, "approval", f"Publication approved ({rec.privacy})")
+    db.commit()
+    return S.publish(rec)
+
+
+@router.post("/episodes/{eid}/publish/start")
+def start_publish(eid: int, db: Session = Depends(get_db)):
+    ep = get_episode(db, eid)
+    gate(ep, "publish")
+    rec = publish_record(db, ep)
+    if rec.status not in ("approved", "failed") or rec.approved_revision != ep.revision or rec.approved_video_asset_id != ep.video_asset_id:
+        raise HTTPException(409, "publication has not been approved for the current video")
+    if not youtube_configured():
+        raise HTTPException(409, "YouTube is not connected on the server (see Settings > YouTube)")
+    rec.status = "approved"
+    set_stage(ep, "publishing")
+    db.commit()
+    return S.job(enqueue(db, "publish_youtube", episode_id=ep.id, revision=ep.revision))

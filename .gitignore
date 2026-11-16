@@ -44,3 +44,9 @@ studio-work/short-001-production/
 # AP-83 studio workspaces (SQLite database, production runs, logs): local data, never committed
 studio-work/studio/
 studio-work/studio-*/
+
+# Oddly Relatable Studio app (studio-app/): build output, caches and local databases
+studio-app/web/.next/
+studio-app/web/*.tsbuildinfo
+__pycache__/
+studio-app/api/*.db

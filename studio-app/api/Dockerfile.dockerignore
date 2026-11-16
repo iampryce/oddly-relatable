@@ -1,0 +1,10 @@
+**/node_modules
+**/__pycache__
+**/.venv
+.git
+studio-work
+handoff-AP74
+studio
+studio-app/web
+**/*.mp4
+**/tests/fixtures/*.mp4
