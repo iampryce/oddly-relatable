@@ -4,6 +4,8 @@
 
 **Track A only.** The blue body/green head figure is a **SYNTHETIC PLACEHOLDER, NOT ARTWORK**, not Character 02.
 
+**Correction commit:** `59e6f3ef2b224ebefd64e5588cd47018b0f30633`.
+
 ## The defect
 In face-to-face scenes with `single` shots, a member's shadow was split into one layer per interval in which the member is on camera. The function that builds those layers (`worldLayer` in `production/lib/timeline.mjs`) sets no visibility window (`from`/`to`), so the renderer showed every one of them for the whole shot. Outside its interval, each layer held its first or last position. As a result:
 - **in another member's single**, the off-camera member's shadow still showed;

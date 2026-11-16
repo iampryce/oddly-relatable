@@ -164,6 +164,7 @@ The owner approved a narrowly scoped corrective task on 2026-11-16.
 - **Correction:** `production/lib/formats/face-to-face.mjs` now shows each shadow layer only while its member is on camera. Composition, shadow positions and appearance, dialogue and bubbles are unchanged.
 - **Scope of the change:** only A4, the accepted scene with singles, changes, and only in shadow pixels. A1, A2, A3a, A3b, A5 and A6 are byte-identical.
 - **Evidence:** the corrected A4 sheets and a before/after comparison are in `production/evidence/ap85/shadow-correction/`. The original accepted A4 evidence is unchanged in `production/evidence/ap85/review/`.
+- **Commit:** `59e6f3ef2b224ebefd64e5588cd47018b0f30633`.
 - **Status:** the corrected A4 evidence **awaits owner visual review**. Track A's acceptance (§5.4) is not changed by this record.
 
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
