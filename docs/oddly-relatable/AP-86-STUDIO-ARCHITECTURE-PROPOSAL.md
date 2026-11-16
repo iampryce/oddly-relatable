@@ -10,6 +10,7 @@
 - **S1 (data models and validation) is implemented:** see §11.1.
 - **S2 (sets and depth) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU or paid services) **and is implemented:** see §11.2.
 - **S3 (staging and props) was approved by the owner on 2026-11-16** (local, $0, synthetic fixtures only, no artwork, no GPU, image generation or paid services, no renderer changes) **and is implemented:** see §11.3. S4 to S7 have not started; each needs its own approval.
+- **S4 approval request prepared (2026-11-16):** `AP-86-S4-APPROVAL-REQUEST.md`. S4 is **not authorised** until the owner approves it.
 - No Character 02 is created or designed. AP-85 decisions M3 to M8 stay open and are not decided here.
 - No GPU, external service, spending, model download or image generation. AP-84B3, its locks and its D1-7 gate are untouched; D1-7 stays NOT AUTHORISED.
 - **The visual identity (AP-51 to AP-57, `bible/VISUAL_IDENTITY.md`) is not changed.** Everything here is engineering that serves it: flat, bold-outlined characters in rich, layered, warmly lit three-quarter environments.
@@ -526,7 +527,7 @@ Implemented at commit `226ea7a1432dcacff9b094a4995cc0c8d28d998a`.
 - One `hold` attaches one prop anchor to one pose anchor. Held props do not follow pop-transition scaling.
 - The face-crop check still assumes a standing figure, so for seated poses its face box is conservative.
 - Occlusion is by draw order with cut-outs, as in S2.
-- **Pre-existing defect found (not caused by S3, not fixed):** since the AP-85 review corrections (`305a504`), a member shadow is drawn by `worldLayer`, which sets no visibility window, so shadow layers split for `single` shots stay on screen for the whole shot: in single shots the off-camera member's shadow still shows, and scenes with singles draw extra shadow copies (measured on the accepted AP-85 A4 scene). Fixing it would change the accepted AP-85 A4 render and evidence, so it needs an owner decision; S3's own prop layers set their windows explicitly and are not affected.
+- **Shadow defect found during S3: corrected and accepted under AP-85.** S3 found a pre-existing defect (not caused by S3): shadow layers split for `single` shots had no visibility window, so off-camera members' shadows showed and shadows were duplicated. It was corrected under an owner-approved AP-85 corrective task at commit `59e6f3ef2b224ebefd64e5588cd47018b0f30633`, which shows each shadow only while its member is on camera, and the owner accepted the corrected A4 evidence on 2026-11-16 (evidence: `production/evidence/ap85/shadow-correction/`; AP-85 plan §5.5). Only AP-85 A4's shadow pixels changed; S3's prop layers already set their windows and were not affected.
 
 **Ordering:** S1 → S2 → S3 is the critical path. S4 can follow S2. S5 follows S3. S6 can be prepared in parallel as decisions only, but no art is produced until approved. Track B stays independent; when Character 02 exists, it is simply another registry the system already supports.
 

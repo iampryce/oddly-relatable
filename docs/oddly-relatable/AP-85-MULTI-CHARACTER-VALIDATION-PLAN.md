@@ -157,7 +157,7 @@ At P1: production 82/82 with FFmpeg; studio 64/64; renderer 134/135 (the pre-exi
 - **What this accepts:** the composition engine only. It is not identity evidence for any character (§1). It does not approve Track B, Character 02, or any later phase, each of which keeps its own owner gate (§8, §9).
 - **Still open:** M3 to M8. Track B has not started. No Character 02 artwork or registry exists.
 
-### 5.5 Shadow correction (2026-11-16): awaiting owner visual review
+### 5.5 Shadow correction (2026-11-16): accepted by the owner
 
 The owner approved a narrowly scoped corrective task on 2026-11-16.
 - **Defect:** in a `single` shot, the off-camera member's shadow still showed, and shadows were duplicated across shots. The split shadow layers had no visibility window, so the renderer showed each one for the whole shot.
@@ -165,7 +165,9 @@ The owner approved a narrowly scoped corrective task on 2026-11-16.
 - **Scope of the change:** only A4, the accepted scene with singles, changes, and only in shadow pixels. A1, A2, A3a, A3b, A5 and A6 are byte-identical.
 - **Evidence:** the corrected A4 sheets and a before/after comparison are in `production/evidence/ap85/shadow-correction/`. The original accepted A4 evidence is unchanged in `production/evidence/ap85/review/`.
 - **Commit:** `59e6f3ef2b224ebefd64e5588cd47018b0f30633`.
-- **Status:** the corrected A4 evidence **awaits owner visual review**. Track A's acceptance (§5.4) is not changed by this record.
+- **Owner acceptance (2026-11-16):** after visual review, the owner **accepted the corrected A4 evidence** in `production/evidence/ap85/shadow-correction/`. It is now the current reference for A4's shadows.
+- **History kept:** the original A4 evidence accepted on 2026-11-15 stays unchanged in `production/evidence/ap85/review/` as the record of that acceptance. §5.4 (Track A acceptance at `305a504`) is unchanged; this acceptance adds to it and does not reopen it.
+- **Not changed:** M3 to M8 stay open; Track B has not started.
 
 ## 6. Track B: identity-consistency tests (real Character 02 artwork)
 
