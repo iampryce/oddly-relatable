@@ -465,6 +465,8 @@ S1 adds data models and validation only. It renders, stages, layers and moves no
 
 ### 11.2 S2 implementation (approved 2026-11-16)
 
+Implemented at commit `bd32bde8ea03bc25eb3203bec53c01eb82ad53d6`.
+
 | Capability | Where | Behaviour |
 |---|---|---|
 | Plate → world mapping | `sets.mjs` `plateWorldRect`, `plateToWorld`, `worldToPlate`, `resolvePlate` | The plate (its `superframe`, or the backdrop image's size) is cover-fitted to the design plane, centred. Plate fractions map to world units and back; marks and surfaces are mapped too, for S3 |
