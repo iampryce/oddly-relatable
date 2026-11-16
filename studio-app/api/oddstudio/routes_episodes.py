@@ -17,6 +17,7 @@ from .models import Asset, Character, Episode, Event, Idea, Job, PublishRecord, 
 from .queue import announce, enqueue
 from .script_schema import ScriptError, estimated_seconds, validate_script
 from .settings_store import get_section
+from .casting import cast_status, register_new_characters
 from .tasks import by_key, save_script
 from .workflow import GateError, REVISION_TARGETS, require, set_stage
 from .youtube import configured as youtube_configured
@@ -194,6 +195,7 @@ def edit_script(eid: int, body: ScriptIn, db: Session = Depends(get_db)):
         content = validate_script(body.content, set(by_key(db)))
     except ScriptError as e:
         raise HTTPException(422, str(e))
+    register_new_characters(db, ep.id, content)
     sv = save_script(db, ep, content, "edited", body.note)
     set_stage(ep, "script_review")
     log_event(db, ep.id, "script", f"Script v{sv.version} saved (edited)")
@@ -387,7 +389,7 @@ def retry_job(jid: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "job not found")
     if job.status != "failed":
         raise HTTPException(409, f"only failed jobs can be retried (this one is {job.status})")
-    if job.episode_id:
+    if job.episode_id and job.kind not in ("character_sheet", "character_pose", "voice_preview"):   # character jobs are not tied to a revision
         ep = get_episode(db, job.episode_id)
         if job.revision != ep.revision:
             raise HTTPException(409, "this job belongs to an earlier revision")
@@ -561,3 +563,37 @@ def start_publish(eid: int, db: Session = Depends(get_db)):
     set_stage(ep, "publishing")
     db.commit()
     return S.job(enqueue(db, "publish_youtube", episode_id=ep.id, revision=ep.revision))
+
+
+# ------------------------------------------------------------------ cast (story-driven characters)
+def episode_script(db: Session, ep: Episode) -> dict:
+    if not ep.script_version:
+        raise HTTPException(409, "the episode has no script yet")
+    return db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.script_version).one().content
+
+
+@router.get("/episodes/{eid}/cast")
+def episode_cast(eid: int, db: Session = Depends(get_db)):
+    """Who the script needs, whether their art is approved, and which expressions are still missing."""
+    ep = get_episode(db, eid)
+    return cast_status(db, episode_script(db, ep))
+
+
+@router.post("/episodes/{eid}/cast/generate")
+def generate_cast(eid: int, db: Session = Depends(get_db)):
+    """Owner-started: generate expression sheets for every character the script needs that lacks approved poses."""
+    from .routes_characters import enqueue_sheet, require_image_generation
+    ep = get_episode(db, eid)
+    jobs = []
+    for row in cast_status(db, episode_script(db, ep)):
+        if row.get("missing") or row["locked"] or not row["missing_expressions"]:
+            continue
+        busy = db.query(Job).filter(Job.character_id == row["id"], Job.kind == "character_sheet", Job.status.in_(["queued", "running"])).count()
+        if busy:
+            continue
+        c = db.get(Character, row["id"])
+        require_image_generation(db, c)
+        jobs.append(S.job(enqueue_sheet(db, c, row["missing_expressions"])))
+    if not jobs:
+        raise HTTPException(409, "every character in the script already has its poses (or a sheet is already being generated)")
+    return jobs

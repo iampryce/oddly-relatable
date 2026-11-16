@@ -9,12 +9,16 @@ from .script_schema import SHOTS, validate_script
 SCRIPT_SHAPE = {
     "title": "short title", "logline": "one sentence", "hook": "2-5 word on-screen hook (optional)",
     "twist": "the unexpected turn", "interactive": {"type": "none | viewer-choice | poll", "question": "...", "options": ["A", "B"]},
-    "characters": [{"key": "<one of the available character keys>", "role": "their part in this story"}],
+    "characters": [{"key": "<an available character key, or the key of a new character below>", "role": "their part in this story"}],
+    "new_characters": [{"key": "lowercase-key", "name": "Name", "description": "who they are and their comic role",
+                        "visual_description": "head shape, hair, face, clothing colours, proportions, posture (distinct from the others)",
+                        "bubble_style": "him | her | neutral", "voice_style": "how they sound: age, pace, tone"}],
     "scenes": [{"id": "s1", "heading": "short scene heading", "location": "<an environment id from the list, or empty>",
                 "description": "what the scene shows", "action": "what the characters physically do (big, readable reactions)",
                 "camera": "camera intent in plain words",
                 "lines": [{"speaker": "<character key>", "text": "one short bubble line (max 140 chars)",
-                           "expression": "<one of that character's expressions>", "shot": " | ".join(SHOTS), "duration": 2.0}]}],
+                           "expression": "<one word: neutral, happy, shocked, angry, worried, laughing, smug, scared...>",
+                           "shot": " | ".join(SHOTS), "duration": 2.0, "delivery": "optional voice direction"}]}],
 }
 
 
@@ -39,8 +43,10 @@ def script_prompt(idea, characters: list, environments: list[str]) -> str:
             f"OWNER NOTES: {idea.notes or '(none)'}\nTARGET LENGTH: about {idea.target_seconds} seconds of dialogue and reaction beats.\n"
             f"INTERACTIVITY: {inter}\nCHARACTERS TO USE: {wanted}\n\nAVAILABLE CHARACTERS:\n{_cast_text(characters)}\n\n"
             f"ENVIRONMENTS (location ids): {', '.join(environments)}\n\n"
-            "Rules: 2-6 scenes; every line belongs to one speaker; use only listed character keys and their expressions; "
-            "short punchy bubbles; reaction beats as their own lines; escalate, then land the twist near the end.\n\n"
+            "Rules: 2-6 scenes; every line belongs to one speaker; short punchy bubbles; reaction beats as their own lines; "
+            "escalate, then land the twist near the end. CAST: there is no fixed cast. Reuse an available character when they "
+            "fit the story; otherwise introduce the characters this story needs in new_characters (at most 3), each visually "
+            "distinct, with a clear visual_description and voice_style. Use simple one-word expressions.\n\n"
             "Return JSON shaped like:\n" + json.dumps(SCRIPT_SHAPE, indent=1))
 
 

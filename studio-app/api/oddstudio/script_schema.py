@@ -7,11 +7,13 @@ with a precise message instead of failing later in production.
   "title": "...", "logline": "...", "hook": "on-screen hook text (optional)", "twist": "what the unexpected turn is",
   "interactive": {"type": "none" | "viewer-choice" | "poll", "question": "...", "options": ["A", "B"]},
   "characters": [{"key": "<character key>", "role": "..."}],
+  "new_characters": [{"key": "dad", "name": "Dad", "description": "who they are", "visual_description": "how they look",
+                      "bubble_style": "him|her|neutral", "voice_style": "how they sound"}],     (optional: cast this story introduces)
   "scenes": [{
       "id": "s1", "heading": "...", "location": "<environment id or free text>", "description": "...",
       "action": "...", "camera": "...",
       "lines": [{"speaker": "<character key>", "text": "...", "expression": "neutral", "shot": "wide|medium|close",
-                 "duration": 2.0}]
+                 "duration": 2.0, "delivery": "optional voice direction, e.g. whispered, panicked"}]
   }]
 }
 """
@@ -23,6 +25,7 @@ SHOTS = ("wide", "medium", "close")
 INTERACTIVE = ("none", "viewer-choice", "poll")
 MAX_LINE_CHARS = 140
 ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+KEY = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
 
 class ScriptError(ValueError):
@@ -63,6 +66,30 @@ def validate_script(doc: dict, known_characters: set[str] | None = None) -> dict
         if not isinstance(opts, list) or not 2 <= len(opts) <= 4 or not all(isinstance(o, str) and o.strip() for o in opts):
             raise ScriptError("script.interactive.options must be 2 to 4 short texts")
         out["interactive"]["options"] = [o.strip()[:60] for o in opts]
+
+    new_chars = doc.get("new_characters") or []
+    if not isinstance(new_chars, list) or len(new_chars) > 4:
+        raise ScriptError("script.new_characters must be a list of at most 4 characters")
+    out["new_characters"] = []
+    for i, c in enumerate(new_chars):
+        where = f"script.new_characters[{i}]"
+        if not isinstance(c, dict):
+            raise ScriptError(f"{where} must be an object")
+        key = _str(c, "key", where, max_len=40).lower()
+        if not KEY.match(key):
+            raise ScriptError(f"{where}.key must be lowercase letters, digits and dashes, starting with a letter")
+        style = (c.get("bubble_style") or "neutral").strip().lower()
+        if style not in ("him", "her", "neutral"):
+            style = "neutral"
+        entry = {"key": key, "name": _str(c, "name", where, max_len=120),
+                 "description": _str(c, "description", where, required=False),
+                 "visual_description": _str(c, "visual_description", where),
+                 "bubble_style": style, "voice_style": _str(c, "voice_style", where, required=False, max_len=600)}
+        if known_characters is not None and key in known_characters:
+            continue   # already in the studio: the story simply reuses that character
+        out["new_characters"].append(entry)
+    if known_characters is not None:
+        known_characters = set(known_characters) | {c["key"] for c in out["new_characters"]}
 
     chars = doc.get("characters")
     if not isinstance(chars, list) or not chars:
@@ -122,6 +149,9 @@ def validate_script(doc: dict, known_characters: set[str] | None = None) -> dict
                 raise ScriptError(f"{lw}.shot must be one of {', '.join(SHOTS)}")
             line = {"speaker": spk, "text": text, "expression": _str(ln, "expression", lw, required=False, max_len=40).lower() or "neutral",
                     "shot": shot}
+            delivery = _str(ln, "delivery", lw, required=False, max_len=120)
+            if delivery:
+                line["delivery"] = delivery
             if ln.get("duration") is not None:
                 d = ln["duration"]
                 if not isinstance(d, (int, float)) or not 0.8 <= d <= 8:

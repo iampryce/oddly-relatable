@@ -8,11 +8,11 @@ Production pipeline for one episode:
 """
 from __future__ import annotations
 
-import hashlib
 import json
+import math
+import re
 import shutil
 import subprocess
-import wave
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 from . import engine, writer
 from .config import REPO_ROOT, get_settings
 from .models import Asset, Character, CharacterAsset, Episode, Event, Idea, Job, PublishRecord, ScriptVersion, StoryboardScene, now
-from .providers import ProviderNotConfigured, image_generate, speak, text_provider
+from .casting import register_new_characters, writer_characters
+from .providers import ProviderNotConfigured, audio_seconds, image_generate, speak, text_provider
 from .queue import enqueue
 from .script_schema import validate_script
 from .settings_store import get_section
@@ -93,11 +94,14 @@ def generate_script(ctx: Ctx) -> dict:
     db, job = ctx.db, ctx.job
     ep = db.get(Episode, job.episode_id)
     idea = db.get(Idea, ep.idea_id)
-    chars = characters(db)
+    chars = writer_characters(db, ep.id)
     provider = text_provider(get_section(db, "text"))
     ctx.log(f"Writing the script with provider {provider.name}")
     answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")), writer.script_prompt(idea, chars, engine.environments()))
-    script = validate_script(answer, {c.key for c in chars})
+    script = validate_script(answer, {c.key for c in characters(db)})
+    made = register_new_characters(db, ep.id, script)
+    if made:
+        ctx.log(f"The script introduces new characters: {', '.join(made)} (pose sheets needed before production)")
     sv = save_script(db, ep, script, "generated", job.payload.get("instruction", ""))
     set_stage(ep, "script_review")
     event(db, ep.id, "script", f"Script v{sv.version} generated")
@@ -109,13 +113,14 @@ def generate_script(ctx: Ctx) -> dict:
 def regenerate_section(ctx: Ctx) -> dict:
     db, job = ctx.db, ctx.job
     ep = db.get(Episode, job.episode_id)
-    chars = characters(db)
+    chars = writer_characters(db, ep.id)
     script = current_script(db, ep)
     section, instruction = job.payload["section"], job.payload.get("instruction", "")
     provider = text_provider(get_section(db, "text"))
     answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")),
                                     writer.section_prompt(script, section, instruction, chars))
-    new = writer.apply_section(script, section, answer, {c.key for c in chars})
+    new = writer.apply_section(script, section, answer, {c.key for c in characters(db)})
+    register_new_characters(db, ep.id, new)
     sv = save_script(db, ep, new, "section-regenerated", f"{section}: {instruction}")
     event(db, ep.id, "script", f"Script v{sv.version}: regenerated {section}")
     db.commit()
@@ -228,36 +233,111 @@ def prepare_characters(ctx: Ctx) -> dict[str, Character]:
     return out
 
 
-@task
-def character_pose(ctx: Ctx) -> dict:
-    """Generate one expression pose for a character with the configured image provider (owner-started)."""
-    db, job = ctx.db, ctx.job
-    c = db.get(Character, job.character_id)
-    expression = job.payload["expression"]
-    cfg = get_section(db, "image")
-    ref = None
-    approved = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").first() \
-        or db.query(CharacterAsset).filter_by(character_id=c.id, kind="reference").first()
+def pose_prompt(c: Character, expression: str, with_reference: bool) -> str:
+    return (f"Full-body 2D cartoon character, standing, facing the viewer, whole body visible with space around it, "
+            f"plain transparent (or flat white) background, no scenery, no text. Style: simple expressive flat 2D stickman-style "
+            f"character, bold clean black outlines, thin limbs, big expressive eyes and brows, flat colours. Character: {c.name}. "
+            f"Appearance: {c.visual_description}. Expression and body language: {expression}, exaggerated and readable."
+            + (" Keep the character identical to the reference image: same head, face, hair, clothes, colours and proportions; "
+               "only the expression and pose change." if with_reference else ""))
+
+
+def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict) -> tuple[CharacterAsset, Path]:
     folder = ctx.folder("characters", c.key, "generated")
-    if approved:
-        ref = storage().get_to_file(approved.storage_key, folder / f"ref-{approved.id}.png")
-    prompt = (f"Full-body 2D cartoon character, standing, facing the viewer, whole body visible with space around it, "
-              f"transparent background, no scenery, no text. Style: simple expressive flat 2D stickman-style character, bold clean "
-              f"black outlines, thin limbs, big expressive eyes and brows, flat colours. Character: {c.name}. Appearance: "
-              f"{c.visual_description}. Expression and body language: {expression}, exaggerated and readable."
-              + (" Keep the character identical to the reference image (same head, face, clothes, colours, proportions)." if ref else ""))
-    out = folder / f"{expression}-job{job.id}.png"
-    ctx.log(f"Generating pose '{expression}' with image provider {cfg.get('provider')}")
-    image_generate(cfg, prompt, out, ref)
+    out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}.png"
+    ctx.log(f"Generating '{expression}' with image provider {cfg.get('provider')}")
+    image_generate(cfg, pose_prompt(c, expression, ref is not None), out, ref)
+    if engine.make_cutout(out):
+        ctx.log(f"'{expression}': flat background removed")
     info = engine.analyse_pose(out)
-    key = f"characters/{c.key}/poses/{expression}-job{job.id}.png"
+    key = f"characters/{c.key}/poses/{out.name}"
     storage().put_file(key, out, "image/png")
     a = CharacterAsset(character_id=c.id, kind="pose", expression=expression, storage_key=key, sha256=sha256_file(out),
                        width=info["width"], height=info["height"], feet=info["feet"], figure_height=info["figure_height"], status="review")
-    db.add(a)
-    c.art_status = "review"
-    db.commit()
+    ctx.db.add(a)
+    ctx.db.commit()
+    return a, out
+
+
+def _reference_for(ctx: Ctx, c: Character) -> Path | None:
+    """Consistency anchor: an approved neutral pose, else any approved pose, else the owner's reference image."""
+    db = ctx.db
+    a = (db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved", expression="neutral").first()
+         or db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").first()
+         or db.query(CharacterAsset).filter_by(character_id=c.id, kind="reference").order_by(CharacterAsset.id.desc()).first())
+    if not a:
+        return None
+    return storage().get_to_file(a.storage_key, ctx.folder("characters", c.key, "ref") / Path(a.storage_key).name)
+
+
+@task
+def character_pose(ctx: Ctx) -> dict:
+    """One extra expression pose for a character (owner-started)."""
+    c = ctx.db.get(Character, ctx.job.character_id)
+    a, _ = _generate_pose(ctx, c, ctx.job.payload["expression"], _reference_for(ctx, c), get_section(ctx.db, "image"))
+    if c.art_status != "approved":
+        c.art_status = "review"
+    ctx.db.commit()
     return {"asset_id": a.id}
+
+
+@task
+def character_sheet(ctx: Ctx) -> dict:
+    """A character's pose and expression sheet (owner-started): the neutral pose first, then every other expression
+    drawn from it as the reference, then one labelled sheet image for review. Expressions that already have a pose in
+    review or approved are skipped, so a retry continues where a failure stopped."""
+    db, job = ctx.db, ctx.job
+    c = db.get(Character, job.character_id)
+    cfg = get_section(db, "image")
+    wanted = list(dict.fromkeys(["neutral"] + [e.lower() for e in job.payload.get("expressions", [])]))
+    ref = _reference_for(ctx, c)
+    entries = []
+    for i, exp in enumerate(wanted):
+        existing = db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
+                                                   CharacterAsset.expression == exp, CharacterAsset.status.in_(["review", "approved"])).first()
+        if existing:
+            f = storage().get_to_file(existing.storage_key, ctx.folder("characters", c.key, "sheet") / Path(existing.storage_key).name)
+        else:
+            _, f = _generate_pose(ctx, c, exp, ref, cfg)
+        if ref is None:
+            ref = f   # the first pose anchors the rest of the sheet
+        entries.append((exp, f))
+        job.progress = {"done": i + 1, "total": len(wanted), "current": exp}
+        db.commit()
+    sheet = engine.compose_sheet(entries, ctx.folder("characters", c.key) / f"sheet-job{job.id}.png", f"{c.name}: expression sheet")
+    key = f"characters/{c.key}/sheet-job{job.id}.png"
+    storage().put_file(key, sheet, "image/png")
+    db.add(CharacterAsset(character_id=c.id, kind="sheet", storage_key=key, sha256=sha256_file(sheet), status="review"))
+    if c.art_status != "approved":
+        c.art_status = "review"
+    event(db, c.episode_id, "character", f"{c.name}: expression sheet ready for review ({len(entries)} poses)")
+    db.commit()
+    return {"poses": len(entries)}
+
+
+def voice_direction(c: Character, line: dict) -> str:
+    """Acting direction for the voice model: the character's voice style, the line's expression and delivery."""
+    parts = [c.voice_style or f"{c.name}: expressive comedic delivery", f"Emotion: {line.get('expression', 'neutral')}"]
+    if line.get("delivery"):
+        parts.append(f"Delivery: {line['delivery']}")
+    parts.append("Short animated comedy sketch; exaggerated, clear and well-timed.")
+    return ". ".join(parts)
+
+
+@task
+def voice_preview(ctx: Ctx) -> dict:
+    """A short sample of a character's assigned voice, so the owner can approve it before production."""
+    db, job = ctx.db, ctx.job
+    c = db.get(Character, job.character_id)
+    cfg = get_section(db, "voice")
+    text = job.payload.get("text") or f"Hi, I am {c.name}. Something is definitely wrong here."
+    f = speak(cfg, text, c.voice, ctx.folder("characters", c.key, "voice") / f"sample-job{job.id}", voice_direction(c, {"expression": "neutral"}))
+    key = f"characters/{c.key}/voice-sample-job{job.id}{f.suffix}"
+    storage().put_file(key, f, "audio/mpeg" if f.suffix == ".mp3" else "audio/wav")
+    a = CharacterAsset(character_id=c.id, kind="voice-sample", expression=c.voice or "default", storage_key=key, sha256=sha256_file(f), status="review")
+    db.add(a)
+    db.commit()
+    return {"asset_id": a.id, "seconds": round(audio_seconds(f), 2)}
 
 
 # ------------------------------------------------------------------ production
@@ -283,14 +363,16 @@ def scene_voice(ctx: Ctx) -> dict:
     clips = []
     folder = ctx.folder("episodes", ep.id, f"r{ep.revision}", f"scene-{sc.position}", "voice")
     for i, ln in enumerate(sc.lines):
-        voice = (cfg.get("voices") or {}).get(ln["speaker"]) or cfg.get("default_voice", "")
-        f = speak(cfg, ln["text"], voice, folder / f"line-{i + 1}.wav")
-        with wave.open(str(f)) as w:
-            seconds = w.getnframes() / w.getframerate()
-        key = f"episodes/{ep.id}/r{ep.revision}/scenes/{sc.position}/voice/line-{i + 1}-job{job.id}.wav"
-        a = store_asset(db, ep_id=ep.id, src=f, key=key, kind="voice", label=f"Scene {sc.position} line {i + 1} ({chars[ln['speaker']].name})",
-                        content_type="audio/wav", scene_id=sc.id, job_id=job.id, revision=ep.revision)
-        clips.append({"line": i, "asset_id": a.id, "seconds": round(seconds, 3)})
+        c = chars[ln["speaker"]]
+        # Voice per character (set under Characters); the old settings map and the default voice are fallbacks.
+        voice = c.voice or (cfg.get("voices") or {}).get(ln["speaker"]) or cfg.get("default_voice", "")
+        f = speak(cfg, ln["text"], voice, folder / f"line-{i + 1}", voice_direction(c, ln))
+        seconds = audio_seconds(f)
+        key = f"episodes/{ep.id}/r{ep.revision}/scenes/{sc.position}/voice/line-{i + 1}-job{job.id}{f.suffix}"
+        a = store_asset(db, ep_id=ep.id, src=f, key=key, kind="voice", label=f"Scene {sc.position} line {i + 1} ({c.name})",
+                        content_type="audio/mpeg" if f.suffix == ".mp3" else "audio/wav", scene_id=sc.id, job_id=job.id, revision=ep.revision)
+        clips.append({"line": i, "asset_id": a.id, "seconds": round(seconds, 3), "text": ln["text"], "speaker": ln["speaker"]})
+        ctx.log(f"line {i + 1}: {seconds:.2f} s ({c.name}, voice {voice or 'default'})")
     db.commit()
     return {"clips": clips}
 
@@ -307,10 +389,14 @@ def _voice_audio(ctx: Ctx, ep: Episode, story: dict, folder: Path) -> None:
             by_scene[sc.position] = j.result["clips"]
     if not by_scene:
         return
-    for idx, (sc, es) in enumerate(zip(ep.scenes, story["scenes"])):
+    for sc, es in zip(ep.scenes, story["scenes"]):
         for clip in by_scene.get(sc.position, []):
+            # A clip is used only for the exact line it was recorded for: edited dialogue needs its voice re-run.
+            if clip["line"] >= len(sc.lines) or sc.lines[clip["line"]]["text"] != clip.get("text", sc.lines[clip["line"]]["text"]):
+                raise engine.EngineInputError(f"scene {sc.position}: dialogue changed after its voice was recorded; re-run the scene")
             line = es["lines"][clip["line"]]
-            line["duration"] = round(max(line.get("duration", 0), clip["seconds"] + 0.4), 2)
+            # The line stays on screen until its clip has finished, plus a short comedic beat.
+            line["duration"] = max(line.get("duration", 0), math.ceil((clip["seconds"] + 0.4) * 100) / 100)   # rounded UP: the clip always fits
     story_file = engine.write_story(story, folder)
     tmp = folder / "timings"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -327,7 +413,7 @@ def _voice_audio(ctx: Ctx, ep: Episode, story: dict, folder: Path) -> None:
             local = storage().get_to_file(a.storage_key, folder / "voice" / Path(a.storage_key).name)
             rel = Path(local).resolve()
             voice.append({"source": str(rel), "sha256": a.sha256, "licence": f"Generated for this episode by the configured voice provider",
-                          "start": t["lines"][clip["line"]]["start"], "gain": 1.0})
+                          "start": t["lines"][clip["line"]]["start"], "gain": float(get_section(db, "voice").get("gain", 1.0))})
     story["audio"] = {"voice": voice}
 
 
@@ -377,6 +463,13 @@ def render_episode(ctx: Ctx) -> dict:
 
 def after_job(db: Session, job: Job) -> None:
     """Advance the episode after a job finishes (success or failure)."""
+    if job.kind in ("character_sheet", "character_pose") and job.status == "failed" and job.character_id:
+        # Do not leave the character stuck in "generating": its status follows the poses it really has.
+        c = db.get(Character, job.character_id)
+        if c is not None and not c.locked:
+            poses = {a.status for a in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose")}
+            c.art_status = "approved" if "approved" in poses else "review" if "review" in poses else "none"
+            db.commit()
     if not job.episode_id:
         return
     ep = db.get(Episode, job.episode_id)

@@ -17,6 +17,14 @@ The engine (`production/`) and the renderer (`skills/directing-stickman-videos/`
 | Dashboard | `web/` | Next.js 16 (App Router), no UI framework |
 | Deployment | `deploy/docker-compose.yml` | Postgres 16, Redis 7, api, worker, web; ports on 127.0.0.1 only |
 
+**Documents:**
+- [`docs/VOICE-AND-CASTING.md`](docs/VOICE-AND-CASTING.md): story-driven characters, voices, credentials and running costs;
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md): `/srv/stickman` deployment, backups, rollback;
+- [`docs/SECURITY-REVIEW.md`](docs/SECURITY-REVIEW.md);
+- [`docs/LONG-FORM-PLAN.md`](docs/LONG-FORM-PLAN.md): 5–7 minute episodes (plan only).
+
+**No fixed cast.** Each script may introduce the characters its story needs. Their pose and expression sheets are generated on the owner's request and shown for approval. Approved characters can join the recurring cast for later stories.
+
 ## Workflow and approval gates
 
 ```mermaid
@@ -55,7 +63,9 @@ flowchart LR
 | `generate_script`, `regenerate_section`, `regenerate_scene` | AI writer (configured provider) → validated script/scene |
 | `generate_storyboard` | Scene breakdown from the approved script version; queues `scene_reference` per scene |
 | `scene_reference`, `scene_prepare` | Engine `build` + `storyboard` for one scene: validates it and stores renderer-exact stills |
-| `scene_voice` | One clip per line via the voice provider; reported as **skipped** when no voice provider is set (SFX only) |
+| `scene_voice` | One clip per line in the character's assigned voice, with acting direction (voice style, expression, delivery); reported as **skipped** when no voice provider is set (SFX only) |
+| `character_sheet` | A character's pose and expression sheet: neutral first, the rest drawn from it; cut-out, measured, labelled sheet for owner approval |
+| `voice_preview` | A short sample of a character's voice |
 | `render_episode` | Engine `produce`: audio bed (voice clips placed at the engine's line timings), MP4, QA, reports, manifest |
 | `character_pose` | One expression pose image via the image provider; analysed for feet and figure height; awaits owner approval |
 | `publish_youtube` | Resumable upload to YouTube with the approved details |
@@ -71,7 +81,7 @@ Nothing below is faked. Without the dependency, the step fails with a clear "Not
 |---|---|---|
 | AI script writing | `codex-cli` (the Codex CLI logged in on the **worker machine**; not inside the containers), or `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` | Codex: ChatGPT subscription. APIs: a few cents per script |
 | Character pose images | `codex-cli` on the worker machine, or `OPENAI_API_KEY` (Images API, transparent PNG) | Per image |
-| Voices | `OPENAI_API_KEY` (text-to-speech); otherwise videos carry the engine's SFX only | Cents per episode |
+| Voices | `OPENAI_API_KEY` (gpt-4o-mini-tts), `ELEVENLABS_API_KEY`, or Piper installed on the worker (free); otherwise videos carry the engine's SFX only | About $0.01 per Short with OpenAI (see docs/VOICE-AND-CASTING.md) |
 | S3 media | `STORAGE_BACKEND=s3`, `S3_BUCKET`, an instance role or `AWS_*` keys | Storage and egress |
 | YouTube publishing | `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` (scope `youtube.upload`) | API quota only |
 | GPU | Not needed: rendering is CPU (Node + FFmpeg) | — |
@@ -109,7 +119,7 @@ docker compose logs -f api worker
 ```
 
 - The API container runs `alembic upgrade head` on start.
-- All ports are bound to `127.0.0.1`. Use the dashboard through an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <admin>@<server>`.
+- Only the dashboard has a host port, bound to `127.0.0.1`. The full procedure, with release layout, backups and rollback, is in `docs/DEPLOYMENT.md`. Use the dashboard through an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 <admin>@<server>`.
 - **Before exposing it publicly:**
   - add a domain and a TLS reverse proxy, and set `COOKIE_SECURE=true`;
   - finish the server hardening in `docs/VPS_PRODUCTION_READINESS.md`: key-only SSH and no root password login.
@@ -139,8 +149,11 @@ Videos upload as **private** by default, so they can be checked on YouTube befor
 
 ```bash
 cd studio-app/api/tests
-python -m unittest -v                         # gates, auth, settings, media signing (seconds)
-FFMPEG=... FFPROBE=... python -m unittest test_end_to_end -v   # full sample episode through the real engine (~2 min)
+python -m unittest -v      # all suites; renderer-backed tests skip without FFMPEG/FFPROBE
+#   test_workflow        gates, auth, settings, media signing (seconds)
+#   test_cast_and_voice  story-introduced characters, sheets, approval, reuse, voice assignment/preview, and a real
+#                        render with a generated character and voiced, synchronised dialogue (~1.5 min)
+#   test_end_to_end      full sample episode through the real engine (~2 min)
 cd ../../web && npx tsc --noEmit && npx next build
 ```
 

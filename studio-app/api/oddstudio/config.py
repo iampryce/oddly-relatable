@@ -44,6 +44,8 @@ class Settings:
     openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
     codex_bin: str = field(default_factory=lambda: _env("CODEX_BIN", "codex"))
+    elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
+    piper_bin: str = field(default_factory=lambda: _env("PIPER_BIN", "piper"))
     youtube_client_id: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_ID"))
     youtube_client_secret: str = field(default_factory=lambda: _env("YOUTUBE_CLIENT_SECRET"))
     youtube_refresh_token: str = field(default_factory=lambda: _env("YOUTUBE_REFRESH_TOKEN"))

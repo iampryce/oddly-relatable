@@ -79,13 +79,16 @@ class Character(Timestamps, Base):
     default_expression: Mapped[str] = mapped_column(String(40), default="neutral")
     locked: Mapped[bool] = mapped_column(default=False)              # approved repo artwork: not editable here
     art_status: Mapped[str] = mapped_column(String(20), default="none")  # none | generating | review | approved
+    # Voice: the voice id for the configured voice provider, and how this character speaks (fed to the voice model).
+    voice: Mapped[str] = mapped_column(String(120), default="")
+    voice_style: Mapped[str] = mapped_column(Text, default="")
 
 
 class CharacterAsset(Base):
     __tablename__ = "character_assets"
     id: Mapped[int] = mapped_column(primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(20))                    # reference | pose
+    kind: Mapped[str] = mapped_column(String(20))                    # reference | pose | sheet | voice-sample
     expression: Mapped[str] = mapped_column(String(40), default="")
     storage_key: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64), default="")

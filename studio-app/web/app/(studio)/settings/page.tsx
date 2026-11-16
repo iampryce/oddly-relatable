@@ -7,7 +7,8 @@ import {ErrorBox} from '@/components/ui';
 const PROVIDERS: Record<string, [string, string][]> = {
   text: [['none', 'Off'], ['codex-cli', 'Codex CLI (ChatGPT subscription; worker machine only)'], ['openai', 'OpenAI API (key on server)'], ['anthropic', 'Anthropic API (key on server)']],
   image: [['none', 'Off'], ['codex-cli', 'Codex CLI image generation (worker machine only)'], ['openai', 'OpenAI Images API (key on server)']],
-  voice: [['none', 'Off (SFX only, no voices)'], ['openai', 'OpenAI text-to-speech (key on server)']],
+  voice: [['none', 'Off (SFX only, no voices)'], ['openai', 'OpenAI gpt-4o-mini-tts (key on server; acting direction)'],
+          ['elevenlabs', 'ElevenLabs (key on server; per-character voice ids)'], ['piper', 'Piper (free, local on the worker; voice = model path)']],
 };
 
 function Section({name, title, value, children}: {name: string; title: string; value: any; children: (v: any, set: (k: string, x: any) => void) => React.ReactNode}) {
@@ -43,7 +44,7 @@ export default function Settings() {
       <h1>Settings</h1><p className="sub">Choices are stored in the studio database. Secrets (API keys, YouTube tokens) live only in the server environment and are never shown here.</p>
       <div className="grid cols-2">
         <div className="card"><h2>Server integrations</h2><ul style={{listStyle: 'none', padding: 0}} className="stack">
-          <Yes ok={i.openai_api_key} label="OpenAI API key" /><Yes ok={i.anthropic_api_key} label="Anthropic API key" />
+          <Yes ok={i.openai_api_key} label="OpenAI API key" /><Yes ok={i.anthropic_api_key} label="Anthropic API key" /><Yes ok={i.elevenlabs_api_key} label="ElevenLabs API key" /><Yes ok={i.piper} label="Piper (local voices) on the worker" />
           <Yes ok={i.codex_cli} label="Codex CLI on the worker machine" /><Yes ok={i.youtube} label="YouTube channel (OAuth refresh token)" />
           <Yes ok={i.ffmpeg} label="FFmpeg for rendering" /><Yes ok={i.redis} label="Job queue (Redis)" />
           <li><span className="badge">{i.storage}</span> media storage{i.storage === 's3' && !i.s3_bucket_set ? ' (bucket missing)' : ''}</li>
@@ -53,7 +54,8 @@ export default function Settings() {
           <div><label htmlFor="settings-size-3">Size</label><select id="settings-size-3" value={v.size} onChange={e => set('size', e.target.value)}><option>1024x1536</option><option>1024x1024</option></select></div></>}</Section>
         <Section name="voice" title="Voice and audio" value={s.voice}>{(v, set) => <>{provider('voice')(v, set)}
           <div><label htmlFor="settings-default-voice-4">Default voice</label><input id="settings-default-voice-4" value={v.default_voice} onChange={e => set('default_voice', e.target.value)} placeholder="e.g. alloy" /></div>
-          <div><label>Voice per character (JSON: {'{"character-key": "voice"}'})</label><textarea value={JSON.stringify(v.voices || {})} onChange={e => { try { set('voices', JSON.parse(e.target.value || '{}')); } catch {} }} /></div></>}</Section>
+          <div><label htmlFor="voice-gain">Voice level (0.2–2)</label><input id="voice-gain" type="number" step="0.1" min={0.2} max={2} value={v.gain ?? 1} onChange={e => set('gain', Number(e.target.value))} /></div>
+          <p className="muted small">Each character&apos;s voice and speaking style are assigned on the Characters page; this default is used when a character has none.</p></>}</Section>
         <Section name="production" title="Production" value={s.production}>{(v, set) => (
           <div className="grid cols-2">
             <div><label htmlFor="settings-default-set-5">Default set</label><select id="settings-default-set-5" value={v.environment} onChange={e => set('environment', e.target.value)}>{data.environments.map((x: string) => <option key={x}>{x}</option>)}</select></div>

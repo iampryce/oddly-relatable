@@ -48,6 +48,8 @@ class CharacterIn(BaseModel):
     scope: Literal["recurring", "episode"] = "recurring"
     episode_id: int | None = None
     default_expression: str = Field(default="neutral", max_length=40)
+    voice: str = Field(default="", max_length=120)
+    voice_style: str = Field(default="", max_length=600)
 
 
 @router.get("/characters")
@@ -72,7 +74,10 @@ def create_character(body: CharacterIn, db: Session = Depends(get_db)):
 def update_character(cid: int, body: CharacterIn, db: Session = Depends(get_db)):
     c = get_char(db, cid)
     if c.locked:
-        raise HTTPException(409, "this character uses approved repository artwork and is locked")
+        # Approved repository artwork and its description stay locked; only the voice may be assigned.
+        c.voice, c.voice_style = body.voice, body.voice_style
+        db.commit()
+        return out(db, c)
     if body.key != c.key:
         raise HTTPException(409, "a character's key cannot change (scripts refer to it)")
     for k, v in body.model_dump().items():
@@ -140,6 +145,31 @@ class DecisionIn(BaseModel):
     decision: Literal["approve", "reject"]
 
 
+def refresh_art(db: Session, c: Character) -> None:
+    """A character's usable expressions are exactly its approved poses; art is approved once any pose is."""
+    approved = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").all()
+    c.expressions = {x.expression: f"p{x.id}" for x in approved}
+    if approved:
+        if c.default_expression not in c.expressions:
+            c.default_expression = "neutral" if "neutral" in c.expressions else approved[0].expression
+        c.art_status = "approved"
+        c.registry_path = c.registry_path or "generated"
+    else:
+        reviewing = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review").count()
+        c.art_status, c.registry_path = ("review" if reviewing else "none"), None
+
+
+def decide(db: Session, c: Character, a: CharacterAsset, approve: bool) -> None:
+    if approve:
+        # One approved pose per expression: approving a new one retires the previous one.
+        for other in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", expression=a.expression, status="approved"):
+            if other.id != a.id:
+                other.status = "rejected"
+        a.status = "approved"
+    else:
+        a.status = "rejected"
+
+
 @router.post("/character-assets/{aid}/decision")
 def decide_pose(aid: int, body: DecisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
     a = db.get(CharacterAsset, aid)
@@ -148,23 +178,94 @@ def decide_pose(aid: int, body: DecisionIn, db: Session = Depends(get_db), user:
     c = get_char(db, a.character_id)
     if c.locked:
         raise HTTPException(409, "locked character")
-    if body.decision == "approve":
-        # One approved pose per expression: approving a new one retires the previous one.
-        for other in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", expression=a.expression, status="approved"):
-            other.status = "rejected"
-        a.status = "approved"
-    else:
-        a.status = "rejected"
+    decide(db, c, a, body.decision == "approve")
     db.flush()
-    approved = [x for x in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved")]
-    c.expressions = {x.expression: f"p{x.id}" for x in approved}
-    if approved:
-        if c.default_expression not in c.expressions:
-            c.default_expression = approved[0].expression
-        c.art_status = "approved"
-        c.registry_path = c.registry_path or "generated"
-    else:
-        c.art_status, c.registry_path = "review", None
-    db.add(Event(kind="character", message=f"{c.name}: pose '{a.expression}' {a.status} by {user}"))
+    refresh_art(db, c)
+    db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: pose '{a.expression}' {a.status} by {user}"))
     db.commit()
     return out(db, c)
+
+
+class SheetIn(BaseModel):
+    expressions: list[str] = Field(default_factory=list, max_length=16)
+
+
+def clean_expressions(values: list[str]) -> list[str]:
+    exps = []
+    for e in values:
+        e = e.strip().lower()
+        if not EXPRESSION.match(e):
+            raise HTTPException(422, f"invalid expression name {e!r}")
+        if e not in exps:
+            exps.append(e)
+    return exps
+
+
+def require_image_generation(db: Session, c: Character) -> None:
+    if c.locked:
+        raise HTTPException(409, "this character uses approved repository artwork; new art needs the owner's separate artwork approval")
+    if not c.visual_description.strip():
+        raise HTTPException(422, f"describe how {c.name} looks first (visual description)")
+    if get_section(db, "image").get("provider", "none") == "none":
+        raise HTTPException(409, "image generation is off; choose an image provider in Settings > AI providers")
+
+
+def enqueue_sheet(db: Session, c: Character, expressions: list[str]):
+    c.art_status = "generating" if c.art_status != "approved" else c.art_status
+    db.commit()
+    # Linked to the character's episode (if any) so it shows in that episode's job list.
+    return enqueue(db, "character_sheet", episode_id=c.episode_id, character_id=c.id, payload={"expressions": expressions})
+
+
+@router.post("/characters/{cid}/sheet")
+def generate_sheet(cid: int, body: SheetIn, db: Session = Depends(get_db)):
+    """Generate the pose and expression sheet (neutral first; the rest drawn from it)."""
+    c = get_char(db, cid)
+    require_image_generation(db, c)
+    exps = clean_expressions(body.expressions or ["neutral", "happy", "shocked", "angry", "worried", "laughing"])
+    return S.job(enqueue_sheet(db, c, exps))
+
+
+@router.post("/characters/{cid}/sheet/decision")
+def decide_sheet(cid: int, body: DecisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Approve (or reject) every pose of the sheet that is awaiting review, in one decision."""
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    pending = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review").all()
+    if not pending:
+        raise HTTPException(409, "no poses are awaiting review")
+    for a in pending:
+        decide(db, c, a, body.decision == "approve")
+        db.flush()
+    for sheet in db.query(CharacterAsset).filter_by(character_id=c.id, kind="sheet", status="review"):
+        sheet.status = "approved" if body.decision == "approve" else "rejected"
+    refresh_art(db, c)
+    db.add(Event(episode_id=c.episode_id, kind="approval" if body.decision == "approve" else "character",
+                 message=f"{c.name}: expression sheet {body.decision}d by {user} ({len(pending)} poses)"))
+    db.commit()
+    return out(db, c)
+
+
+@router.post("/characters/{cid}/promote")
+def promote(cid: int, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Save a story's character to the recurring cast so any later story can reuse it."""
+    c = get_char(db, cid)
+    if c.art_status != "approved":
+        raise HTTPException(409, "approve the character's expression sheet before adding it to the recurring cast")
+    c.scope, c.episode_id = "recurring", None
+    db.add(Event(kind="character", message=f"{c.name} added to the recurring cast by {user}"))
+    db.commit()
+    return out(db, c)
+
+
+class VoicePreviewIn(BaseModel):
+    text: str = Field(default="", max_length=300)
+
+
+@router.post("/characters/{cid}/voice/preview")
+def voice_preview(cid: int, body: VoicePreviewIn, db: Session = Depends(get_db)):
+    c = get_char(db, cid)
+    if get_section(db, "voice").get("provider", "none") == "none":
+        raise HTTPException(409, "no voice provider is configured (Settings > Voice and audio)")
+    return S.job(enqueue(db, "voice_preview", character_id=c.id, payload=body.model_dump()))

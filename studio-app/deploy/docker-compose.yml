@@ -1,7 +1,7 @@
 # Oddly Relatable Studio: one Compose project, nothing shared with other projects on the host.
-#   cd studio-app/deploy && cp .env.example .env   (fill it in; never commit .env)
-#   docker compose up -d --build
-# Every port is bound to 127.0.0.1: reach the dashboard through an SSH tunnel
+#   See studio-app/docs/DEPLOYMENT.md (release layout under /srv/stickman, backups, rollback).
+#   RELEASE=<git sha> docker compose --env-file /srv/stickman/shared/.env up -d --build
+# Only the dashboard has a host port, bound to 127.0.0.1: reach it through an SSH tunnel
 #   ssh -L 3000:127.0.0.1:3000 <admin>@<server>   then open http://127.0.0.1:3000
 # Public HTTPS (domain + TLS reverse proxy) is a separate, owner-approved step.
 name: oddstudio
@@ -22,6 +22,7 @@ x-app-env: &app-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
   YOUTUBE_CLIENT_ID: ${YOUTUBE_CLIENT_ID:-}
   YOUTUBE_CLIENT_SECRET: ${YOUTUBE_CLIENT_SECRET:-}
   YOUTUBE_REFRESH_TOKEN: ${YOUTUBE_REFRESH_TOKEN:-}
@@ -53,17 +54,22 @@ services:
 
   api:
     build: {context: ../.., dockerfile: studio-app/api/Dockerfile}
-    image: oddstudio-api
+    image: oddstudio-api:${RELEASE:-dev}
     restart: unless-stopped
     environment: *app-env
     volumes: [work_data:/data]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    ports: ["127.0.0.1:8000:8000"]
+    # No host port: only the dashboard container reaches the API (it trusts X-Forwarded-For from that proxy).
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      retries: 5
 
   worker:
-    image: oddstudio-api
+    image: oddstudio-api:${RELEASE:-dev}
     restart: unless-stopped
     environment: *app-env
     command: ["python", "-m", "oddstudio.worker"]
@@ -77,7 +83,7 @@ services:
 
   web:
     build: {context: ../web, args: {API_URL: "http://api:8000"}}
-    image: oddstudio-web
+    image: oddstudio-web:${RELEASE:-dev}
     restart: unless-stopped
     depends_on: [api]
     ports: ["127.0.0.1:3000:3000"]

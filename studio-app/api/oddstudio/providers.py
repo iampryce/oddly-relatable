@@ -180,6 +180,8 @@ def image_generate(cfg: dict, prompt: str, out_file: Path, reference: Path | Non
     p = cfg.get("provider", "none")
     out_file.parent.mkdir(parents=True, exist_ok=True)
     s = get_settings()
+    if s.env == "test" and _test_image is not None:
+        return _test_image(prompt, out_file, reference)
     if p == "openai":
         if not s.openai_api_key:
             raise ProviderNotConfigured("openai images: OPENAI_API_KEY is not set on the server")
@@ -218,22 +220,87 @@ def image_generate(cfg: dict, prompt: str, out_file: Path, reference: Path | Non
 
 
 # ---------------------------------------------------------------- voice
-def speak(cfg: dict, text: str, voice: str, out_file: Path) -> Path:
+# Voice providers. Each returns the written audio file (WAV or MP3; the engine accepts any format FFmpeg reads).
+#   openai     gpt-4o-mini-tts (default model): accepts acting "instructions" (character voice style + line delivery).
+#   elevenlabs ElevenLabs text-to-speech: `voice` is an ElevenLabs voice id; strongest character voices.
+#   piper      local, free, CPU: `voice` is the path of a Piper .onnx voice model on the worker (PIPER_BIN).
+_test_voice = None
+_test_image = None
+
+
+def set_test_voice(fn) -> None:
+    """Tests only: fn(text, voice, instructions, out_file) -> out_file."""
+    global _test_voice
+    _test_voice = fn
+
+
+def set_test_image(fn) -> None:
+    """Tests only: fn(prompt, out_file, reference) -> out_file."""
+    global _test_image
+    _test_image = fn
+
+
+def speak(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "") -> Path:
     p = cfg.get("provider", "none")
     s = get_settings()
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    if s.env == "test" and _test_voice is not None:
+        return _test_voice(text, voice, instructions, out_file)
     if p == "openai":
         if not s.openai_api_key:
             raise ProviderNotConfigured("openai voice: OPENAI_API_KEY is not set on the server")
-        r = httpx.post("https://api.openai.com/v1/audio/speech", timeout=180,
-                       headers={"Authorization": f"Bearer {s.openai_api_key}"},
-                       json={"model": cfg.get("model") or "gpt-4o-mini-tts", "voice": voice or "alloy", "input": text,
-                             "response_format": "wav"})
+        body = {"model": cfg.get("model") or "gpt-4o-mini-tts", "voice": voice or cfg.get("default_voice") or "alloy",
+                "input": text, "response_format": "wav"}
+        if instructions and not body["model"].startswith("tts-1"):
+            body["instructions"] = instructions[:1000]
+        r = httpx.post("https://api.openai.com/v1/audio/speech", timeout=180, headers={"Authorization": f"Bearer {s.openai_api_key}"}, json=body)
         if r.status_code >= 400:
             raise ProviderError(f"openai voice: HTTP {r.status_code}: {r.text[:500]}")
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_bytes(r.content)
-        return out_file
+        f = out_file.with_suffix(".wav")
+        f.write_bytes(r.content)
+        return f
+    if p == "elevenlabs":
+        if not s.elevenlabs_api_key:
+            raise ProviderNotConfigured("elevenlabs: ELEVENLABS_API_KEY is not set on the server")
+        vid = voice or cfg.get("default_voice")
+        if not vid:
+            raise ProviderNotConfigured("elevenlabs: assign a voice id to this character (Characters) or set a default voice")
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}?output_format=mp3_44100_128", timeout=180,
+                       headers={"xi-api-key": s.elevenlabs_api_key},
+                       json={"text": text, "model_id": cfg.get("model") or "eleven_multilingual_v2",
+                             "voice_settings": {"stability": 0.4, "similarity_boost": 0.8, "style": 0.5}})
+        if r.status_code >= 400:
+            raise ProviderError(f"elevenlabs: HTTP {r.status_code}: {r.text[:500]}")
+        f = out_file.with_suffix(".mp3")
+        f.write_bytes(r.content)
+        return f
+    if p == "piper":
+        exe = shutil.which(s.piper_bin)
+        model = voice or cfg.get("default_voice")
+        if not exe:
+            raise ProviderNotConfigured("piper: the `piper` command is not installed on the worker (PIPER_BIN)")
+        if not model or not Path(model).exists():
+            raise ProviderNotConfigured("piper: the character's voice must be the path of an installed Piper .onnx model")
+        f = out_file.with_suffix(".wav")
+        r = subprocess.run([exe, "--model", model, "--output_file", str(f)], input=text, capture_output=True, text=True,
+                           encoding="utf-8", timeout=300)
+        if r.returncode != 0 or not f.exists():
+            raise ProviderError(f"piper failed: {(r.stderr or r.stdout)[-400:]}")
+        return f
     raise ProviderNotConfigured("No voice provider is configured")
+
+
+def audio_seconds(path: Path) -> float:
+    """Duration of an audio file (FFprobe when available; WAV header otherwise)."""
+    s = get_settings()
+    if s.ffprobe:
+        r = subprocess.run([s.ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            return float(r.stdout.strip())
+    import wave
+    with wave.open(str(path)) as w:
+        return w.getnframes() / w.getframerate()
 
 
 def env_for_node() -> dict:

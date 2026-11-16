@@ -69,18 +69,32 @@ def read_token(token: str | None) -> str | None:
 
 
 _failures: dict[str, deque] = defaultdict(deque)
+_all_failures: deque = deque()
+PER_CLIENT, GLOBAL, WINDOW = 8, 30, 900
+
+
+def _trim(q: deque, t: float) -> None:
+    while q and q[0] < t - WINDOW:
+        q.popleft()
 
 
 def check_rate(client: str) -> None:
-    q, t = _failures[client], time.time()
-    while q and q[0] < t - 900:
-        q.popleft()
-    if len(q) >= 8:
+    """Per-client limit, plus a global cap: the client address comes from X-Forwarded-For behind the dashboard proxy,
+    which a caller can influence, so the global cap bounds password guessing however addresses are presented."""
+    t = time.time()
+    q = _failures[client]
+    _trim(q, t)
+    _trim(_all_failures, t)
+    if len(q) >= PER_CLIENT or len(_all_failures) >= GLOBAL:
         raise HTTPException(429, "Too many failed sign-in attempts. Wait 15 minutes.")
 
 
 def record_failure(client: str) -> None:
-    _failures[client].append(time.time())
+    t = time.time()
+    _failures[client].append(t)
+    _all_failures.append(t)
+    if len(_failures) > 10_000:      # bound memory under address spoofing
+        _failures.clear()
 
 
 def current_user(request: Request) -> str:

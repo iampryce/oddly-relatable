@@ -13,8 +13,8 @@ DEFAULTS: dict[str, dict] = {
     "text": {"provider": "none", "model": "", "temperature": 0.9},
     # Image generation (character poses, scene reference images). Off until the owner turns it on.
     "image": {"provider": "none", "model": "", "size": "1024x1536"},
-    # Voiceover. "none" means the video carries the engine's built-in SFX only (no voices).
-    "voice": {"provider": "none", "model": "", "voices": {}, "default_voice": ""},
+    # Voiceover. "none": the video carries the engine's built-in SFX only. Each character's voice is set on the character.
+    "voice": {"provider": "none", "model": "", "voices": {}, "default_voice": "", "gain": 1.0},
     "production": {"environment": "living-room-empty-03", "max_seconds": 60, "fps": 30,
                    "end_card": "Oddly Relatable"},
     "youtube": {"default_privacy": "private", "category_id": "23", "default_tags": ["stickman", "funny", "relatable", "comedy"]},
@@ -28,7 +28,7 @@ DEFAULTS: dict[str, dict] = {
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
 IMAGE_PROVIDERS = ("none", "codex-cli", "openai")
-VOICE_PROVIDERS = ("none", "openai")
+VOICE_PROVIDERS = ("none", "openai", "elevenlabs", "piper")
 
 
 def get_section(db: Session, key: str) -> dict:
@@ -53,6 +53,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
     choices = {"text": TEXT_PROVIDERS, "image": IMAGE_PROVIDERS, "voice": VOICE_PROVIDERS}.get(key)
     if choices and "provider" in value and value["provider"] not in choices:
         raise ValueError(f"{key}.provider must be one of {', '.join(choices)}")
+    if key == "voice" and "gain" in value and not (isinstance(value["gain"], (int, float)) and 0.2 <= value["gain"] <= 2):
+        raise ValueError("voice.gain must be between 0.2 and 2")
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
@@ -73,6 +75,8 @@ def integrations_status() -> dict:
     return {
         "openai_api_key": bool(s.openai_api_key),
         "anthropic_api_key": bool(s.anthropic_api_key),
+        "elevenlabs_api_key": bool(s.elevenlabs_api_key),
+        "piper": bool(shutil.which(s.piper_bin)),
         "codex_cli": bool(shutil.which(s.codex_bin)),
         "youtube": bool(s.youtube_client_id and s.youtube_client_secret and s.youtube_refresh_token),
         "storage": s.storage_backend,

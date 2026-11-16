@@ -222,6 +222,55 @@ def last_error(output: str) -> str:
     return (errs[-1] if errs else (lines[-1] if lines else "no output"))[:600]
 
 
+def make_cutout(png: Path) -> bool:
+    """Ensure a pose image is a cut-out. Image models often return a flat background instead of transparency: when the
+    four corners share one flat colour, that colour is flood-filled to transparent from each corner (characters have
+    bold outlines, so the fill stops at the figure). Returns True if the file was changed. Anything else is left for
+    analyse_pose to refuse."""
+    from PIL import ImageDraw
+    img = Image.open(png).convert("RGBA")
+    w, h = img.size
+    corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+    if all(img.getpixel(c)[3] <= 16 for c in corners):
+        return False
+    first = img.getpixel(corners[0])
+    if any(max(abs(a - b) for a, b in zip(img.getpixel(c)[:3], first[:3])) > 24 for c in corners):
+        return False
+    for c in corners:
+        if img.getpixel(c)[3] > 16:
+            ImageDraw.floodfill(img, c, (0, 0, 0, 0), thresh=40)
+    img.save(png)
+    return True
+
+
+def compose_sheet(entries: list[tuple[str, Path]], out: Path, title: str) -> Path:
+    """Expression sheet for owner review: every pose side by side at the same scale, labelled."""
+    from PIL import ImageDraw, ImageFont
+    cell_w, cell_h, pad, head = 300, 470, 16, 70
+    cols = min(4, max(1, len(entries)))
+    rows = (len(entries) + cols - 1) // cols
+    sheet = Image.new("RGB", (pad + cols * (cell_w + pad), head + rows * (cell_h + pad)), (245, 242, 236))
+    d = ImageDraw.Draw(sheet)
+    try:
+        big, small = ImageFont.load_default(size=30), ImageFont.load_default(size=22)
+    except TypeError:   # Pillow < 10.1
+        big = small = ImageFont.load_default()
+    d.text((pad, 18), title, fill=(30, 30, 30), font=big)
+    for i, (label, f) in enumerate(entries):
+        x, y = pad + (i % cols) * (cell_w + pad), head + (i // cols) * (cell_h + pad)
+        d.rectangle([x, y, x + cell_w, y + cell_h], fill=(255, 255, 255), outline=(220, 214, 204))
+        im = Image.open(f).convert("RGBA")
+        box = im.getchannel("A").getbbox() or (0, 0, im.width, im.height)
+        im = im.crop(box)
+        scale = min((cell_w - 20) / im.width, (cell_h - 60) / im.height)
+        im = im.resize((max(1, int(im.width * scale)), max(1, int(im.height * scale))))
+        sheet.paste(im, (x + (cell_w - im.width) // 2, y + 10 + (cell_h - 60 - im.height)), im)
+        d.text((x + 12, y + cell_h - 40), label, fill=(60, 60, 60), font=small)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(out)
+    return out
+
+
 def analyse_pose(png: Path) -> dict:
     """Feet anchor and figure height of a transparent pose image (what the engine's registry needs)."""
     img = Image.open(png)

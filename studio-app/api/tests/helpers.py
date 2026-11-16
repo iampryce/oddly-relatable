@@ -33,6 +33,36 @@ def sample_script(title="Group Chat Emergency", speaker="character-01"):
     }
 
 
+def fake_pose_image(prompt, out_file, reference):
+    """Test stand-in for an image model: a bold-outlined figure on a FLAT WHITE background (not transparent), so the
+    studio's cut-out step is exercised exactly as with real model output. The face colour varies with the prompt."""
+    from PIL import Image, ImageDraw
+    import hashlib
+    tint = hashlib.sha256(prompt.encode()).digest()
+    img = Image.new("RGB", (512, 768), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    d.ellipse([176, 60, 336, 220], fill=(240, 200 - tint[0] % 60, 160), outline=(0, 0, 0), width=8)    # head
+    d.rectangle([206, 220, 306, 470], fill=(40 + tint[1] % 150, 90, 180), outline=(0, 0, 0), width=8)   # body
+    d.line([216, 470, 196, 700], fill=(0, 0, 0), width=10)                                                 # legs
+    d.line([296, 470, 316, 700], fill=(0, 0, 0), width=10)
+    d.line([176, 700, 216, 700], fill=(0, 0, 0), width=10)                                                 # feet
+    d.line([296, 700, 336, 700], fill=(0, 0, 0), width=10)
+    img.save(out_file)
+    return out_file
+
+
+def fake_voice(text, voice, instructions, out_file):
+    """Test stand-in for a voice model: a tone whose length follows the text (about 14 characters per second)."""
+    import math, struct, wave
+    seconds = max(0.6, len(text) / 14)
+    rate = 24000
+    f = out_file.with_suffix(".wav")
+    with wave.open(str(f), "w") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * i / rate))) for i in range(int(seconds * rate))))
+    return f
+
+
 class Env:
     def __init__(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="oddstudio-test-"))

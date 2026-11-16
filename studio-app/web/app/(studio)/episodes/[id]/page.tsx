@@ -4,6 +4,7 @@ import {api, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox, JobStatus, Pipeline, Stage} from '@/components/ui';
 import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
+import CastPanel from '@/components/CastPanel';
 
 const TABS = ['Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
 type Tab = typeof TABS[number];
@@ -166,6 +167,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
               <div><strong>Twist</strong><div className="muted">{s.twist || '—'}</div></div>
             </div>
             {s.interactive?.type !== 'none' && <p><strong>Interactive:</strong> {s.interactive.question} — {s.interactive.options.join(' / ')}</p>}
+            {s.new_characters?.length > 0 && <div className="alert info small"><strong>New characters in this story:</strong> {s.new_characters.map((c: any) => `${c.name} (${c.visual_description})`).join('; ')}. Their expression sheets are generated from the Cast panel below.</div>}
             <p className="small"><strong>Cast:</strong> {s.characters.map((c: any) => `${characters.find(x => x.key === c.key)?.name || c.key}${c.role ? ` (${c.role})` : ''}`).join(', ')}</p>
           </div>
           {s.scenes.map((sc: Scene) => (
@@ -188,6 +190,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
                 <button className="btn danger" disabled={!!act.busy || !comment} onClick={() => act.run('reject', () => api(`/episodes/${ep.id}/script/reject`, {body: {comment}}))}>Reject (keep editing)</button>
               </div>
             </div>)}
+          <CastPanel episodeId={ep.id} />
           {ep.stage === 'script_approved' && <div className="alert good">Script approved. Continue in the Storyboard tab.</div>}
         </>)}
     </div>
@@ -205,6 +208,7 @@ function StoryboardTab({ep, can, act, characters, environments}: Ctx) {
   return (
     <div className="stack">
       <JobNote job={gen} />
+      {ep.script && <CastPanel episodeId={ep.id} />}
       {can('generate_storyboard') && (
         <div className="card spread"><div><h2 style={{marginBottom: 2}}>{ep.scenes.length ? 'Rebuild storyboard' : 'Build the storyboard'}</h2>
           <span className="muted">Scene breakdown from the approved script, with renderer stills for each scene.</span></div>
