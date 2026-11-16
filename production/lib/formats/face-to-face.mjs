@@ -33,6 +33,7 @@ import {cameraAt, applyCamera, parseCameraNote, CAMERA_DEFAULTS} from '../camera
 import {planPoseLayers, castLayers, worldLayer, poseRect, scaleAt, alphaAt} from '../timeline.mjs';
 import {parallaxCamera} from '../depth.mjs';
 import {resolveStaging} from '../staging.mjs';
+import {composeWindow, continuityReport, moveSpan, MOVE_DEFAULTS, windowAt, windowCamera} from '../framing.mjs';
 
 export const FACE_TO_FACE_DEFAULTS = Object.freeze({bubbleY: 300, marginX: LAYOUT_DEFAULTS.marginX, safe: LAYOUT_DEFAULTS.safe});
 // edgeMargin: design units kept between a framed member and the frame edge. subjectMargin: when several members are in
@@ -48,7 +49,8 @@ export const faceToFace = {
   description: 'Face-to-face dialogue: several characters in one environment, speech bubbles per speaker, shot/reverse-shot camera.',
 
   // Timing and validation only (no files written).
-  sequence(scene) {
+  // ctx.profile (AP-86 S4, opt-in): camera moves (push-in, pull back, pan) are allowed; without it, exactly as before.
+  sequence(scene, ctx = {}) {
     const cast = validateCast(scene.cast || []);
     if (!cast.length) throw new Error('face-to-face: at least one cast member is required');
     if (!Array.isArray(scene.lines) || !scene.lines.length) throw new Error('face-to-face: lines[] is required');
@@ -65,9 +67,20 @@ export const faceToFace = {
       if (!byId.has(l.speaker)) throw new Error(`${where}: speaker "${l.speaker}" is not a cast member of this scene`);
       if (!speakers[l.speaker]) throw new Error(`${where}: cast member "${l.speaker}" has no "speech" configuration ({style})`);
       if (!l.shot || typeof l.shot.camera !== 'string') throw new Error(`${where}: "shot" with a camera framing is required (e.g. {camera: "Wide"})`);
-      const a = parseCameraNote(l.shot.camera, camOpts);
-      if (a.move || a.shake || a.drift) throw new Error(`${where}: face-to-face shots support wide / medium N× / close / hold framings only (no moves, shake or drift)`);
-      if (a.framing) zoom = a.framing.zoom;
+      let move = null;
+      const pan = ctx.profile && /^\s*(slow\s+)?pan\b/i.test(l.shot.camera);
+      const a = pan ? {framing: null, move: null, shake: false, drift: false} : parseCameraNote(l.shot.camera, camOpts);
+      if (!ctx.profile && (a.move || a.shake || a.drift)) throw new Error(`${where}: face-to-face shots support wide / medium N× / close / hold framings only (no moves, shake or drift)`);
+      if (a.shake || a.drift) throw new Error(`${where}: shake and drift are not part of face-to-face framing profiles`);
+      if ((a.move || pan) && zoom === null) throw new Error(`${where}: the first shot needs a framing (wide, medium or close), not a camera move`);
+      if (pan) {
+        if (!(zoom > 1 + EPS)) throw new Error(`${where}: a pan moves a medium or close framing to another member; frame a medium or close shot first`);
+        move = {kind: 'pan', slow: /slow/i.test(l.shot.camera)};
+      } else if (a.move) {
+        move = {kind: a.move.zoom > zoom + EPS ? 'push' : 'pull', slow: a.move.duration === 'beat'};
+        if (Math.abs(a.move.zoom - zoom) <= EPS) throw new Error(`${where}: "${l.shot.camera}" does not change the zoom (already ${zoom}x)`);
+        zoom = a.move.zoom;
+      } else if (a.framing) zoom = a.framing.zoom;
       else if (zoom === null) throw new Error(`${where}: the first shot needs a framing (wide, medium or close)`);
       if (l.shot.focus !== undefined && !byId.has(l.shot.focus)) throw new Error(`${where}: shot focus "${l.shot.focus}" is not a cast member of this scene`);
       if (zoom > 1 + EPS && l.shot.focus === undefined) throw new Error(`${where}: a medium or close shot needs a "focus" cast member`);
@@ -76,7 +89,7 @@ export const faceToFace = {
       const poses = {...(l.poses || {})};
       if (l.pose !== undefined) poses[l.speaker] = l.pose;
       for (const id of Object.keys(poses)) if (!byId.has(id)) throw new Error(`${where}: pose for "${id}", which is not a cast member of this scene`);
-      shots.push({line: i + 1, speaker: l.speaker, focus: l.shot.focus ?? null, zoom, single: l.shot.single === true, note: l.shot.camera});
+      shots.push({line: i + 1, speaker: l.speaker, focus: l.shot.focus ?? null, zoom, single: l.shot.single === true, note: l.shot.camera, ...(move ? {move} : {})});
       return {type: 'message', speaker: l.speaker, text: l.text, ...(l.duration !== undefined ? {duration: l.duration} : {}), ...(Object.keys(poses).length ? {poses} : {}), ...(l.transition ? {transition: l.transition} : {})};
     });
     const seq = sequenceConversation({speakers, cast, timing: scene.timing, events}, {defaultCast: null});
@@ -87,9 +100,11 @@ export const faceToFace = {
 
   // stage: a resolved set plate (AP-86 S2) instead of env. layering: 'legacy' (story@1: z, default 0, declaration order,
   // exactly as before) or 'depth' (story@2: O4, depth-derived with explicit z winning; see depth.mjs).
-  async compile({scene, seq, shotDuration, plane, ppu, fps, env, stage = null, layering = 'legacy', actionLibrary = null, writeGen, copySource, hookRect, repoRoot, allowSynthetic = false}) {
-    const o = {...FACE_TO_FACE_DEFAULTS, ...(scene.layout || {}), safe: {...FACE_TO_FACE_DEFAULTS.safe, ...(scene.layout?.safe || {})}};
-    const bubbleOpts = {...BUBBLE_DEFAULTS, ...(scene.bubbles || {})};
+  // profile (AP-86 S4, opt-in): a framing profile from framing.mjs. Without it, compilation is exactly as before.
+  async compile({scene, seq, shotDuration, plane, ppu, fps, env, stage = null, layering = 'legacy', actionLibrary = null, writeGen, copySource, hookRect, repoRoot, allowSynthetic = false, profile = null}) {
+    const base = profile ? {...FACE_TO_FACE_DEFAULTS, bubbleY: profile.bubbleY, safe: profile.safe} : FACE_TO_FACE_DEFAULTS;
+    const o = {...base, ...(scene.layout || {}), safe: {...base.safe, ...(scene.layout?.safe || {})}};
+    const bubbleOpts = {...BUBBLE_DEFAULTS, ...(profile?.bubbles || {}), ...(scene.bubbles || {})};
     const world = [], screen = [], issues = [];
 
     // 1. Cast (resolved by character ID, facing resolved to declared artwork) and their pose segments.
@@ -112,16 +127,42 @@ export const faceToFace = {
     //    vertical framing keeps the focus member's head top where it is in the wide shot.
     const coverRect = stage ? stage.rect : (env?.rect || null), camCache = new Map();
     const fr = {...FRAMING_DEFAULTS, ...(scene.framing || {})};
-    const shots = seq.shots.map((s, i) => composeShot({...s, end: i === seq.shots.length - 1 ? shotDuration : s.end}, {cast, byId, plane, coverRect, fr}));
-    const shotAt = t => shots.find(s => t >= s.start - EPS && t < s.end - EPS) || shots.at(-1);
-    const cameraFor = t => {
-      const key = Math.round(t * fps);
-      if (!camCache.has(key)) {
-        const s = shotAt(key / fps);
-        camCache.set(key, cameraAt({cuts: [], moves: [], shakes: [], drifts: [], initialZoom: s.zoom}, key / fps, {pivot: s.pivot, plane, coverRect}));
+    let shots, cameraFor, moving = () => false, continuity = [];
+    if (!profile) {
+      shots = seq.shots.map((s, i) => composeShot({...s, end: i === seq.shots.length - 1 ? shotDuration : s.end}, {cast, byId, plane, coverRect, fr}));
+      cameraFor = t => {
+        const key = Math.round(t * fps);
+        if (!camCache.has(key)) {
+          const s = shots.find(x => key / fps >= x.start - EPS && key / fps < x.end - EPS) || shots.at(-1);
+          camCache.set(key, cameraAt({cuts: [], moves: [], shakes: [], drifts: [], initialZoom: s.zoom}, key / fps, {pivot: s.pivot, plane, coverRect}));
+        }
+        return camCache.get(key);
+      };
+    } else {
+      // AP-86 S4: every shot is a window on the set plate (framing.mjs); moves interpolate between two windows.
+      if (!stage) throw new Error(`framing profile ${profile.id}: face-to-face profiles compose shots on a set plate; give the scene a "set"`);
+      const ctx = {cast, byId, plane, plate: stage.rect, fr, profile, poseRect};
+      shots = seq.shots.map((s, i) => composeWindow({...s, end: i === seq.shots.length - 1 ? shotDuration : s.end}, ctx));
+      for (const [i, s] of shots.entries()) {
+        if (!s.move) continue;
+        s.from = shots[i - 1].window;
+        s.span = moveSpan(s);
+        const travel = Math.abs((s.window.L + s.window.W / 2) - (s.from.L + s.from.W / 2)) / s.window.W, secs = s.span.end - s.span.start;
+        if (s.move.kind === 'pan' && travel / secs > MOVE_DEFAULTS.maxPanSpeed) {
+          throw new Error(`line ${s.line} (${s.note}): this pan covers ${travel.toFixed(2)} frame widths in ${secs.toFixed(2)} s, too fast to read; use "slow pan", a longer line, or a cut`);
+        }
       }
-      return camCache.get(key);
-    };
+      moving = t => shots.some(s => s.span && t >= s.span.start - EPS && t < s.span.end - EPS);
+      cameraFor = t => {
+        const key = Math.round(t * fps);
+        if (!camCache.has(key)) camCache.set(key, windowCamera(windowAt(shots, key / fps), plane, key / fps));
+        return camCache.get(key);
+      };
+      const screenX = (shot, id) => (byId.get(id).placement.feetX - shot.window.L) * shot.window.z;
+      continuity = continuityReport(shots, cast, plane, screenX);
+      for (const s of shots) s.pivot = {window: {left: r2(s.window.L), top: r2(s.window.T), width: r2(s.window.W), zoom: +s.window.z.toFixed(4)}};
+    }
+    const shotAt = t => shots.find(s => t >= s.start - EPS && t < s.end - EPS) || shots.at(-1);
 
     // 3. World layers: environment (or the set's backdrop layers), then cast members in draw order (shadow under each).
     //    In a set, occluder layers are drawn between members by depth: a member standing behind an occluder's baseline
@@ -219,6 +260,11 @@ export const faceToFace = {
     const backdrop = stage?.layers[0];
     for (let f = 0; f < frames; f++) {
       const t = f / fps, cam = cameraFor(t), shot = shotAt(t);
+      if (profile) {
+        // S4: the window (moving or not) never leaves the plate, so the background always covers the frame.
+        const w = windowAt(shots, Math.round(t * fps) / fps), p = stage.rect;
+        if (w.L < p.x - 0.5 || w.T < p.y - 0.5 || w.L + w.W > p.x + p.w + 0.5 || w.T + w.H > p.y + p.h + 0.5) issues.push({t: +t.toFixed(3), id: 'camera', problem: 'the camera window leaves the set plate'});
+      }
       if (backdrop && backdrop.parallax !== 1) {
         const b = applyCamera(parallaxCamera(cam, backdrop.parallax), backdrop.rect), bh = backdrop.rect.h * b.w / backdrop.rect.w;
         if (b.x > 0.5 || b.y > 0.5 || b.x + b.w < plane.width - 0.5 || b.y + bh < plane.height - 0.5) issues.push({t: +t.toFixed(3), id: backdrop.id, problem: `with parallax ${backdrop.parallax} the backdrop layer no longer covers the frame`});
@@ -230,10 +276,13 @@ export const faceToFace = {
         const face = applyCamera(cam, {x: rect.x, y: top, w: rect.w});
         const faceH = m.placement.figureHeight * (info.headFraction ?? 0.42) * s * cam.z, faceBox = {x: face.x, y: face.y, w: face.w, h: faceH};
         const framed = shot.focus === null || shot.focus === m.id;
-        if (framed && (face.x < -1 || face.x + face.w > plane.width + 1 || face.y < -1 || face.y + faceH > plane.height + 1)) issues.push({t: +t.toFixed(3), id: m.id, problem: `face of pose ${plan.pose} is cropped by the camera`});
+        // While the camera moves (S4 profiles only), members may cross the frame edge; the rules apply again from the
+        // move's last frame. Without a profile nothing moves, so these checks run on every frame exactly as before.
+        const settled = !moving(t);
+        if (settled && framed && (face.x < -1 || face.x + face.w > plane.width + 1 || face.y < -1 || face.y + faceH > plane.height + 1)) issues.push({t: +t.toFixed(3), id: m.id, problem: `face of pose ${plan.pose} is cropped by the camera`});
         // No member may be cut by the left or right frame edge: fully in frame or fully out of it.
         const body = applyCamera(cam, rect);
-        if (body.x < plane.width - 1 && body.x + body.w > 1 && (body.x < -1 || body.x + body.w > plane.width + 1)) issues.push({t: +t.toFixed(3), id: m.id, problem: `pose ${plan.pose} is cut by the ${body.x < -1 ? 'left' : 'right'} frame edge`});
+        if (settled && body.x < plane.width - 1 && body.x + body.w > 1 && (body.x < -1 || body.x + body.w > plane.width + 1)) issues.push({t: +t.toFixed(3), id: m.id, problem: `pose ${plan.pose} is cut by the ${body.x < -1 ? 'left' : 'right'} frame edge`});
         for (const b of bubbles) if (t >= b.from - EPS && t < b.to - EPS && overlap(b.rect, faceBox)) issues.push({t: +t.toFixed(3), id: b.id, problem: `covers the face of cast member ${m.id}`});
       }
     }
@@ -249,8 +298,11 @@ export const faceToFace = {
       ...(staging ? {staging} : {}),
       diagnostics,
       camera: {shots: shots.map(s => ({line: s.line, start: s.start, end: s.end, speaker: s.speaker, focus: s.focus, zoom: s.zoom, single: s.single, note: s.note, pivot: s.pivot,
-        window: s.window, visible: s.visible, hidden: s.hidden})),
-        cuts, moves: [], shakes: [], drifts: [], notes: shots.map(s => ({start: s.start, end: s.end, note: s.note}))},
+        window: s.window, visible: s.visible, hidden: s.hidden, ...(profile ? {out: s.out, ...(s.move ? {move: s.move.kind} : {})} : {})})),
+        cuts: profile ? cuts.filter(c => !shots.find(s => Math.abs(s.start - c.t) < EPS)?.move) : cuts,
+        moves: profile ? shots.filter(s => s.move).map(s => ({line: s.line, kind: s.move.kind, start: r2(s.span.start), end: r2(s.span.end), from: +(plane.width / s.from.W).toFixed(4), to: +s.window.z.toFixed(4)})) : [],
+        shakes: [], drifts: [], notes: shots.map(s => ({start: s.start, end: s.end, note: s.note})),
+        ...(profile ? {profile: profile.id, continuity} : {})},
     };
   },
 };

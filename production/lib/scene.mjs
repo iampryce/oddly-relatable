@@ -15,6 +15,7 @@ import {assertCompilable, validateStoryReferences, STORY_SCHEMA_V2} from './stor
 import {loadActionLibrary, ACTIONS_FILE} from './actions.mjs';
 import {loadSet, resolvePlate} from './sets.mjs';
 import {formatFor} from './formats/index.mjs';
+import {profileFor} from './framing.mjs';
 import {assertRenderable} from './text.mjs';
 
 export {EPISODE_SCHEMA, STORY_SCHEMA};
@@ -46,13 +47,15 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
   const dir = assertWritableOutput(outDir);
   if (fs.existsSync(path.join(dir, 'project.json')) && !fs.existsSync(path.join(dir, MARKER))) throw new Error(`${dir} holds a project not created by this toolkit; refusing to overwrite`);
 
-  const fmt = {width: 1080, height: 1920, fps: 30, ...(story.format || {})};
+  // AP-86 S4 (opt-in): a story@2 `profile` fixes the frame size; without one, the story's own format is used as before.
+  const profile = story.profile !== undefined ? profileFor(story.profile) : null;
+  const fmt = {width: 1080, height: 1920, fps: 30, ...(story.format || {}), ...(profile ? {width: profile.width, height: profile.height} : {})};
   const fps = fmt.fps, plane = designPlane(fmt.width, fmt.height), ppu = fmt.width / plane.width;
   const frame = t => Math.ceil(t * fps - 1e-6) / fps;   // round a time up to the frame grid
 
   // 1. Sequence every scene first (timing only), then lay scenes end to end as shots.
   const scenes = story.scenes.map(s => ({scene: s, strategy: formatFor(s.format)}));
-  for (const x of scenes) { x.seq = x.strategy.sequence(x.scene); x.duration = frame(x.seq.duration); }
+  for (const x of scenes) { x.seq = profile ? x.strategy.sequence(x.scene, {profile}) : x.strategy.sequence(x.scene); x.duration = frame(x.seq.duration); }
   const endCard = story.endCard ? {...story.endCard, hold: num(story.endCard.hold ?? 0, 'end card hold', 0, 10), duration: num(story.endCard.duration ?? 3, 'end card duration', 0.5, 15)} : null;
   let t0 = 0;
   scenes.forEach((x, i) => {
@@ -102,7 +105,7 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
       ? await resolvePlate(loadSet(x.scene.set, {file: x.scene.setRegistry ?? null, allowSynthetic}), x.scene.plate, {plane, registryFile: x.scene.setRegistry ?? null, repoRoot})
       : null;
     const env = stage ? null : await resolveEnvironment(x.scene.environment, plane, repoRoot);
-    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, ...(v2 ? {stage, layering: 'depth', actionLibrary} : {}), writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic});
+    const out = await x.strategy.compile({scene: x.scene, seq: x.seq, shotDuration: x.shotDuration, plane, ppu, fps, env, ...(v2 ? {stage, layering: 'depth', actionLibrary} : {}), writeGen, copySource, hookRect: i === 0 && hook ? hook.rect : null, repoRoot, allowSynthetic, ...(profile ? {profile} : {})});
     const layers = [...out.world, ...out.screen];
     if (i === 0 && hookLayer) layers.push(hookLayer);
     if (i === scenes.length - 1 && endCard) {
@@ -152,6 +155,16 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
   fs.writeFileSync(path.join(dir, MARKER), JSON.stringify(manifest, null, 1) + '\n');
   if (issues.length && !allowIssues) throw new Error(`Layout check failed: ${issues.map(i => `${i.id}@${i.t}s ${i.problem}`).join('; ')}`);
   return {projectFile: path.join(dir, 'project.json'), report, manifest, sequence: first.seq};
+}
+
+// AP-86 S4: the same staged story in several framing profiles (for example P-916 and P-169), one project per profile in
+// <outDir>/<profile id>. Each profile is composed and checked on its own; a framing that cannot meet the rules in one
+// profile fails that profile with an explanation (per-shot overrides are a scene's own camera choice).
+export async function compileProfiles(story, {outDir, profiles, ...opts}) {
+  if (!Array.isArray(profiles) || !profiles.length) throw new Error('compileProfiles: profiles (for example ["P-916", "P-169"]) are required');
+  const out = {};
+  for (const id of profiles) out[id] = await compileStory({...story, profile: id}, {...opts, outDir: path.join(outDir, id)});
+  return out;
 }
 
 // Good moments to inspect: mid-hook, each message once settled, mid-typing, each camera cut/move, mid end card.

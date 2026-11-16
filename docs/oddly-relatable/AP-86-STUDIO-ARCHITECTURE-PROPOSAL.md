@@ -1,6 +1,6 @@
 # AP-86: next-generation production architecture
 
-**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1, S2 and S3 AUTHORISED AND IMPLEMENTED; S4 APPROVED (NOT YET IMPLEMENTED); O5 TO O13 OPEN; S5 TO S7 NOT AUTHORISED.**
+**Status (2026-11-16): PROPOSAL APPROVED (O1 to O4); S1, S2 and S3 AUTHORISED AND IMPLEMENTED; S4 APPROVED AND IMPLEMENTED (§11.4); O5 TO O13 OPEN; S5 TO S7 NOT AUTHORISED.**
 - **Approved by the owner on 2026-11-15:**
   - **O1:** this proposal and the milestone ID AP-86;
   - **O2:** the phase order and the S1 scope (data-model work only, local, $0, no artwork); every later phase needs its own approval;
@@ -431,7 +431,7 @@ Each phase needs its own owner approval, has its own regression gate, and stops 
 | **S1 Data model** ✅ implemented | Schemas and validation for character v2 fields, sets, props, actions, story@2; loaders accept v1 and v2; errors for every invalid reference | Schema tests; Short 001 and Track A unchanged | $0 |
 | **S2 Sets and depth** ✅ implemented (approved 2026-11-16) | Plate → world mapping, floor model (scale by depth), marks, surfaces, layered plates, occluders, depth ordering, parallax; synthetic labelled test set | Depth and scale tests; occlusion pixel tests (like A-4); regression gate | $0 |
 | **S3 Staging and props** ✅ implemented (approved 2026-11-16) | Staging resolver; props with states and anchors; actions stand-at, sit-on, lean-on, hold; anchor-alignment QA | Bar and desk examples (§6, §7) built entirely from synthetic fixtures; anchor tolerance tests | $0 |
-| **S4 Framing and camera** (approved; not yet implemented) | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
+| **S4 Framing and camera** ✅ implemented (§11.4) | Superframe composition, framing profiles 9:16/16:9 from one scene, face-to-face camera moves, continuity checks | Same staged scene → two profiles passing all framing rules; Track A rules preserved | $0 |
 | **S5 Movement** | Paths on the floor model, entrances and exits, walk-cycle stepping, door states; optional limb-rig spike | Movement tests (no foot slip beyond tolerance); regression gate | $0 |
 | **S6 First real set (art)** | One approved set and plate kit, plus Character 01's sitting and contact poses, via an approved production route | Owner visual approval of the assets; one produced test scene | **Depends on route (§12)** |
 | **S7 Pipeline** | External audio mix (stems → one master), post-render caption burn-in per profile, export presets | Produced test episode passes QA in both profiles | $0 (local tools) |
@@ -528,6 +528,41 @@ Implemented at commit `226ea7a1432dcacff9b094a4995cc0c8d28d998a`.
 - The face-crop check still assumes a standing figure, so for seated poses its face box is conservative.
 - Occlusion is by draw order with cut-outs, as in S2.
 - **Shadow defect found during S3: corrected and accepted under AP-85.** S3 found a pre-existing defect (not caused by S3): shadow layers split for `single` shots had no visibility window, so off-camera members' shadows showed and shadows were duplicated. It was corrected under an owner-approved AP-85 corrective task at commit `59e6f3ef2b224ebefd64e5588cd47018b0f30633`, which shows each shadow only while its member is on camera, and the owner accepted the corrected A4 evidence on 2026-11-16 (evidence: `production/evidence/ap85/shadow-correction/`; AP-85 plan §5.5). Only AP-85 A4's shadow pixels changed; S3's prop layers already set their windows and were not affected.
+
+### 11.4 S4 implementation (approved by the owner; implemented 2026-11-16)
+
+**Owner decisions applied:**
+- 1080×1920 (P-916) and 1920×1080 (P-169) as test resolutions; O11 and D18 stay open;
+- provisional safe margins;
+- screen-side switches between shots are **reported, not failed**.
+
+| Capability | Where | Behaviour |
+|---|---|---|
+| Opt-in | `story-v2.mjs`, `scene.mjs` | A story@2 story with `profile` ("P-916" or "P-169") takes the S4 path; every scene must be face-to-face in a set. `compileProfiles(story, {outDir, profiles})` builds the same staged story once per profile (`<outDir>/<profile>`). **Without `profile`, compilation is unchanged** |
+| Profiles | `framing.mjs` `PROFILES` | Frame size, safe margins (provisional), bubble row and headroom per profile. Landscape uses smaller bubble type (36 design units, 54 px at 1080p) so one line fits above the heads |
+| Composed windows (superframe) | `framing.mjs` `composeWindow` | Each shot is a window on the set plate, which can pan at any zoom. Wide: the whole cast in frame, centred. Medium and close: the Track A rules (focus fully in frame; others fully in or fully out; focus clearly central; `single` still available). With a wide plate, a single is achieved by panning: the other member is simply out of frame. Vertical: headroom above the tallest framed head, for the bubbles. Windows never leave the plate, so the background always covers the frame |
+| Camera moves | `face-to-face.mjs`, `framing.mjs` | `Push-in to N×`, `Pull back to wide`, `Pan` / `Slow pan` (to the shot's focus). The window's left, top and width are eased frame by frame between two rule-satisfying windows; coverage holds on every in-between frame and is checked per frame. Members may cross the frame edge only while the camera moves. A pan faster than 1.6 frame widths per second is refused ("use slow pan"). A move cannot open a scene; a pan needs a medium or close framing. Shake and drift stay refused |
+| Continuity | `framing.mjs` `continuityReport` | Between consecutive cuts: a member that changes screen half, or two members whose left-right order flips, is listed in the layout report (`camera[].continuity`); never a build failure |
+| Report | layout report | Per shot: window, visible, hidden (single) and out-of-frame members; moves with kind, span and zooms (also used for story-board stills) |
+
+**Tests and regression gate:**
+- `production/tests/ap86-s4-framing.test.mjs`: 6/6. It covers:
+  - both profiles from one staged scene;
+  - a true single by panning in portrait;
+  - push-in, pan and pull-back with a key on every frame, eased and never reversing;
+  - refusals (a move as the first shot, a pan at wide, a pan that is too fast, a move without a profile, a profile in story@1, an unknown profile);
+  - continuity reported but never failing;
+  - rendered frames in both profiles filled by the set at every sampled time, including mid-move.
+- Production suite 114/114 with FFmpeg.
+- **All seven AP-85 scenes (A1, A2, A3a, A3b, A4, A5, A6) are frame-for-frame identical** to the pre-S4 code (fingerprints compared against a worktree of `49c0a2d`).
+- Short 001 byte and pixel baselines pass, and S1 to S3 tests pass unchanged.
+- The renderer is not modified.
+
+**Limitations:**
+- **Profiles compose on a set plate.** No real set exists yet (O5 set standard and O8 first set are open), so dashboard episodes, which use the approved room plate as a story@1 environment, do not use profiles until a real set is registered.
+- Safe margins and caption zones are provisional (not platform-verified); caption burn-in remains S7.
+- Moves are push-in, pull-back and pan only (no tilt-only moves); easing is smoothstep.
+- The 16:9 bubble layout keeps one-line bubbles above the heads; long lines wrap and may be refused for covering a face, and the build says so.
 
 **Ordering:** S1 → S2 → S3 is the critical path. S4 can follow S2. S5 follows S3. S6 can be prepared in parallel as decisions only, but no art is produced until approved. Track B stays independent; when Character 02 exists, it is simply another registry the system already supports.
 

@@ -11,7 +11,7 @@
 | Script size | `script_schema.py` | At most 12 scenes, 24 lines per scene, 4 characters |
 | Writer | `writer.py` | Asks for 2–6 scenes and returns the whole script in one answer |
 | Format | `scene.mjs`, `face-to-face.mjs` | 1080×1920 (9:16). Framing rules, bubbles and safe areas are tuned for vertical |
-| Composition | AP-86 S4 (approved, not yet implemented) | 16:9 framing profiles from one staged scene are S4 work |
+| Composition | AP-86 S4 (implemented 2026-11-16; needs a registered set) | 16:9 framing profiles from one staged scene are S4 work |
 | Storyboard review | Episode page | One long page; fine for 4 scenes, unwieldy for 40 |
 
 ## 2. Measured performance (this PC, CPU only)
@@ -51,7 +51,7 @@ An episode gets a **format**: `short` (default; everything exactly as today) or 
    - Voices as today.
    - No music at first (D-L4 A): voices and sound effects only. A licensed music bed (the engine supports one with fades) comes later, after the owner chooses a library.
    - Loudness normalised to the platform target, YouTube about −14 LUFS, as a final FFmpeg pass.
-6. **Format 16:9.** Long YouTube episodes follow AP-20, with 9:16 primary and 16:9 secondary. That depends on AP-86 S4 framing profiles: S4 is approved (1080×1920 and 1920×1080 as test resolutions) but not yet implemented, and O11/D18 are open. Until then, long-form can be produced in 9:16 for testing.
+6. **Format 16:9.** Long YouTube episodes follow AP-20, with 9:16 primary and 16:9 secondary. That depends on AP-86 S4 framing profiles: S4 is implemented (1080×1920 and 1920×1080 test profiles), but it composes on a registered set plate, and no real set exists yet (O5, O8 open); O11/D18 are open. Until then, long-form can be produced in 9:16 for testing.
 7. **QA and review.**
    - Chapter markers from the acts, used in the YouTube description.
    - Per-segment QA plus whole-file QA: duration, frame count and audio continuity at joins.
@@ -67,7 +67,7 @@ An episode gets a **format**: `short` (default; everything exactly as today) or 
 | L2 | Segmented production and FFmpeg concat; per-segment retry and revision; progress per segment | 2–3 days |
 | L3 | Act-grouped storyboard and review UI; chapters | 1–2 days |
 | L4 | Loudness normalisation; continuation of a Short (D-L5); music bed later, once a library is chosen | 1 day |
-| L5 | 16:9 profile | After AP-86 S4 is implemented (approved) |
+| L5 | 16:9 profile | S4 is implemented; needs a registered real set (O5, O8) |
 | Test | A real 5-minute episode end to end; measure time and memory on the server | 1 day |
 
 ## 5. Costs per long episode

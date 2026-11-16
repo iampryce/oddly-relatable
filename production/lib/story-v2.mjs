@@ -20,6 +20,7 @@ import {loadSet, plateOf} from './sets.mjs';
 import {loadProp} from './props.mjs';
 import {loadActionLibrary, targetOf, actionKind, ACTIONS_FILE} from './actions.mjs';
 import {object, onlyKeys, id, finite, fraction, point01, fail} from './schema.mjs';
+import {profileFor} from './framing.mjs';
 import {placementKind} from './depth.mjs';
 
 export const STORY_SCHEMA_V1 = 'oddly-relatable/story@1';
@@ -177,7 +178,17 @@ export function validateStoryReferences(story, {allowSynthetic = false} = {}) {
 // resolver. Everything that needs a later phase is refused rather than approximated.
 export const SET_FORMATS = Object.freeze(['face-to-face']);
 export function assertCompilable(story) {
-  if (story.schema !== STORY_SCHEMA_V2) return;
+  if (story.schema !== STORY_SCHEMA_V2) {
+    if (story.profile !== undefined) fail('story', `"profile" needs "${STORY_SCHEMA_V2}"`);
+    return;
+  }
+  // AP-86 S4 (approved 2026-11-16): a framing profile composes face-to-face scenes on their set plates.
+  if (story.profile !== undefined) {
+    profileFor(story.profile);
+    for (const s of story.scenes) {
+      if (s.format !== 'face-to-face' || s.set === undefined) fail(`story@2 scene ${s.id}`, `framing profile ${story.profile} needs face-to-face scenes in a set`);
+    }
+  }
   for (const s of story.scenes) {
     const where = `story@2 scene ${s.id}`;
     if (s.set !== undefined && !SET_FORMATS.includes(s.format)) fail(where, `uses a set in a "${s.format}" scene; AP-86 S2 renders sets in ${SET_FORMATS.join(', ')} scenes only`);

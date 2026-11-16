@@ -1,6 +1,6 @@
 # AP-86 S4: framing and camera — approval request
 
-**Status (2026-11-16): APPROVED; NOT YET IMPLEMENTED.** **S4 APPROVED by the owner** (confirmed 2026-11-16; the owner states it was given in an earlier discussion that this repository had not recorded): (1) S4 implementation approved, scope as in §1 to §3; (2) 1080×1920 and 1920×1080 approved as engineering test resolutions (O11 and D18 stay open); (3) provisional safe margins approved; (4) a character switching screen side between shots is **reported, not a build failure**. Implementation has not started. S5 to S7 stay unauthorised; O5 to O13 stay open.
+**Status (2026-11-16): APPROVED AND IMPLEMENTED** (see the AP-86 proposal §11.4). **S4 APPROVED by the owner** (confirmed 2026-11-16; the owner states it was given in an earlier discussion that this repository had not recorded): (1) S4 implementation approved, scope as in §1 to §3; (2) 1080×1920 and 1920×1080 approved as engineering test resolutions (O11 and D18 stay open); (3) provisional safe margins approved; (4) a character switching screen side between shots is **reported, not a build failure**. Implementation has not started. S5 to S7 stay unauthorised; O5 to O13 stay open.
 
 **Context:** AP-86 proposal §8 (camera workflow, items 1 to 5) and §11 (roadmap row S4). S1, S2 and S3 are implemented; S4 depends on S2 (sets, plates, parallax), which is done. The AP-85 shadow correction (`59e6f3e`) was accepted by the owner on 2026-11-16, so S4 starts from a clean Track A baseline.
 
