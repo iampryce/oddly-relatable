@@ -25,7 +25,8 @@ export async function api<T = any>(path: string, opts: {method?: string; body?: 
 }
 
 export const STAGE_LABEL: Record<string, string> = {
-  script_pending: 'Script needed', script_generating: 'Writing script', script_review: 'Script review',
+  script_pending: 'Script needed', outline_generating: 'Writing outline', outline_review: 'Outline review',
+  outline_approved: 'Outline approved', script_generating: 'Writing script', script_review: 'Script review',
   script_approved: 'Script approved', storyboard_generating: 'Building storyboard', storyboard_review: 'Storyboard review',
   storyboard_approved: 'Ready for production', producing: 'In production', production_failed: 'Production failed',
   video_review: 'Video review', final_approved: 'Approved', publishing: 'Publishing', published: 'Published',

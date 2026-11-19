@@ -4,6 +4,8 @@ import {NextResponse} from 'next/server';
 import type {NextRequest} from 'next/server';
 
 export function proxy(request: NextRequest) {
+  // AUTH_DISABLED=true (server .env, read at request time): the owner chose open access; the API agrees.
+  if (process.env.AUTH_DISABLED === 'true') return NextResponse.next();
   if (!request.cookies.get('odd_session')) {
     const url = new URL('/login', request.url);
     url.searchParams.set('next', request.nextUrl.pathname);

@@ -11,6 +11,7 @@ set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP=${KEEP:-14}
 COMPOSE=(docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/current/studio-app/deploy/docker-compose.yml")
+if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env"; then COMPOSE+=(-f "$ROOT/current/studio-app/deploy/docker-compose.public.yml"); fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 out="$ROOT/backups/$stamp"
 umask 077

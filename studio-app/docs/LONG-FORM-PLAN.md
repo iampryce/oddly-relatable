@@ -1,6 +1,6 @@
 # Long-form episodes (5–7 minutes): investigation and plan
 
-**Status (2026-11-16): APPROVED AT THE PLANNING LEVEL; DECISIONS D-L1 TO D-L5 SETTLED (§6); NOT IMPLEMENTED.** Implementation starts only on the owner's go, and the short-form workflow is unchanged.
+**Status (2026-11-16): IMPLEMENTED** on the owner's go (decisions D-L1 to D-L5 in §6; implementation in §7). The short-form workflow is unchanged.
 
 ## 1. What limits episode length today (verified in the code)
 
@@ -99,4 +99,35 @@ Estimates; see `VOICE-AND-CASTING.md`.
    - The joined file is checked as a whole: duration, frame count and continuous audio.
 3. **Selective regeneration.** Editing one scene re-renders only the segment or segments containing it. The other approved segments are reused unchanged, identified by the hash of their inputs, and the final join is redone.
 
-**Status:** approved at the planning level. **Implementation has not started and needs the owner's go.** Shorts are unchanged.
+**Status:** implemented (§7). Shorts are unchanged.
+
+## 7. Implementation (2026-11-16)
+
+| Part | Where | What it does |
+|---|---|---|
+| Format | `models.py`, migration `0003` | Ideas and episodes have `format` (short or long) and an optional `continues_episode_id` (D-L5). Additive migration |
+| Outline (pass 1) | `longform.validate_outline`, `tasks_long.generate_outline`, `writer.outline_prompt` | Exactly 3 acts; 15–40 scenes; every scene needs at least one story beat; at most 4 characters on screen; over 450 s is refused. Quality flags shown to the owner, never acted on automatically: under 5 minutes ("do not pad: approve as it is or make it a Short"), repeated jokes, thin scenes. Stories can introduce characters, registered as in Shorts. A continuation of a Short gets that Short's script as context |
+| Gate | `workflow.py`, `routes_episodes.py` | `outline_review → outline_approved`: no scene is written before the owner approves the outline. Owner edits are saved as new outline versions |
+| Scenes (pass 2) | `tasks_long.generate_act`, `writer.act_prompt` | Act 1, then 2, then 3, each from the approved outline, consistent with the acts already written. Each act is validated before the next starts. One act can be rewritten later (`act:N`); single scenes can be regenerated as in Shorts. Over the cap blocks script approval |
+| Segments | `longform.plan_segments`, `tasks_long.plan_segments` | Exact timings from the engine (voice-extended). Segments of at most 58 s, cut at scene boundaries; a long scene is split between lines, never inside one. A split keeps the scene's cast, placements and the poses in effect, so continuity holds |
+| Continuity | `engine.build_story` | Every segment is built from the same character registries, environments, voice assignments and framing defaults. Only the first segment has the hook and only the last the end card |
+| Render | `tasks_long.render_segment` | Each segment goes through the unchanged engine `produce`, with voices placed at the engine's own line timings. Engine QA runs per segment |
+| Join | `longform.join_segments` | Video packets are copied (identical renderer settings are verified). Audio is concatenated from each segment's exact mixed WAV and encoded once. Checks: frame count equals the sum of the segments; audio covers the video; audio level just before and after each join matches the joined WAVs (no gap, click or level jump). A join report is stored with the episode |
+| Selective regeneration | segment fingerprints; `start_long_scene_jobs` | A segment's fingerprint covers its engine story (minus its revision-specific id), its voice clips, character registries and the engine and renderer code. An unchanged fingerprint reuses the earlier render. Unchanged scenes keep their preparation and voices on a new production run, so editing one scene re-renders only its segment(s) |
+| Retries and revisions | `routes_episodes.py` | A failed segment, plan or join is retried on its own. Revisions: script, storyboard scenes, re-produce scenes, or re-render chosen segments |
+| Dashboard | `OutlineTab`, `SegmentsPanel`, episode page | Outline review and editing, act-by-act development, act rewrite, segment table (status, render time, reused, preview, retry), segment revisions, final approval |
+
+**Engine fix found by the first long render** (`production/lib/scene.mjs`): the renderer checks each layer's end against the shot span computed by float subtraction of the rounded shot start and end (for example 55.5333 − 51.5667 = 3.96659999…). A layer ending exactly at the scene end (3.9666) failed by a float hair. That can happen in any multi-scene story, but Shorts had not hit it. Such an end is now rounded down to the span; projects the renderer already accepted are unchanged. All seven AP-85 scenes are frame-for-frame identical to the previous commit, and Short 001 baselines pass.
+
+**Tests:** `studio-app/api/tests/test_long_form.py` covers:
+- outline rules and quality flags;
+- segment planning, including split scenes and the single-line limit;
+- joins on real FFmpeg clips, including a refused mismatch;
+- outline → acts → act rewrite;
+- the complete workflow through the real engine:
+  - voiced scenes, several segments and the join;
+  - a one-scene revision that re-renders only its segment;
+  - an injected segment failure retried on its own;
+  - final approval.
+
+**Not yet measured:** a real 5–7 minute episode on the server's CPU (the local test episode is in the progress log).

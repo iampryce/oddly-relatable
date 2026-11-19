@@ -52,6 +52,41 @@ class CastAndVoiceTest(unittest.TestCase):
     def dad(self):
         return next(x for x in self.ok(self.c.get("/api/characters")) if x["key"] == "dad")
 
+    def test_restyle_replaces_design_only_after_approval(self):
+        """A restyle redraws a character in the house style; the old poses stay in use until the owner approves the new
+        sheet, and are then superseded (kept in history, never mixed into production)."""
+        c = self.c
+        eid = self.episode_through_storyboard()
+        self.ok(c.put("/api/settings/image", json={"provider": "openai"}))
+        self.ok(c.post(f"/api/episodes/{eid}/cast/generate"))
+        self.env.run_jobs(["character_sheet"])
+        self.ok(c.post(f"/api/characters/{self.dad()['id']}/sheet/decision", json={"decision": "approve"}))
+        old = {a["id"] for a in self.dad()["assets"] if a["kind"] == "pose" and a["status"] == "approved"}
+        self.assertEqual(c.post(f"/api/characters/{self.dad()['id']}/restyle", json={}).status_code, 409)   # no OpenAI key
+        c.put("/api/settings/credentials", json={"values": {"openai_api_key": "sk-test"}})
+        self.assertEqual(c.post(f"/api/characters/{self.dad()['id']}/restyle", json={}).status_code, 422)   # needs a description
+        j = self.ok(c.post(f"/api/characters/{self.dad()['id']}/restyle", json={"visual_description": "a simple flat moustache; a flat blue top"}))
+        self.assertTrue(j["payload"]["restyle"])
+        self.env.run_jobs(["character_sheet"])
+        dad = self.dad()
+        new = {a["id"] for a in dad["assets"] if a["kind"] == "pose" and a["status"] == "review"}
+        self.assertEqual(len(new), 2, "both expressions redrawn")
+        self.assertEqual({a["id"] for a in dad["assets"] if a["kind"] == "pose" and a["status"] == "approved"}, old, "old design in use until approval")
+        self.ok(c.post(f"/api/characters/{dad['id']}/sheet/decision", json={"decision": "approve"}))
+        dad = self.dad()
+        st = {a["id"]: a["status"] for a in dad["assets"] if a["kind"] == "pose"}
+        self.assertTrue(all(st[i] == "superseded" for i in old))
+        self.assertTrue(all(st[i] == "approved" for i in new))
+        self.assertEqual(dad["visual_description"], "a simple flat moustache; a flat blue top")
+
+    def test_character_voice_names_its_engine(self):
+        heard = []
+        providers.set_test_voice(lambda text, voice, instr, out: heard.append(voice) or fake_voice(text, voice, instr, out))
+        from pathlib import Path
+        import tempfile
+        providers.speak({"provider": "piper"}, "hi", "kokoro:bm_george", Path(tempfile.mkdtemp()) / "x")
+        self.assertEqual(heard, ["bm_george"])
+
     def test_story_introduces_character_sheet_approval_and_reuse(self):
         c = self.c
         eid = self.episode_through_storyboard()

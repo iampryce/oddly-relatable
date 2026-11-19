@@ -9,3 +9,5 @@ boto3==1.43.46
 httpx==0.28.1
 pillow==12.3.0
 pydantic==2.12.5
+cryptography==50.0.2
+numpy==2.5.1

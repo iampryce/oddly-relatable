@@ -13,11 +13,12 @@ import math
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from . import engine, writer
+from . import engine, house_style, writer
 from .config import REPO_ROOT, get_settings
 from .models import Asset, Character, CharacterAsset, Episode, Event, Idea, Job, PublishRecord, ScriptVersion, StoryboardScene, now
 from .casting import register_new_characters, writer_characters
@@ -65,6 +66,12 @@ def by_key(db: Session) -> dict[str, Character]:
     return {c.key: c for c in characters(db)}
 
 
+def scene_hash(sc) -> str:
+    """Production-relevant content of a storyboard scene (long-form selective regeneration compares it)."""
+    import hashlib
+    return hashlib.sha256(json.dumps({"location": sc.location, "characters": sc.characters, "lines": sc.lines}, sort_keys=True).encode()).hexdigest()
+
+
 def current_script(db: Session, ep: Episode) -> dict:
     sv = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.script_version).one()
     return sv.content
@@ -97,7 +104,7 @@ def generate_script(ctx: Ctx) -> dict:
     chars = writer_characters(db, ep.id)
     provider = text_provider(get_section(db, "text"))
     ctx.log(f"Writing the script with provider {provider.name}")
-    answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")), writer.script_prompt(idea, chars, engine.environments()))
+    answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")), writer.script_prompt(idea, chars, sets.writer_environments(db), job.payload.get("instruction", "")))
     script = validate_script(answer, {c.key for c in characters(db)})
     made = register_new_characters(db, ep.id, script)
     if made:
@@ -117,9 +124,13 @@ def regenerate_section(ctx: Ctx) -> dict:
     script = current_script(db, ep)
     section, instruction = job.payload["section"], job.payload.get("instruction", "")
     provider = text_provider(get_section(db, "text"))
-    answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")),
-                                    writer.section_prompt(script, section, instruction, chars))
-    new = writer.apply_section(script, section, answer, {c.key for c in characters(db)})
+    if section.startswith("act:") and ep.format == "long":
+        from .tasks_long import regenerate_act
+        new = regenerate_act(ctx, ep, script, int(section.split(":", 1)[1]), instruction)
+    else:
+        answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")),
+                                        writer.section_prompt(script, section, instruction, chars))
+        new = writer.apply_section(script, section, answer, {c.key for c in characters(db)}, fmt=ep.format)
     register_new_characters(db, ep.id, new)
     sv = save_script(db, ep, new, "section-regenerated", f"{section}: {instruction}")
     event(db, ep.id, "script", f"Script v{sv.version}: regenerated {section}")
@@ -220,10 +231,15 @@ def prepare_characters(ctx: Ctx) -> dict[str, Character]:
         folder = ctx.folder("characters", c.key)
         entries = []
         for p in poses:
-            f = folder / f"pose-{p.id}.png"
-            if not f.exists() or sha256_file(f) != p.sha256:
-                storage().get_to_file(p.storage_key, f)
-            entries.append({"pose_id": f"p{p.id}", "file": f.resolve(), "sha256": p.sha256, "feet": p.feet,
+            src = folder / f"pose-{p.id}.png"
+            if not src.exists() or sha256_file(src) != p.sha256:
+                storage().get_to_file(p.storage_key, src)
+            # The engine sizes and frames a pose by its whole image, so the generator's wide transparent margins would
+            # count as body width (members cut at frame edges, medium shots that "do not fit"). The engine works from a
+            # copy trimmed to the figure (plus a small border), with the feet anchor moved to match; the approved
+            # original is never changed.
+            trimmed, feet = engine.trim_pose(src, folder / f"pose-{p.id}-trim.png", p.feet)
+            entries.append({"pose_id": f"p{p.id}", "file": trimmed.resolve(), "sha256": sha256_file(trimmed), "feet": feet,
                             "figure_height": p.figure_height, "expression": p.expression})
         reg = engine.write_registry(c, entries, folder)
         c.registry_path = str(reg.resolve())
@@ -233,22 +249,53 @@ def prepare_characters(ctx: Ctx) -> dict[str, Character]:
     return out
 
 
-def pose_prompt(c: Character, expression: str, with_reference: bool) -> str:
-    return (f"Full-body 2D cartoon character, standing, facing the viewer, whole body visible with space around it, "
-            f"plain transparent (or flat white) background, no scenery, no text. Style: simple expressive flat 2D stickman-style "
-            f"character, bold clean black outlines, thin limbs, big expressive eyes and brows, flat colours. Character: {c.name}. "
-            f"Appearance: {c.visual_description}. Expression and body language: {expression}, exaggerated and readable."
-            + (" Keep the character identical to the reference image: same head, face, hair, clothes, colours and proportions; "
-               "only the expression and pose change." if with_reference else ""))
+def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False) -> str:
+    """Image prompt for one pose. References are attached in this order: the character's own approved/neutral pose
+    (identity), then the house-style reference (the show's locked lead character)."""
+    refs = []
+    if with_identity and simplify:
+        refs.append("IMAGE 1 is THIS character's previous, more detailed design: keep who they are (hair or hat shape, skin "
+                    "tone, clothing type and colours) but redraw them simpler in the house style described above: remove "
+                    "textures, stubble, jewellery and fine detail.")
+    elif with_identity:
+        refs.append("IMAGE 1 is THIS character: keep them identical (same face, hairstyle, accessories, outfit, colours, "
+                    "head and body proportions); only the expression and pose change.")
+    if with_style:
+        refs.append(f"The {'LAST' if with_identity else 'attached'} image is the show's HOUSE STYLE reference (a different "
+                    "character): match its drawing style exactly (line weight, bold clean black outlines, head-to-body "
+                    "proportions of an adult, flat colours with the same simple shading, eye and brow style), but do NOT copy "
+                    "that character's face, head, hair, clothes or colours.")
+    return (f"Full-body 2D cartoon character for an animated comedy show about adults: an ADULT (not a child), standing, "
+            f"facing the viewer, whole body visible with space around it, plain transparent (or flat white) background, no "
+            f"scenery, no text. {house_style.CHARACTER_RULES} Clothing covers the torso only (no trousers, sleeves or "
+            f"skin-coloured limbs). Character: {c.name}. "
+            f"Appearance: {c.visual_description}. Expression and body language: {expression}, exaggerated and readable. "
+            + " ".join(refs))
 
 
-def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict) -> tuple[CharacterAsset, Path]:
+def style_reference(ctx: Ctx) -> Path | None:
+    """The house style: the locked lead character's approved neutral pose (read only; never modified)."""
+    db = ctx.db
+    lead = db.query(Character).filter_by(locked=True).order_by(Character.id).first()
+    if lead is None:
+        return None
+    a = (db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved", expression="neutral").first()
+         or db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved").first())
+    if a is None:
+        return None
+    return storage().get_to_file(a.storage_key, ctx.folder("characters", "_style") / Path(a.storage_key).name)
+
+
+def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict, simplify: bool = False) -> tuple[CharacterAsset, Path]:
     folder = ctx.folder("characters", c.key, "generated")
-    out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}.png"
-    ctx.log(f"Generating '{expression}' with image provider {cfg.get('provider')}")
-    image_generate(cfg, pose_prompt(c, expression, ref is not None), out, ref)
+    # The attempt number keeps every generation as its own file: a retried sheet never overwrites earlier evidence.
+    out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}-a{ctx.job.attempts}.png"
+    style = style_reference(ctx)
+    refs = [r for r in (ref, style) if r is not None]
+    ctx.log(f"Generating '{expression}' with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
+    image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify), out, refs or None)
     if engine.make_cutout(out):
-        ctx.log(f"'{expression}': flat background removed")
+        ctx.log(f"'{expression}': background or halo removed")
     info = engine.analyse_pose(out)
     key = f"characters/{c.key}/poses/{out.name}"
     storage().put_file(key, out, "image/png")
@@ -264,6 +311,8 @@ def _reference_for(ctx: Ctx, c: Character) -> Path | None:
     db = ctx.db
     a = (db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved", expression="neutral").first()
          or db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").first()
+         # A sheet still in review: its neutral pose anchors a re-drawn expression, so the sheet stays one identity.
+         or db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review", expression="neutral").order_by(CharacterAsset.id.desc()).first()
          or db.query(CharacterAsset).filter_by(character_id=c.id, kind="reference").order_by(CharacterAsset.id.desc()).first())
     if not a:
         return None
@@ -289,16 +338,28 @@ def character_sheet(ctx: Ctx) -> dict:
     db, job = ctx.db, ctx.job
     c = db.get(Character, job.character_id)
     cfg = get_section(db, "image")
+    restyle = bool(job.payload.get("restyle"))
+    if job.payload.get("provider"):
+        cfg = {**cfg, "provider": job.payload["provider"], "model": "", "fallback": "none"}
+    if cfg.get("provider") == "openai":
+        cfg = {**cfg, "use_reference": True}      # attach the house-style reference (and the new neutral) to each image
     wanted = list(dict.fromkeys(["neutral"] + [e.lower() for e in job.payload.get("expressions", [])]))
-    ref = _reference_for(ctx, c)
+    # A restyle draws the new neutral from the current design simplified into the house style ("simplify"), or from
+    # the house style alone; the rest of the sheet is anchored on the new neutral.
+    simplify_from = _reference_for(ctx, c) if restyle and job.payload.get("from_current") else None
+    ref = None if restyle else _reference_for(ctx, c)
     entries = []
     for i, exp in enumerate(wanted):
+        statuses = ["review"] if restyle else ["review", "approved"]   # a restyle redraws approved expressions too
         existing = db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
-                                                   CharacterAsset.expression == exp, CharacterAsset.status.in_(["review", "approved"])).first()
+                                                   CharacterAsset.expression == exp, CharacterAsset.status.in_(statuses)).first()
         if existing:
             f = storage().get_to_file(existing.storage_key, ctx.folder("characters", c.key, "sheet") / Path(existing.storage_key).name)
         else:
-            _, f = _generate_pose(ctx, c, exp, ref, cfg)
+            if ref is None and simplify_from is not None:
+                _, f = _generate_pose(ctx, c, exp, simplify_from, cfg, simplify=True)
+            else:
+                _, f = _generate_pose(ctx, c, exp, ref, cfg)
         if ref is None:
             ref = f   # the first pose anchors the rest of the sheet
         entries.append((exp, f))
@@ -334,7 +395,9 @@ def voice_preview(ctx: Ctx) -> dict:
     f = speak(cfg, text, c.voice, ctx.folder("characters", c.key, "voice") / f"sample-job{job.id}", voice_direction(c, {"expression": "neutral"}))
     key = f"characters/{c.key}/voice-sample-job{job.id}{f.suffix}"
     storage().put_file(key, f, "audio/mpeg" if f.suffix == ".mp3" else "audio/wav")
-    a = CharacterAsset(character_id=c.id, kind="voice-sample", expression=c.voice or "default", storage_key=key, sha256=sha256_file(f), status="review")
+    a = CharacterAsset(character_id=c.id, kind="voice-sample",
+                       # the voice's short name (a Piper voice is a model path; the column holds 40 characters)
+                       expression=(Path(c.voice.replace("\\", "/")).stem if c.voice else "default")[:40], storage_key=key, sha256=sha256_file(f), status="review")
     db.add(a)
     db.commit()
     return {"asset_id": a.id, "seconds": round(audio_seconds(f), 2)}
@@ -348,7 +411,7 @@ def scene_prepare(ctx: Ctx) -> dict:
     sc.production_status = "running"
     db.commit()
     asset = _scene_preview(ctx, ep, sc, "scene-frames")
-    return {"asset_id": asset.id}
+    return {"asset_id": asset.id, "scene_hash": scene_hash(sc)}
 
 
 @task
@@ -358,12 +421,16 @@ def scene_voice(ctx: Ctx) -> dict:
     cfg = get_section(db, "voice")
     if cfg.get("provider", "none") == "none":
         ctx.log("No voice provider configured: this scene has no voice clips (the video carries the engine's SFX only).")
-        return {"skipped": "no voice provider configured", "clips": []}
+        return {"skipped": "no voice provider configured", "clips": [], "scene_hash": scene_hash(sc)}
     chars = by_key(db)
     clips = []
     folder = ctx.folder("episodes", ep.id, f"r{ep.revision}", f"scene-{sc.position}", "voice")
     for i, ln in enumerate(sc.lines):
         c = chars[ln["speaker"]]
+        if not re.search(r"\w", ln["text"]):
+            # A silent reaction beat ("...", "?!"): nothing to speak, so no clip; the line keeps its storyboard timing.
+            ctx.log(f"line {i + 1}: silent reaction beat ({ln['text']!r}), no voice")
+            continue
         # Voice per character (set under Characters); the old settings map and the default voice are fallbacks.
         voice = c.voice or (cfg.get("voices") or {}).get(ln["speaker"]) or cfg.get("default_voice", "")
         f = speak(cfg, ln["text"], voice, folder / f"line-{i + 1}", voice_direction(c, ln))
@@ -374,7 +441,7 @@ def scene_voice(ctx: Ctx) -> dict:
         clips.append({"line": i, "asset_id": a.id, "seconds": round(seconds, 3), "text": ln["text"], "speaker": ln["speaker"]})
         ctx.log(f"line {i + 1}: {seconds:.2f} s ({c.name}, voice {voice or 'default'})")
     db.commit()
-    return {"clips": clips}
+    return {"clips": clips, "scene_hash": scene_hash(sc)}
 
 
 def _voice_audio(ctx: Ctx, ep: Episode, story: dict, folder: Path) -> None:
@@ -402,7 +469,8 @@ def _voice_audio(ctx: Ctx, ep: Episode, story: dict, folder: Path) -> None:
     shutil.rmtree(tmp, ignore_errors=True)
     s = get_settings()
     r = subprocess.run([s.node_bin, str(Path(__file__).parent / "node" / "line-timings.mjs"), str(story_file), str(tmp)],
-                       capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT), env=engine.env_for_node(), timeout=600)
+                       capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT), env=engine.env_for_node(), timeout=600,
+                       stdin=subprocess.DEVNULL)
     if r.returncode != 0:
         raise engine.EngineRunError("could not time the voice clips: " + engine.last_error(r.stdout + r.stderr))
     timings = json.loads(r.stdout)
@@ -432,10 +500,22 @@ def render_episode(ctx: Ctx) -> dict:
         job.progress = {"status": run.get("status"), "stages": run.get("stages", [])}
         db.commit()
 
-    result = engine.produce(story, folder, ctx.log, progress)
-    out: Path = result["folder"]
+    from . import acting
     base = f"episodes/{ep.id}/r{ep.revision}"
-    mp4 = next((out / "render").glob("*.mp4"), None)
+    if acting.enabled(db):
+        # Settings > Motion = studio rig animator: every line performed by the procedural acting renderer
+        from .tasks_long import clip_map
+        refs = [[(sc.id, li) for li in range(len(sc.lines))] for sc in ep.scenes]
+        mp4, wav, rep = acting.render(ctx, ep, refs, clip_map(db, ep), prepare_characters(ctx), folder / "acting",
+                                      end_card=prod.get("end_card") or "Oddly Relatable")
+        out = folder / "acting"
+        result = {"run": {"status": "pass", "renderer": "acting", **rep}, "folder": out}
+        store_asset(db, ep_id=ep.id, src=wav, key=f"{base}/audio-job{job.id}.wav", kind="audio", label="Final mixed audio",
+                    content_type="audio/wav", job_id=job.id, revision=ep.revision)
+    else:
+        result = engine.produce(story, folder, ctx.log, progress)
+        out: Path = result["folder"]
+        mp4 = next((out / "render").glob("*.mp4"), None)
     if not mp4:
         raise engine.EngineRunError("the engine finished without an MP4")
     video = store_asset(db, ep_id=ep.id, src=mp4, key=f"{base}/video-job{job.id}.mp4", kind="video", label=f"{ep.title} (revision {ep.revision})",
@@ -475,6 +555,10 @@ def after_job(db: Session, job: Job) -> None:
     ep = db.get(Episode, job.episode_id)
     if ep is None or job.revision != ep.revision:
         return
+    if ep.format == "long":
+        from .tasks_long import after_long_job
+        if after_long_job(db, job, ep):
+            return
     if job.kind in SCENE_JOBS:
         sc = db.get(StoryboardScene, job.scene_id)
         if job.status == "failed":
@@ -492,10 +576,13 @@ def after_job(db: Session, job: Job) -> None:
         done = all(latest.get(x) is not None and latest[x].status == "succeeded" for x in expected)
         rendering = db.query(Job).filter(Job.episode_id == ep.id, Job.revision == ep.revision, Job.kind == "render_episode",
                                          Job.status.in_(["queued", "running", "succeeded"])).count()
+        if ep.format == "long":   # long-form: plan segments (the Shorts single render is never used)
+            rendering = db.query(Job).filter(Job.episode_id == ep.id, Job.revision == ep.revision, Job.kind == "plan_segments",
+                                             Job.status.in_(["queued", "running"])).count()
         if done and not rendering and ep.stage in ("producing", "production_failed"):
             set_stage(ep, "producing")
             db.commit()
-            enqueue(db, "render_episode", episode_id=ep.id, revision=ep.revision)
+            enqueue(db, "plan_segments" if ep.format == "long" else "render_episode", episode_id=ep.id, revision=ep.revision)
     elif job.kind == "render_episode" and job.status == "failed":
         set_stage(ep, "production_failed")
         db.commit()
@@ -540,6 +627,20 @@ def publish_youtube(ctx: Ctx) -> dict:
     return {"video_id": vid, "url": rec.youtube_url}
 
 
+def is_transient(e: Exception) -> bool:
+    """Failures worth an automatic retry: rate limits, provider server errors, timeouts and network errors."""
+    import httpx
+    if getattr(e, "transient", False):
+        return True
+    if isinstance(e, (httpx.TimeoutException, httpx.TransportError, subprocess.TimeoutExpired, ConnectionError, TimeoutError)):
+        return True
+    try:
+        from botocore.exceptions import ConnectionError as BotoConnectionError, EndpointConnectionError
+        return isinstance(e, (BotoConnectionError, EndpointConnectionError))
+    except ImportError:
+        return False
+
+
 def run_job(db: Session, job_id: int) -> Job | None:
     """Claim and run one job (the worker calls this for each ID it receives)."""
     from .queue import claim
@@ -547,6 +648,9 @@ def run_job(db: Session, job_id: int) -> Job | None:
     if job is None:
         return None
     ctx = Ctx(db, job)
+    from .providers import set_fallback_logger
+    set_fallback_logger(ctx.log)
+    retry_in = 0
     try:
         fn = TASKS.get(job.kind)
         if fn is None:
@@ -561,9 +665,32 @@ def run_job(db: Session, job_id: int) -> Job | None:
         db.rollback()
         job = db.get(Job, job_id)
         job.status, job.error = "failed", f"{type(e).__name__}: {e}"
+        if is_transient(e) and job.attempts < get_settings().max_job_attempts:
+            retry_in = min(60, 5 * 2 ** job.attempts)   # 10 s, 20 s, ... capped at a minute
+    finally:
+        set_fallback_logger(None)
+    if retry_in:
+        # Automatic retry of a transient failure: back to the queue; the dashboard shows the attempt and the reason.
+        job.status, job.error = "queued", f"Retrying automatically (attempt {job.attempts + 1} of {get_settings().max_job_attempts}) after: {job.error}"
+        job.log = (job.log or "") + "\n" + job.error
+        db.add(Event(episode_id=job.episode_id, kind="job", message=f"{job.kind} (job {job.id}) will retry in {retry_in} s: {job.error[:200]}"))
+        db.commit()
+        if get_settings().env != "test":
+            time.sleep(retry_in)
+        from .queue import announce
+        announce(job.id)
+        return job
     job.finished_at = now()
     if job.status == "failed":
         db.add(Event(episode_id=job.episode_id, kind="error", message=f"{job.kind} (job {job.id}) failed: {job.error[:300]}"))
     db.commit()
     after_job(db, job)
     return job
+
+
+# Long-form handlers register themselves with @task (imported last: they build on the helpers above).
+from . import tasks_long  # noqa: E402,F401
+from . import tasks_providers  # noqa: E402,F401
+from . import comparison  # noqa: E402,F401
+from . import voice_compare  # noqa: E402,F401
+from . import sets  # noqa: E402,F401

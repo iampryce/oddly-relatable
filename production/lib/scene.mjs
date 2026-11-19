@@ -115,7 +115,15 @@ export async function compileStory(story, {outDir, repoRoot = REPO_ROOT, allowIs
       const local = +(endCard.start - x.start).toFixed(3);
       layers.push({type: 'image', path: writeGen('endcard', img), x: 0, y: 0, w: plane.width, from: local, keys: [{t: local, alpha: 0}, {t: +(local + 0.35).toFixed(3), alpha: 1}]});
     }
-    shots.push({start: +x.start.toFixed(4), end: +(x.start + x.shotDuration).toFixed(4), layers});
+    const shotStart = +x.start.toFixed(4), shotEnd = +(x.start + x.shotDuration).toFixed(4), span = shotEnd - shotStart;
+    // The renderer checks each layer's end against the shot span computed exactly like this (raw float subtraction of
+    // the rounded start and end, e.g. 55.5333 - 51.5667 = 3.96659999...). A layer ending exactly at the scene's end
+    // (3.9666) then fails by a float hair. This only happens in a scene with no end card after it (long-form segments;
+    // the end card always extends a Short's last shot). Such an end is rounded DOWN to the span; projects the renderer
+    // already accepts are never changed.
+    // (span - 1e-9: 3.96659999... × 1e4 rounds back up to 39666 in floating point.)
+    for (const l of layers) if (l.to !== undefined && l.to > span) l.to = Math.floor((span - 1e-9) * 1e4) / 1e4;
+    shots.push({start: shotStart, end: shotEnd, layers});
     sfx.push(...out.sfx.map(c => ({...c, time: +(c.time + x.start).toFixed(3)})));
     sceneReports.push({id: x.scene.id, format: x.scene.format, start: x.start, duration: x.shotDuration, seq: x.seq, out});
   }

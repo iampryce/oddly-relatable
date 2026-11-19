@@ -9,6 +9,7 @@ ROOT=${STICKMAN_ROOT:-/srv/stickman}
 src=${1:?usage: restore.sh <backup folder> [--media]}
 media=${2:-}
 COMPOSE=(docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/current/studio-app/deploy/docker-compose.yml")
+if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env"; then COMPOSE+=(-f "$ROOT/current/studio-app/deploy/docker-compose.public.yml"); fi
 
 ( cd "$src" && sha256sum -c SHA256SUMS )
 "$(dirname "$0")/backup.sh"     # keep what is about to be replaced

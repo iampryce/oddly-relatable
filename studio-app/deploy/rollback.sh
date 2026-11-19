@@ -9,6 +9,9 @@ rel=$(basename "${1:?usage: rollback.sh <release sha> [<backup folder>]}")
 test -d "$ROOT/releases/$rel" || { echo "rollback: no release $rel" >&2; exit 1; }
 docker image inspect "oddstudio-api:$rel" >/dev/null || { echo "rollback: images for $rel are gone; run deploy.sh $rel" >&2; exit 1; }
 ln -sfn "releases/$rel" "$ROOT/current"
-RELEASE="$rel" docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/releases/$rel/studio-app/deploy/docker-compose.yml" up -d --remove-orphans
+f=(-f "$ROOT/releases/$rel/studio-app/deploy/docker-compose.yml")
+if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env" && test -f "$ROOT/releases/$rel/studio-app/deploy/docker-compose.public.yml"; then
+  f+=(-f "$ROOT/releases/$rel/studio-app/deploy/docker-compose.public.yml"); fi
+RELEASE="$rel" docker compose -p oddstudio --env-file "$ROOT/shared/.env" "${f[@]}" up -d --remove-orphans
 if [[ -n "${2:-}" ]]; then "$ROOT/releases/$rel/studio-app/deploy/restore.sh" "$2"; fi
 echo "rollback: now running $rel"

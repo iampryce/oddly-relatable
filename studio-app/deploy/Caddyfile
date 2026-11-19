@@ -1,0 +1,31 @@
+# Public HTTPS entry point for the dashboard (the only public service of this project).
+#   PUBLIC_HOST  a DNS name that resolves to the server (e.g. 13-140-218-113.sslip.io or your own domain)
+#   PUBLIC_PORT  the dedicated HTTPS port (8443)
+# Port 80 is used only for Let's Encrypt HTTP-01 validation and renewals; any other request there is redirected.
+# Postgres, Redis, the API and the worker have no published ports; Caddy reaches only the dashboard container,
+# and the dashboard forwards /api/* to the API on the private Compose network.
+{
+	http_port 80
+	https_port {$PUBLIC_PORT}
+	admin off
+}
+
+# Plain HTTP: Caddy answers ACME challenges here first; everything else goes to the HTTPS port.
+http://{$PUBLIC_HOST} {
+	redir https://{$PUBLIC_HOST}:{$PUBLIC_PORT}{uri} permanent
+}
+
+{$PUBLIC_HOST}:{$PUBLIC_PORT} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+	request_body {
+		max_size 50MB
+	}
+	reverse_proxy web:3000
+}

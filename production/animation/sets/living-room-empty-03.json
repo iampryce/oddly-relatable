@@ -1,0 +1,7 @@
+{
+  "note": "Blocking for the approved living-room plate (world units = plate pixels). floor_y: standing feet line on the rug; seat: the green armchair (hip height when seated, feet line in front of it).",
+  "plate": "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png",
+  "width": 941, "height": 1672,
+  "floor_y": 1335, "stand_min_x": 175, "stand_max_x": 935,
+  "seat": {"x": 300, "hip_y": 1112, "feet_y": 1252}
+}

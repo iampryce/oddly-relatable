@@ -19,7 +19,12 @@ prev=$(readlink "$ROOT/current" 2>/dev/null | xargs -r basename || true)
 
 if [[ -n "$prev" ]]; then "$dir/studio-app/deploy/backup.sh"; fi
 
-compose() { RELEASE="$1" docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/releases/$1/studio-app/deploy/docker-compose.yml" "${@:2}"; }
+# Public HTTPS (Caddy on PUBLIC_PORT) is added when shared/.env sets PUBLIC_HOST; see docker-compose.public.yml.
+compose() {
+  local f=(-f "$ROOT/releases/$1/studio-app/deploy/docker-compose.yml")
+  if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env"; then f+=(-f "$ROOT/releases/$1/studio-app/deploy/docker-compose.public.yml"); fi
+  RELEASE="$1" docker compose -p oddstudio --env-file "$ROOT/shared/.env" "${f[@]}" "${@:2}"
+}
 compose "$rel" build
 ln -sfn "releases/$rel" "$ROOT/current"
 compose "$rel" up -d --remove-orphans

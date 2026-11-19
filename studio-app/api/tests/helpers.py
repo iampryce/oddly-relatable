@@ -56,10 +56,11 @@ def fake_voice(text, voice, instructions, out_file):
     import math, struct, wave
     seconds = max(0.6, len(text) / 14)
     rate = 24000
+    freq = 180 + sum(map(ord, voice or "")) % 120   # each voice sounds different (so a re-voiced line changes)
     f = out_file.with_suffix(".wav")
     with wave.open(str(f), "w") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
-        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * i / rate))) for i in range(int(seconds * rate))))
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * freq * i / rate))) for i in range(int(seconds * rate))))
     return f
 
 

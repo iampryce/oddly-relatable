@@ -5,12 +5,16 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox, JobStatus, Pipeline, Stage} from '@/components/ui';
 import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import CastPanel from '@/components/CastPanel';
+import OutlineTab from '@/components/OutlineTab';
+import SegmentsPanel from '@/components/SegmentsPanel';
 
-const TABS = ['Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
+const TABS = ['Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
 type Tab = typeof TABS[number];
-const BUSY = ['script_generating', 'storyboard_generating', 'producing', 'publishing'];
+const tabsFor = (ep: any) => TABS.filter(t => t !== 'Outline' || ep.format === 'long');
+const BUSY = ['outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 
 function defaultTab(stage: string): Tab {
+  if (stage.startsWith('outline')) return 'Outline';
   if (stage.startsWith('script')) return stage === 'script_approved' ? 'Storyboard' : 'Script';
   if (stage.startsWith('storyboard')) return stage === 'storyboard_approved' ? 'Production' : 'Storyboard';
   if (stage === 'producing' || stage === 'production_failed') return 'Production';
@@ -39,14 +43,15 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   return (
     <>
       <div className="spread">
-        <div><h1>{ep.title}</h1><div className="row"><Stage stage={ep.stage} /><span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
+        <div><h1>{ep.title}</h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
       </div>
       <Pipeline stage={ep.stage} />
       <div className="tabs" role="tablist">
-        {TABS.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
+        {tabsFor(ep).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       <ErrorBox error={act.error} />
       {ep.last_error && <div className="alert bad">{ep.last_error}</div>}
+      {tab === 'Outline' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}
       {tab === 'Script' && <ScriptTab {...ctx} />}
       {tab === 'Storyboard' && <StoryboardTab {...ctx} />}
       {tab === 'Production' && <ProductionTab {...ctx} />}
@@ -83,7 +88,8 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
   const [instruction, setInstruction] = useState('');
   const [comment, setComment] = useState('');
   const s = ep.script?.content;
-  const job = lastJob(ep, 'generate_script') || lastJob(ep, 'regenerate_section');
+  const job = lastJob(ep, 'generate_act') || lastJob(ep, 'generate_script') || lastJob(ep, 'regenerate_section');
+  const long = ep.format === 'long';
   const save = () => act.run('save', async () => { await api(`/episodes/${ep.id}/script`, {method: 'PUT', body: {content: draft, note}}); setDraft(null); });
   const regen = (section: string) => act.run('regen', () => api(`/episodes/${ep.id}/script/regenerate-section`, {body: {section, instruction}}));
   if (draft) {
@@ -139,7 +145,13 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
   return (
     <div className="stack">
       <JobNote job={job} />
-      {!s ? (
+      {!s && long ? (
+        <div className="card stack">
+          <h2>No scenes yet</h2>
+          <p className="muted">Long episodes are written from the approved three-act outline (Outline tab), act by act.</p>
+          {ep.stage === 'outline_approved' && <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('dev', () => api(`/episodes/${ep.id}/script/generate`, {body: {}}))}>Develop scenes act by act</button>}
+        </div>
+      ) : !s ? (
         <div className="card stack">
           <h2>No script yet</h2>
           <p className="muted">Generate an original script from the idea with the configured AI writer, or write it yourself.</p>
@@ -170,11 +182,17 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
             {s.new_characters?.length > 0 && <div className="alert info small"><strong>New characters in this story:</strong> {s.new_characters.map((c: any) => `${c.name} (${c.visual_description})`).join('; ')}. Their expression sheets are generated from the Cast panel below.</div>}
             <p className="small"><strong>Cast:</strong> {s.characters.map((c: any) => `${characters.find(x => x.key === c.key)?.name || c.key}${c.role ? ` (${c.role})` : ''}`).join(', ')}</p>
           </div>
-          {s.scenes.map((sc: Scene) => (
-            <div key={sc.id} className="card">
+          {(ep.script.warnings || []).map((w: string, i: number) => <div key={i} className="alert warn small">{w}</div>)}
+          {s.scenes.map((sc: any, i: number) => (
+            <div key={sc.id} className="stack">
+            {long && sc.act !== s.scenes[i - 1]?.act && (
+              <div className="spread" style={{marginTop: 8}}><h2 style={{margin: 0}}>Act {sc.act}</h2>
+                <button className="btn sm" disabled={!can('regenerate_section') || !!act.busy} onClick={() => regen(`act:${sc.act}`)}>Rewrite act {sc.act}</button></div>)}
+            <div className="card">
               <div className="spread"><h3>{sc.heading}</h3>
                 <button className="btn sm" disabled={!can('regenerate_section') || !!act.busy} onClick={() => regen(`scene:${sc.id}`)}>Regenerate this scene</button></div>
               <SceneView scene={sc} characters={characters} />
+            </div>
             </div>))}
           {can('regenerate_section') && (
             <div className="card row">
@@ -283,7 +301,7 @@ function JobRow({job, act}: {job: any; act: Ctx['act']}) {
 }
 
 function ProductionTab({ep, can, act}: Ctx) {
-  const prodJobs = ep.jobs.filter((j: any) => ['scene_prepare', 'scene_voice', 'render_episode'].includes(j.kind) && j.revision === ep.revision);
+  const prodJobs = ep.jobs.filter((j: any) => ['scene_prepare', 'scene_voice', 'render_episode', 'plan_segments', 'render_segment', 'join_segments'].includes(j.kind) && j.revision === ep.revision);
   const done = prodJobs.filter((j: any) => j.status === 'succeeded').length;
   return (
     <div className="stack">
@@ -291,6 +309,7 @@ function ProductionTab({ep, can, act}: Ctx) {
         <div className="card spread"><div><h2 style={{marginBottom: 2}}>Start production</h2><span className="muted">Scene preparation, voice, then the full render with QA.</span></div>
           <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('start', () => api(`/episodes/${ep.id}/production/start`, {method: 'POST'}))}>Start production</button></div>)}
       {ep.stage === 'production_failed' && <div className="alert bad">A production job failed. Fix the cause (see the error and log), then retry only that job.</div>}
+      {ep.format === 'long' && <SegmentsPanel ep={ep} act={act} />}
       {ep.scenes.length > 0 && (
         <div className="card">
           <h2>Scenes</h2>
@@ -316,6 +335,7 @@ function ProductionTab({ep, can, act}: Ctx) {
 function ReviewTab({ep, can, act}: Ctx) {
   const [target, setTarget] = useState('scenes');
   const [scenes, setScenes] = useState<number[]>([]);
+  const [segs, setSegs] = useState<number[]>([]);
   const [comment, setComment] = useState('');
   const files = ep.assets.filter((a: any) => a.revision === ep.revision && ['report', 'manifest', 'storyboard-sheet', 'audio'].includes(a.kind));
   return (
@@ -335,12 +355,16 @@ function ReviewTab({ep, can, act}: Ctx) {
                 <h3>Or request a revision</h3>
                 <select value={target} onChange={e => setTarget(e.target.value)}>
                   <option value="scenes">Re-produce selected scenes</option><option value="storyboard">Change the storyboard (selected scenes marked)</option><option value="script">Rewrite the script</option>
+                  {ep.format === 'long' && <option value="segments">Re-render selected segments</option>}
                 </select>
-                {target !== 'script' && ep.scenes.map((sc: any) => (
+                {target === 'segments' && (ep.segments || []).map((g: any) => (
+                  <label key={g.id} className="row" style={{fontWeight: 400, color: 'inherit'}}><input type="checkbox" style={{width: 'auto'}} checked={segs.includes(g.position)}
+                    onChange={e => setSegs(e.target.checked ? [...segs, g.position] : segs.filter(x => x !== g.position))} />Segment {g.position} ({g.seconds.toFixed(0)} s: {g.parts.map((p: any) => p.scene).join(', ')})</label>))}
+                {target !== 'script' && target !== 'segments' && ep.scenes.map((sc: any) => (
                   <label key={sc.id} className="row" style={{fontWeight: 400, color: 'inherit'}}><input type="checkbox" style={{width: 'auto'}} checked={scenes.includes(sc.id)}
                     onChange={e => setScenes(e.target.checked ? [...scenes, sc.id] : scenes.filter(x => x !== sc.id))} />Scene {sc.position}: {sc.heading}</label>))}
-                <button className="btn danger" disabled={!!act.busy || !comment || (target === 'scenes' && !scenes.length)}
-                        onClick={() => act.run('rev', () => api(`/episodes/${ep.id}/video/request-revision`, {body: {target, comment, scene_ids: scenes}}))}>Request revision</button>
+                <button className="btn danger" disabled={!!act.busy || !comment || (target === 'scenes' && !scenes.length) || (target === 'segments' && !segs.length)}
+                        onClick={() => act.run('rev', () => api(`/episodes/${ep.id}/video/request-revision`, {body: {target, comment, scene_ids: scenes, segment_positions: segs}}))}>Request revision</button>
               </div>)}
             {['final_approved', 'publishing', 'published', 'publish_failed'].includes(ep.stage) && <div className="alert good">Final video approved. Continue in Publishing.</div>}
           </div>

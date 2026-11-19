@@ -270,7 +270,9 @@ export const faceToFace = {
         if (b.x > 0.5 || b.y > 0.5 || b.x + b.w < plane.width - 0.5 || b.y + bh < plane.height - 0.5) issues.push({t: +t.toFixed(3), id: backdrop.id, problem: `with parallax ${backdrop.parallax} the backdrop layer no longer covers the frame`});
       }
       for (const {m, plans} of members) for (const plan of plans) {
-        if (t < plan.from || t >= plan.to || alphaAt(plan, t) <= 0) continue;
+        // EPS: a frame time (472/30 = 15.733333...333) can sit a float hair below a layer end at the same instant
+        // (15.733333...334); the renderer does not draw the layer on that frame, so the check must not either.
+        if (t < plan.from - EPS || t >= plan.to - EPS || alphaAt(plan, t) <= 0) continue;
         const info = m.infos.get(plan.pose), s = scaleAt(plan, t), rect = poseRect(info, m.placement, s);
         const top = m.placement.feetY - m.placement.figureHeight * s;
         const face = applyCamera(cam, {x: rect.x, y: top, w: rect.w});

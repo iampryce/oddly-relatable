@@ -28,6 +28,8 @@ class Idea(Timestamps, Base):
     characters: Mapped[list] = mapped_column(JSON, default=list)    # character keys the owner wants in it (optional)
     target_seconds: Mapped[int] = mapped_column(Integer, default=45)
     interactive: Mapped[str] = mapped_column(String(40), default="none")  # none | viewer-choice | poll
+    format: Mapped[str] = mapped_column(String(10), default="short")       # short | long (5–7 min, D-L3)
+    continues_episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # D-L5: optional continuation of a Short
     status: Mapped[str] = mapped_column(String(30), default="draft")  # draft | submitted | in_production | archived
     episode_id: Mapped[int | None] = mapped_column(ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True)
 
@@ -45,6 +47,10 @@ class Episode(Timestamps, Base):
     approved_storyboard_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_error: Mapped[str] = mapped_column(Text, default="")
+    format: Mapped[str] = mapped_column(String(10), default="short")       # short | long
+    continues_episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_outline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 
@@ -58,6 +64,39 @@ class ScriptVersion(Base):
     content: Mapped[dict] = mapped_column(JSON)                      # validated by script_schema.validate_script
     source: Mapped[str] = mapped_column(String(40))                  # generated | edited | section-regenerated
     note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class OutlineVersion(Base):
+    """Long-form three-act outline (owner-approved before any scene is written)."""
+    __tablename__ = "outline_versions"
+    __table_args__ = (UniqueConstraint("episode_id", "version"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    content: Mapped[dict] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(40))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class Segment(Base):
+    """A long-form render segment (at most 58 s): scene parts, its input fingerprint and its rendered video."""
+    __tablename__ = "segments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id", ondelete="CASCADE"))
+    revision: Mapped[int] = mapped_column(Integer)
+    position: Mapped[int] = mapped_column(Integer)
+    parts: Mapped[list] = mapped_column(JSON)                         # [{"scene": scene_key, "lines": [a, b], "duration": s}]
+    seconds: Mapped[float] = mapped_column(default=0.0)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | rendering | done | failed
+    reused_from: Mapped[int | None] = mapped_column(Integer, nullable=True)   # segment id whose render is reused
+    video_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audio_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    render_seconds: Mapped[float | None] = mapped_column(nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

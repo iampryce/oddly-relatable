@@ -98,6 +98,9 @@ def record_failure(client: str) -> None:
 
 
 def current_user(request: Request) -> str:
+    s = get_settings()
+    if s.auth_disabled:   # owner-chosen open mode: every visitor acts as the owner (see config.auth_disabled)
+        return s.owner_email or "owner"
     email = read_token(request.cookies.get(COOKIE))
     if not email or email != get_settings().owner_email:
         raise HTTPException(401, "Sign in required")

@@ -226,6 +226,42 @@ def generate_sheet(cid: int, body: SheetIn, db: Session = Depends(get_db)):
     return S.job(enqueue_sheet(db, c, exps))
 
 
+class RestyleIn(BaseModel):
+    visual_description: str | None = None
+    from_current: bool = True   # simplify the current design (keeps hair/hat, skin tone, colours) into the house style
+
+
+@router.post("/characters/{cid}/restyle")
+def restyle(cid: int, body: RestyleIn, db: Session = Depends(get_db)):
+    """Redraw a provisional character in the locked house style (Character 01's stickman style), keeping their traits.
+    The new sheet goes to review; the current approved poses stay in use until the owner approves it, and are then
+    superseded (kept in history)."""
+    from . import house_style
+    from .models import Setting
+    from .secrets_store import secret
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    if not secret("openai_api_key", db):
+        raise HTTPException(409, "the restyle uses the verified OpenAI image provider: save the OpenAI key first")
+    desc = body.visual_description or house_style.RESTYLE_DESCRIPTIONS.get(c.key)
+    if not desc:
+        raise HTTPException(422, "give the simplified visual description for this character")
+    c.visual_description = desc
+    exps = sorted({a.expression for a in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved")} | {"neutral"})
+    j = enqueue(db, "character_sheet", episode_id=c.episode_id, character_id=c.id,
+                payload={"expressions": exps, "restyle": True, "provider": "openai", "from_current": body.from_current})
+    row = db.get(Setting, "_restyle")
+    pending = dict(row.value) if row else {}
+    pending[str(c.id)] = j.id
+    if row:
+        row.value = pending
+    else:
+        db.add(Setting(key="_restyle", value=pending))
+    db.commit()
+    return S.job(j)
+
+
 @router.post("/characters/{cid}/sheet/decision")
 def decide_sheet(cid: int, body: DecisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
     """Approve (or reject) every pose of the sheet that is awaiting review, in one decision."""
@@ -235,6 +271,16 @@ def decide_sheet(cid: int, body: DecisionIn, db: Session = Depends(get_db), user
     pending = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review").all()
     if not pending:
         raise HTTPException(409, "no poses are awaiting review")
+    from .models import Setting
+    row = db.get(Setting, "_restyle")
+    restyles = dict(row.value) if row else {}
+    if str(c.id) in restyles:
+        if body.decision == "approve":
+            # the restyled sheet replaces the old design: old poses stay in history, never mixed into production
+            for old in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved"):
+                old.status = "superseded"
+        restyles.pop(str(c.id))
+        row.value = restyles
     for a in pending:
         decide(db, c, a, body.decision == "approve")
         db.flush()

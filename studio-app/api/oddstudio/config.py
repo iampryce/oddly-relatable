@@ -26,6 +26,9 @@ class Settings:
     session_secret: str = field(default_factory=lambda: _env("SESSION_SECRET"))
     owner_email: str = field(default_factory=lambda: _env("OWNER_EMAIL").lower())
     owner_password_hash: str = field(default_factory=lambda: _env("OWNER_PASSWORD_HASH"))
+    # Owner's temporary choice (2026-11-17): AUTH_DISABLED=true serves every route without sign-in (anyone with the URL
+    # acts as the owner). Set it back to false and restart to require sign-in again.
+    auth_disabled: bool = field(default_factory=lambda: _env("AUTH_DISABLED", "false").lower() == "true")
     session_hours: int = field(default_factory=lambda: int(_env("SESSION_HOURS", "12")))
     cookie_secure: bool = field(default_factory=lambda: _env("COOKIE_SECURE", "true").lower() != "false")
     # Where the worker keeps working files (engine projects, renders, generated art) before upload to storage.

@@ -45,6 +45,15 @@ def engine_id(key: str) -> str:
     return s or "member"
 
 
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
+
+
+def strip_emoji(text: str) -> str:
+    """The bundled font has no emoji; they are removed from bubbles (the writer is also told not to use them)."""
+    t = re.sub(r"\s{2,}", " ", _EMOJI.sub("", text)).strip()
+    return t or "..."
+
+
 def pose_for(char, expression: str) -> str:
     exp = (expression or "").lower()
     if exp in char.expressions:
@@ -62,15 +71,35 @@ def check_cast_ready(chars: list) -> None:
                                + ", ".join(missing) + ". Generate and approve their poses under Characters.")
 
 
+def _poses_before(sc, chars, chars_by_key, start: int) -> dict:
+    """Each cast member's pose when line `start` begins (line 0 sets everyone; later lines set their speaker)."""
+    state = {}
+    for li, ln in enumerate(sc.lines[:start]):
+        speaker = chars_by_key[ln["speaker"]]
+        if li == 0:
+            state = {c.key: pose_for(c, ln.get("expression", "") if c is speaker else c.default_expression) for c in chars}
+        state[speaker.key] = pose_for(speaker, ln.get("expression", ""))
+    return state
+
+
 def build_story(*, episode_id: int, revision: int, title: str, script: dict, scenes: list, chars_by_key: dict,
-                production: dict, only_scene_ids: set[int] | None = None, end_card: bool = True) -> dict:
-    """Engine story for the approved storyboard (or a subset of scenes, for previews and scene re-runs)."""
+                production: dict, only_scene_ids: set[int] | None = None, end_card: bool = True,
+                parts: list[dict] | None = None, segment: tuple[int, int] | None = None) -> dict:
+    """Engine story for the approved storyboard (or a subset of scenes, for previews and scene re-runs).
+
+    Long-form segments (D-L2): `parts` lists the scene parts of one segment ({"scene": scene_key, "lines": [a, b]}; a long
+    scene may be split between lines, never inside one) and `segment` = (index, count). Only the first segment carries
+    the hook and only the last one the end card. Every part keeps its scene's full cast and placements, so characters
+    stand in the same places on both sides of a split (continuity)."""
     envs = set(environments())
     out_scenes = []
     used = []
-    for sc in scenes:
-        if only_scene_ids is not None and sc.id not in only_scene_ids:
-            continue
+    if parts is not None:
+        by_key = {sc.scene_key: sc for sc in scenes}
+        work = [(by_key[p["scene"]], p["lines"][0], p["lines"][1]) for p in parts]
+    else:
+        work = [(sc, 0, len(sc.lines)) for sc in scenes if only_scene_ids is None or sc.id in only_scene_ids]
+    for sc, first, last in work:
         keys = []
         for k in list(sc.characters) + [ln["speaker"] for ln in sc.lines]:
             if k not in keys:
@@ -84,22 +113,32 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
             chars.append(chars_by_key[k])
         check_cast_ready(chars)
         used += [c for c in chars if c not in used]
-        xs = POSITIONS[len(chars)]
+        scene_poses = {}
+        for li in range(first, last):
+            ln = sc.lines[li]
+            scene_poses.setdefault(ln["speaker"], set()).add(pose_for(chars_by_key[ln["speaker"]], ln.get("expression", "")))
+        for c in chars:   # members who only react keep their default pose
+            scene_poses.setdefault(c.key, set()).add(pose_for(c, c.default_expression))
+        has_wide = any(sc.lines[li].get("shot", "wide") == "wide" for li in range(first, last)) or len(chars) == 1
+        xs, fig_h = cast_layout(chars, scene_poses, has_wide)
         cast = []
         for i, c in enumerate(chars):
             m = {"id": engine_id(c.key), "character": c.engine_character,
-                 "placement": {"feetX": xs[i], "feetY": 2070, "figureHeight": 760}, "z": i,
+                 "placement": {"feetX": xs[i], "feetY": 2070, "figureHeight": fig_h}, "z": i,
                  "speech": {"style": c.bubble_style}}
             if c.registry_path and c.registry_path != f"production/characters/{c.engine_character}.json":
                 m["registry"] = c.registry_path
             cast.append(m)
         lines = []
-        for li, ln in enumerate(sc.lines):
+        state = _poses_before(sc, chars, chars_by_key, first)
+        for li in range(first, last):
+            ln = sc.lines[li]
             speaker = chars_by_key[ln["speaker"]]
-            line = {"speaker": engine_id(speaker.key), "text": ln["text"], "pose": pose_for(speaker, ln.get("expression", ""))}
-            if li == 0:   # every cast member needs a pose on the first line
-                line["poses"] = {engine_id(c.key): pose_for(c, ln.get("expression", "") if c is speaker else c.default_expression)
-                                 for c in chars}
+            line = {"speaker": engine_id(speaker.key), "text": strip_emoji(ln["text"]), "pose": pose_for(speaker, ln.get("expression", ""))}
+            if li == first:   # every cast member needs a pose on the first line (the poses in effect at a split)
+                start_pose = {c.key: state.get(c.key, pose_for(c, ln.get("expression", "") if c is speaker else c.default_expression)) for c in chars}
+                start_pose[speaker.key] = pose_for(speaker, ln.get("expression", ""))
+                line["poses"] = {engine_id(c.key): start_pose[c.key] for c in chars}
                 line.pop("pose")
             shot = ln.get("shot", "wide")
             line["shot"] = {"camera": SHOT[shot]}
@@ -111,8 +150,8 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
                 line["duration"] = ln["duration"]
             lines.append(line)
         env = sc.location if sc.location in envs else production.get("environment", "living-room-empty-03")
-        out_scenes.append({"id": engine_id(sc.scene_key) + f"-{sc.position}", "format": "face-to-face", "environment": env,
-                           "cast": cast, "lines": lines})
+        sid = engine_id(sc.scene_key) + f"-{sc.position}" + (f"-l{first}" if parts is not None and (first or last < len(sc.lines)) else "")
+        out_scenes.append({"id": sid, "format": "face-to-face", "environment": env, "cast": cast, "lines": lines})
     if not out_scenes:
         raise EngineInputError("no scenes to produce")
     end_lines = [{"text": title[:40], "size": 84, "weight": 800}]
@@ -135,6 +174,16 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
         # first storyboard still) replaces the end card's.
         del story["endCard"]
         story["captions"] = [{"start": 0, "end": 0.3, "text": out_scenes[0]["id"]}]
+    if segment is not None:
+        index, count = segment
+        story["id"] = f"ep{episode_id}-r{revision}-seg{index + 1}"
+        if index < count - 1:
+            # Not the last segment: no end card. The renderer requires one caption, so a single-frame caption sits on
+            # the segment's first frame (a scene cut); it is not perceptible at 30 fps.
+            del story["endCard"]
+            story["captions"] = [{"start": 0, "end": round(1 / int(production.get("fps", 30)), 4), "text": production.get("end_card", "Oddly Relatable")}]
+        if index > 0:
+            return story   # only the first segment carries the hook
     if script.get("hook"):
         story["hook"] = {"text": script["hook"], "start": 0, "duration": 2.5}
     return story
@@ -143,7 +192,8 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
 def run_node(args: list[str], *, timeout: int, log: Callable[[str], None], watch: Callable[[], None] | None = None) -> tuple[int, str]:
     """Run the engine CLI (argument list, no shell), streaming its output to `log`; `watch` is polled while it runs."""
     s = get_settings()
-    p = subprocess.Popen([s.node_bin, str(CLI), *args], cwd=str(REPO_ROOT), env=env_for_node(),
+    # stdin=DEVNULL: FFmpeg (run by the engine) reads stdin for keyboard commands and can block on an inherited pipe.
+    p = subprocess.Popen([s.node_bin, str(CLI), *args], cwd=str(REPO_ROOT), env=env_for_node(), stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     lines: list[str] = []
     t = threading.Thread(target=lambda: [lines.append(x) for x in p.stdout], daemon=True)  # type: ignore[union-attr]
@@ -222,6 +272,68 @@ def last_error(output: str) -> str:
     return (errs[-1] if errs else (lines[-1] if lines else "no output"))[:600]
 
 
+def trim_pose(src: Path, dst: Path, feet: dict, border: int = 12) -> tuple[Path, dict]:
+    """Copy of a cut-out pose trimmed to its opaque figure plus `border` pixels; returns it and the moved feet anchor."""
+    img = Image.open(src).convert("RGBA")
+    box = img.getchannel("A").getbbox() or (0, 0, img.width, img.height)
+    left, top = max(0, box[0] - border), max(0, box[1] - border)
+    right, bottom = min(img.width, box[2] + border), min(img.height, box[3] + border)
+    if not dst.exists() or Image.open(dst).size != (right - left, bottom - top):
+        img.crop((left, top, right, bottom)).save(dst)
+    return dst, {"x": feet["x"] - left, "y": feet["y"] - top}
+
+
+_reach_cache: dict[str, tuple[float, float]] = {}
+
+
+def reach(char, pose_ids: set[str] | None = None) -> tuple[float, float]:
+    """How far a character's widest poses reach left and right of the feet anchor, per unit of figure height. The engine
+    places a pose by its feet, so a pose with arms out to one side reaches further on that side than half its width."""
+    ids = sorted(pose_ids) if pose_ids else sorted(set(char.expressions.values()))
+    key = f"{char.key}:{char.registry_path}:{ids}"
+    if key not in _reach_cache:
+        reg_file = Path(char.registry_path) if Path(char.registry_path).is_absolute() else REPO_ROOT / char.registry_path
+        reg = json.loads(reg_file.read_text(encoding="utf-8"))
+        left = right = 0.0
+        for pid in ids:
+            p = reg["poses"].get(pid)
+            if not p:
+                continue
+            f = Path(p["file"]) if Path(p["file"]).is_absolute() else REPO_ROOT / p["file"]
+            with Image.open(f) as im:
+                left = max(left, p["feet"]["x"] / p["figureHeight"])
+                right = max(right, (im.width - p["feet"]["x"]) / p["figureHeight"])
+        _reach_cache[key] = (left or 0.25, right or 0.25)
+    return _reach_cache[key]
+
+
+FIGURE_HEIGHT, EDGE, GAP = 760, 48, 24
+
+
+def cast_layout(chars: list, used: dict | None = None, has_wide: bool = True) -> tuple[list[float], float]:
+    """Feet positions and figure height for a scene: members spread evenly across the frame by the real reach (each side)
+    of the poses this scene uses, and the cast scaled down together only when a WIDE shot needs everyone side by side
+    and they would not otherwise fit. A scene of singles keeps full size (no member is ever cut by an edge)."""
+    reaches = [reach(c, (used or {}).get(c.key)) for c in chars]
+    total = sum(l + r for l, r in reaches)
+    gaps = GAP * (len(chars) - 1)
+    h = min(FIGURE_HEIGHT, (1280 - 2 * EDGE - gaps) / total) if has_wide else FIGURE_HEIGHT
+    free = 1280 - 2 * EDGE - total * h
+    if free < 0:
+        # Singles only, at full size: members cannot stand side by side, and need not (only the focus is on screen).
+        # Spread them evenly within the frame so every member can be framed on the background.
+        x0, x1 = EDGE + reaches[0][0] * h, 1280 - EDGE - reaches[-1][1] * h
+        n = len(chars)
+        return [round(x0 + (x1 - x0) * i / max(1, n - 1), 1) for i in range(n)], round(h, 1)
+    step = free / (len(chars) + 1)
+    xs, x = [], EDGE
+    for left, right in reaches:
+        x += step
+        xs.append(round(x + left * h, 1))
+        x += (left + right) * h
+    return xs, round(h, 1)
+
+
 def make_cutout(png: Path) -> bool:
     """Ensure a pose image is a cut-out. Image models often return a flat background instead of transparency: when the
     four corners share one flat colour, that colour is flood-filled to transparent from each corner (characters have
@@ -232,6 +344,15 @@ def make_cutout(png: Path) -> bool:
     w, h = img.size
     corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
     if all(img.getpixel(c)[3] <= 16 for c in corners):
+        # Already transparent. Image models often add a faint glow around the figure (semi-transparent pixels), which
+        # shows as a halo on a set and inflates the measured figure. Bold-outline art has crisp edges, so pixels below
+        # 40% opacity are dropped.
+        alpha = img.getchannel("A")
+        cleaned = alpha.point(lambda v: 0 if v < 102 else v)
+        if cleaned.getbbox() != alpha.getbbox() or list(cleaned.getdata()) != list(alpha.getdata()):
+            img.putalpha(cleaned)
+            img.save(png)
+            return True
         return False
     first = img.getpixel(corners[0])
     if any(max(abs(a - b) for a, b in zip(img.getpixel(c)[:3], first[:3])) > 24 for c in corners):

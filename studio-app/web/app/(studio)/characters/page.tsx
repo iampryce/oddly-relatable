@@ -95,6 +95,8 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
           <div><label htmlFor={`exprs-${c.id}`}>Expression sheet (comma separated; neutral is drawn first and anchors the rest; one image each, started only by you)</label>
             <div className="row"><input id={`exprs-${c.id}`} style={{flex: 1}} value={exprs} onChange={e => setExprs(e.target.value)} />
               <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('gen', () => api(`/characters/${c.id}/sheet`, {body: {expressions: exprs.split(',').map(x => x.trim()).filter(Boolean)}}))}>Generate sheet</button></div></div>
+          {c.art_status === 'approved' && <div><button className="btn" disabled={!!act.busy} onClick={() => act.run('restyle', () => api(`/characters/${c.id}/restyle`, {method: 'POST', body: {}}))}>Restyle to house style</button>
+            <span className="muted small"> Redraws {c.name} in Character 01&apos;s stickman style (keeps their traits). The current art stays in use until you approve the new sheet.</span></div>}
           {c.scope === 'episode' && c.art_status === 'approved' && <div><button className="btn" disabled={!!act.busy} onClick={() => act.run('promote', () => api(`/characters/${c.id}/promote`, {method: 'POST'}))}>Add to recurring cast</button>
             <span className="muted small"> Saves {c.name} for reuse in future stories.</span></div>}
         </div>)}

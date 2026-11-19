@@ -14,6 +14,7 @@ from typing import Callable
 import httpx
 
 from .config import get_settings
+from .secrets_store import secret
 from .providers import ProviderNotConfigured
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -23,15 +24,15 @@ THUMB_URL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId
 
 def configured() -> bool:
     s = get_settings()
-    return bool(s.youtube_client_id and s.youtube_client_secret and s.youtube_refresh_token)
+    return bool(secret("youtube_client_id") and secret("youtube_client_secret") and secret("youtube_refresh_token"))
 
 
 def access_token() -> str:
     s = get_settings()
     if not configured():
         raise ProviderNotConfigured("YouTube is not connected: set YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET and YOUTUBE_REFRESH_TOKEN on the server")
-    r = httpx.post(TOKEN_URL, timeout=30, data={"client_id": s.youtube_client_id, "client_secret": s.youtube_client_secret,
-                                                "refresh_token": s.youtube_refresh_token, "grant_type": "refresh_token"})
+    r = httpx.post(TOKEN_URL, timeout=30, data={"client_id": secret("youtube_client_id"), "client_secret": secret("youtube_client_secret"),
+                                                "refresh_token": secret("youtube_refresh_token"), "grant_type": "refresh_token"})
     if r.status_code >= 400:
         raise RuntimeError(f"YouTube sign-in failed: HTTP {r.status_code}: {r.text[:300]}")
     return r.json()["access_token"]

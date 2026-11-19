@@ -14,6 +14,8 @@ x-app-env: &app-env
   OWNER_EMAIL: ${OWNER_EMAIL:?set OWNER_EMAIL in .env}
   OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:?set OWNER_PASSWORD_HASH in .env}
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  AUTH_DISABLED: ${AUTH_DISABLED:-false}
+  PUBLIC_URL: ${PUBLIC_URL:-}
   STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
   S3_BUCKET: ${S3_BUCKET:-}
   S3_PREFIX: ${S3_PREFIX:-oddly-relatable/}
@@ -86,6 +88,8 @@ services:
     image: oddstudio-web:${RELEASE:-dev}
     restart: unless-stopped
     depends_on: [api]
+    environment:
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
     ports: ["127.0.0.1:3000:3000"]
 
 volumes:

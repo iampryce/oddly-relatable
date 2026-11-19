@@ -40,7 +40,7 @@ export function EpisodeTable({episodes, empty}: {episodes: any[]; empty: string}
 }
 
 export const PIPELINE: [string, string[]][] = [
-  ['script', ['script_pending', 'script_generating', 'script_review']],
+  ['script', ['script_pending', 'outline_generating', 'outline_review', 'outline_approved', 'script_generating', 'script_review']],
   ['storyboard', ['script_approved', 'storyboard_generating', 'storyboard_review']],
   ['production', ['storyboard_approved', 'producing', 'production_failed']],
   ['review', ['video_review']],

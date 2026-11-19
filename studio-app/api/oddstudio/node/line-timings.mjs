@@ -16,6 +16,9 @@ const {report} = await compileStory(story, {outDir: tmp, allowIssues: true});
 const out = story.scenes.map((s, i) => {
   const seq = formatFor(s.format).sequence(s);
   const start = report.scenes[i].start;
-  return {scene: s.id, lines: seq.messages.map(m => ({start: +(start + m.start).toFixed(3), duration: m.duration}))};
+  // duration: the scene's own length on the frame grid (without the end card the engine adds to the last scene).
+  const duration = Math.ceil(seq.duration * story.format.fps - 1e-6) / story.format.fps;
+  return {scene: s.id, start: +start.toFixed(4), duration: +duration.toFixed(4),
+    lines: seq.messages.map(m => ({start: +(start + m.start).toFixed(3), duration: m.duration}))};
 });
 process.stdout.write(JSON.stringify(out));

@@ -10,10 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from . import engine, serialize as S
+import secrets
+
+from . import engine, longform, serialize as S
 from .auth import current_user
 from .db import get_db
-from .models import Asset, Character, Episode, Event, Idea, Job, PublishRecord, Review, ScriptVersion, StoryboardScene, now
+from .models import Asset, Character, Episode, Event, Idea, Job, OutlineVersion, PublishRecord, Review, ScriptVersion, Segment, StoryboardScene, now
 from .queue import announce, enqueue
 from .script_schema import ScriptError, estimated_seconds, validate_script
 from .settings_store import get_section
@@ -53,9 +55,22 @@ class IdeaIn(BaseModel):
     premise: str = Field(min_length=1, max_length=4000)
     notes: str = Field(default="", max_length=4000)
     characters: list[str] = Field(default_factory=list, max_length=4)
-    target_seconds: int = Field(default=45, ge=10, le=60)
+    target_seconds: int = Field(default=45, ge=10, le=450)
     interactive: Literal["none", "viewer-choice", "poll"] = "none"
     status: Literal["draft", "submitted"] = "draft"
+    format: Literal["short", "long"] = "short"            # long: 3 acts, 5–7 minutes (D-L3)
+    continues_episode_id: int | None = None               # D-L5: a long episode may continue a successful Short
+
+
+def check_idea(db: Session, body: "IdeaIn") -> None:
+    if body.format == "short" and body.target_seconds > 60:
+        raise HTTPException(422, "a Short runs at most 60 s; choose a long episode for more")
+    if body.continues_episode_id is not None:
+        if body.format != "long":
+            raise HTTPException(422, "only a long episode can continue a Short")
+        src = db.get(Episode, body.continues_episode_id)
+        if src is None or src.format != "short" or not src.script_version:
+            raise HTTPException(422, "the episode to continue must be a Short with a script")
 
 
 @router.get("/ideas")
@@ -69,6 +84,7 @@ def create_idea(body: IdeaIn, db: Session = Depends(get_db)):
     unknown = [k for k in body.characters if k not in known]
     if unknown:
         raise HTTPException(422, f"unknown characters: {', '.join(unknown)}")
+    check_idea(db, body)
     i = Idea(**body.model_dump())
     db.add(i)
     db.flush()
@@ -84,6 +100,7 @@ def update_idea(iid: int, body: IdeaIn, db: Session = Depends(get_db)):
         raise HTTPException(404, "idea not found")
     if i.status in ("in_production", "archived"):
         raise HTTPException(409, f"an idea that is {i.status.replace('_', ' ')} cannot be edited")
+    check_idea(db, body)
     for k, v in body.model_dump().items():
         setattr(i, k, v)
     db.commit()
@@ -113,16 +130,18 @@ def start_from_idea(iid: int, body: StartIn, db: Session = Depends(get_db)):
         raise HTTPException(404, "idea not found")
     if i.status in ("in_production", "archived"):
         raise HTTPException(409, f"this idea is already {i.status.replace('_', ' ')}")
-    ep = Episode(idea_id=i.id, title=i.title, stage="script_pending")
+    ep = Episode(idea_id=i.id, title=i.title, stage="script_pending", format=i.format, continues_episode_id=i.continues_episode_id)
     db.add(ep)
     db.flush()
     i.status, i.episode_id = "in_production", ep.id
     log_event(db, ep.id, "episode", f"Episode created from idea “{i.title}”")
     db.commit()
     if body.generate_script:
-        set_stage(ep, "script_generating")
+        # Long episodes start with the three-act outline (two-pass writing); Shorts with the script, as before.
+        long = ep.format == "long"
+        set_stage(ep, "outline_generating" if long else "script_generating")
         db.commit()
-        enqueue(db, "generate_script", episode_id=ep.id, revision=ep.revision)
+        enqueue(db, "generate_outline" if long else "generate_script", episode_id=ep.id, revision=ep.revision)
     return S.episode_summary(ep)
 
 
@@ -149,7 +168,20 @@ def episode_detail(eid: int, db: Session = Depends(get_db)):
     amap = {a.id: a for a in assets}
     jobs = db.query(Job).filter_by(episode_id=ep.id).order_by(Job.id.desc()).limit(200).all()
     idea = db.get(Idea, ep.idea_id) if ep.idea_id else None
-    return {**S.episode_summary(ep), "idea": S.idea(idea) if idea else None, "script": script, "script_versions": versions,
+    outline = None
+    if ep.outline_version:
+        ov = db.query(OutlineVersion).filter_by(episode_id=ep.id, version=ep.outline_version).one()
+        outline = {"version": ov.version, "content": ov.content, "source": ov.source, "note": ov.note, "created_at": S.ts(ov.created_at),
+                   "approved": ep.approved_outline_version == ov.version, "warnings": longform.outline_warnings(ov.content)}
+    if script and ep.format == "long":
+        script["warnings"] = longform.repeated_lines(script["content"]) + (
+            [f"Runs about {script['estimated_seconds']:.0f} s, over the 7½-minute cap ({longform.HARD_CAP} s)."] if script["estimated_seconds"] > longform.HARD_CAP else [])
+    segs = db.query(Segment).filter_by(episode_id=ep.id, revision=ep.revision).order_by(Segment.position).all()
+    segments = [{"id": g.id, "position": g.position, "parts": g.parts, "seconds": g.seconds, "status": g.status, "reused_from": g.reused_from,
+                 "render_seconds": g.render_seconds, "error": g.error, "job_id": g.job_id, "fingerprint": g.fingerprint[:12],
+                 "video": S.asset(amap.get(g.video_asset_id) or (db.get(Asset, g.video_asset_id) if g.video_asset_id else None))} for g in segs]
+    return {**S.episode_summary(ep), "idea": S.idea(idea) if idea else None, "outline": outline, "segments": segments,
+            "script": script, "script_versions": versions,
             "scenes": [S.scene(s, amap.get(s.reference_asset_id) if s.reference_asset_id else None) for s in ep.scenes],
             "jobs": [S.job(j) for j in jobs], "assets": [S.asset(a) for a in assets],
             "video": S.asset(amap.get(ep.video_asset_id)) if ep.video_asset_id else None,
@@ -168,6 +200,15 @@ class InstructionIn(BaseModel):
 def generate_script(eid: int, body: InstructionIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
     gate(ep, "generate_script")
+    if ep.format == "long":
+        if not ep.approved_outline_version:
+            raise HTTPException(409, "a long episode is written from its approved outline: approve the outline first")
+        set_stage(ep, "script_generating")
+        db.commit()
+        return S.job(enqueue(db, "generate_act", episode_id=ep.id, revision=ep.revision,
+                             payload={"act": 1, "chain": secrets.randbelow(2**31), "instruction": body.instruction}))
+    if ep.stage == "outline_approved":
+        raise HTTPException(409, "outlines apply to long episodes only")
     set_stage(ep, "script_generating")
     db.commit()
     job = enqueue(db, "generate_script", episode_id=ep.id, revision=ep.revision, payload={"instruction": body.instruction})
@@ -192,9 +233,11 @@ def edit_script(eid: int, body: ScriptIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
     gate(ep, "edit_script")
     try:
-        content = validate_script(body.content, set(by_key(db)))
+        content = validate_script(body.content, set(by_key(db)), fmt=ep.format)
     except ScriptError as e:
         raise HTTPException(422, str(e))
+    if ep.format == "long" and not ep.approved_outline_version:
+        raise HTTPException(409, "approve the outline before writing the long episode's scenes")
     register_new_characters(db, ep.id, content)
     sv = save_script(db, ep, content, "edited", body.note)
     set_stage(ep, "script_review")
@@ -225,6 +268,10 @@ def approve_script(eid: int, body: CommentIn, db: Session = Depends(get_db), use
     gate(ep, "approve_script")
     if not ep.script_version:
         raise HTTPException(409, "there is no script to approve")
+    if ep.format == "long":
+        est = estimated_seconds(db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.script_version).one().content)
+        if est > longform.HARD_CAP:
+            raise HTTPException(409, f"the script runs about {est:.0f} s, over the 7½-minute cap ({longform.HARD_CAP} s): tighten it first")
     ep.approved_script_version = ep.script_version
     set_stage(ep, "script_approved")
     record(db, ep, "script", "approved", user, body.comment, {"script_version": ep.script_version})
@@ -364,7 +411,8 @@ def preflight(db: Session, ep: Episode) -> None:
     except engine.EngineInputError as e:
         raise HTTPException(409, str(e))
     sv = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.approved_script_version).one()
-    est, limit = estimated_seconds(sv.content), get_section(db, "production")["max_seconds"]
+    est = estimated_seconds(sv.content)
+    limit = longform.HARD_CAP if ep.format == "long" else get_section(db, "production")["max_seconds"]
     if est > limit:
         raise HTTPException(409, f"the script runs about {est} s; production renders up to {limit} s (shorten the script)")
 
@@ -379,6 +427,13 @@ def start_production(eid: int, db: Session = Depends(get_db), user: str = Depend
     set_stage(ep, "producing")
     log_event(db, ep.id, "production", f"Production started (revision {ep.revision}) by {user}")
     db.commit()
+    if ep.format == "long":
+        # Selective regeneration: unchanged scenes keep their preparation and voices (their segments are then reused).
+        from .tasks_long import start_long_scene_jobs
+        need = start_long_scene_jobs(db, ep, list(ep.scenes))
+        if not need:
+            return [S.job(enqueue(db, "plan_segments", episode_id=ep.id, revision=ep.revision))]
+        return [S.job(j) for j in enqueue_scene_jobs(db, ep, need)]
     return [S.job(j) for j in enqueue_scene_jobs(db, ep, list(ep.scenes))]
 
 
@@ -393,9 +448,20 @@ def retry_job(jid: int, db: Session = Depends(get_db)):
         ep = get_episode(db, job.episode_id)
         if job.revision != ep.revision:
             raise HTTPException(409, "this job belongs to an earlier revision")
-        if job.kind in ("scene_prepare", "scene_voice", "render_episode"):
+        if job.kind in ("scene_prepare", "scene_voice", "render_episode", "plan_segments", "render_segment", "join_segments"):
             gate(ep, "retry_job")
             set_stage(ep, "producing")
+            if job.kind == "render_segment":
+                seg = db.get(Segment, job.payload.get("segment_id"))
+                if seg:
+                    seg.status, seg.error = "pending", ""
+        elif job.kind == "generate_outline":
+            gate(ep, "generate_outline")
+            set_stage(ep, "outline_generating")
+        elif job.kind == "generate_act":
+            if ep.stage != "outline_approved":
+                raise HTTPException(409, "acts are retried from the approved outline")
+            set_stage(ep, "script_generating")
         elif job.kind == "generate_script":
             gate(ep, "generate_script")
             set_stage(ep, "script_generating")
@@ -455,6 +521,7 @@ class RevisionIn(BaseModel):
     target: str
     comment: str = Field(min_length=1, max_length=4000)
     scene_ids: list[int] = Field(default_factory=list)
+    segment_positions: list[int] = Field(default_factory=list)
 
 
 @router.post("/episodes/{eid}/video/request-revision")
@@ -468,7 +535,13 @@ def request_revision(eid: int, body: RevisionIn, db: Session = Depends(get_db), 
             get_scene(db, ep, sid)
     if body.target == "scenes" and not body.scene_ids:
         raise HTTPException(422, "choose the scenes to re-produce")
-    record(db, ep, "video", "revision_requested", user, body.comment, {"target": body.target, "scene_ids": body.scene_ids})
+    if body.target == "segments":
+        if ep.format != "long":
+            raise HTTPException(422, "segments apply to long episodes")
+        positions = {s.position for s in db.query(Segment).filter_by(episode_id=ep.id, revision=ep.revision)}
+        if not body.segment_positions or not set(body.segment_positions) <= positions:
+            raise HTTPException(422, f"choose segments to re-render from {sorted(positions)}")
+    record(db, ep, "video", "revision_requested", user, body.comment, {"target": body.target, "scene_ids": body.scene_ids, "segment_positions": body.segment_positions})
     ep.revision += 1
     ep.video_asset_id = None
     if body.target == "script":
@@ -482,6 +555,10 @@ def request_revision(eid: int, body: RevisionIn, db: Session = Depends(get_db), 
             if s.id in body.scene_ids:
                 s.status, s.revision_note = "needs_revision", body.comment
         set_stage(ep, "storyboard_review")
+    elif body.target == "segments":
+        set_stage(ep, "producing")
+        db.commit()
+        enqueue(db, "plan_segments", episode_id=ep.id, revision=ep.revision, payload={"force_positions": body.segment_positions})
     else:
         targets = [s for s in ep.scenes if s.id in body.scene_ids]
         for s in targets:
@@ -597,3 +674,72 @@ def generate_cast(eid: int, db: Session = Depends(get_db)):
     if not jobs:
         raise HTTPException(409, "every character in the script already has its poses (or a sheet is already being generated)")
     return jobs
+
+
+# ------------------------------------------------------------------ long-form outline (two-pass writing, D-L1 to D-L5)
+def long_episode(db: Session, eid: int) -> Episode:
+    ep = get_episode(db, eid)
+    if ep.format != "long":
+        raise HTTPException(409, "outlines apply to long episodes only")
+    return ep
+
+
+@router.post("/episodes/{eid}/outline/generate")
+def generate_outline(eid: int, body: InstructionIn, db: Session = Depends(get_db)):
+    ep = long_episode(db, eid)
+    gate(ep, "generate_outline")
+    set_stage(ep, "outline_generating")
+    db.commit()
+    return S.job(enqueue(db, "generate_outline", episode_id=ep.id, revision=ep.revision, payload={"instruction": body.instruction}))
+
+
+class OutlineIn(BaseModel):
+    content: dict
+    note: str = Field(default="", max_length=500)
+
+
+@router.put("/episodes/{eid}/outline")
+def edit_outline(eid: int, body: OutlineIn, db: Session = Depends(get_db)):
+    from .tasks_long import save_outline
+    ep = long_episode(db, eid)
+    gate(ep, "edit_outline")
+    try:
+        content = longform.validate_outline(body.content, set(by_key(db)))
+    except ScriptError as e:
+        raise HTTPException(422, str(e))
+    register_new_characters(db, ep.id, content)
+    ov = save_outline(db, ep, content, "edited", body.note)
+    set_stage(ep, "outline_review")
+    log_event(db, ep.id, "outline", f"Outline v{ov.version} saved (edited)")
+    db.commit()
+    return {"version": ov.version, "warnings": longform.outline_warnings(content)}
+
+
+@router.post("/episodes/{eid}/outline/approve")
+def approve_outline(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = long_episode(db, eid)
+    gate(ep, "approve_outline")
+    ep.approved_outline_version = ep.outline_version
+    set_stage(ep, "outline_approved")
+    record(db, ep, "outline", "approved", user, body.comment, {"outline_version": ep.outline_version})
+    log_event(db, ep.id, "approval", f"Outline v{ep.outline_version} approved")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+@router.post("/episodes/{eid}/outline/reject")
+def reject_outline(eid: int, body: CommentIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    ep = long_episode(db, eid)
+    gate(ep, "reject_outline")
+    record(db, ep, "outline", "rejected", user, body.comment, {"outline_version": ep.outline_version})
+    log_event(db, ep.id, "review", f"Outline v{ep.outline_version} sent back: {body.comment[:200]}")
+    db.commit()
+    return S.episode_summary(ep)
+
+
+@router.get("/episodes/{eid}/outline/versions/{version}")
+def outline_version(eid: int, version: int, db: Session = Depends(get_db)):
+    ov = db.query(OutlineVersion).filter_by(episode_id=eid, version=version).one_or_none()
+    if ov is None:
+        raise HTTPException(404, "no such outline version")
+    return {"version": ov.version, "content": ov.content, "source": ov.source, "note": ov.note, "created_at": S.ts(ov.created_at)}

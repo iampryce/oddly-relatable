@@ -70,13 +70,21 @@ def verify_local(key: str, exp: int, sig: str) -> bool:
 
 
 class S3Storage:
+    """New media goes to S3. Media saved on the server volume before the switch to S3 is still read and served from
+    there (a key that exists locally wins), so switching backends never breaks existing episodes."""
     kind = "s3"
 
-    def __init__(self):
+    def __init__(self, cfg: dict):
         import boto3  # imported lazily: only needed when S3 is configured
-        s = get_settings()
-        self.bucket, self.prefix = s.s3_bucket, s.s3_prefix
-        self.client = boto3.client("s3", region_name=s.s3_region or None)
+        from .secrets_store import secret
+        self.bucket, self.prefix = cfg["bucket"], cfg["prefix"]
+        kid, sec = secret("aws_access_key_id"), secret("aws_secret_access_key")
+        creds = {"aws_access_key_id": kid, "aws_secret_access_key": sec} if kid and sec else {}  # else IAM role / env
+        from botocore.config import Config
+        self.client = boto3.client("s3", region_name=cfg["region"] or None,
+                                   config=Config(retries={"max_attempts": 5, "mode": "standard"}, connect_timeout=10,
+                                                 read_timeout=120), **creds)
+        self.local = LocalStorage()
 
     def _k(self, key: str) -> str:
         return self.prefix + check_key(key)
@@ -86,28 +94,72 @@ class S3Storage:
         self.client.upload_file(str(src), self.bucket, self._k(key), ExtraArgs={"ContentType": ct, "ServerSideEncryption": "AES256"})
 
     def get_to_file(self, key: str, dst: Path) -> Path:
+        if self.local.local_path(key).exists():
+            return self.local.get_to_file(key, dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
         self.client.download_file(self.bucket, self._k(key), str(dst))
         return dst
 
     def local_path(self, key: str) -> Path | None:
-        return None
+        p = self.local.local_path(key)
+        return p if p.exists() else None
 
     def url(self, key: str, seconds: int | None = None) -> str:
+        if self.local.local_path(key).exists():
+            return self.local.url(key, seconds)
         return self.client.generate_presigned_url("get_object", Params={"Bucket": self.bucket, "Key": self._k(key)},
                                                   ExpiresIn=seconds or get_settings().presign_seconds)
 
+    def check(self) -> dict:
+        """Real round trip: upload, read back and delete a small object."""
+        import uuid
+        k = self._k(f"_connection-test/{uuid.uuid4().hex}.txt")
+        body = b"oddly relatable connection test"
+        self.client.put_object(Bucket=self.bucket, Key=k, Body=body, ServerSideEncryption="AES256")
+        got = self.client.get_object(Bucket=self.bucket, Key=k)["Body"].read()
+        self.client.delete_object(Bucket=self.bucket, Key=k)
+        if got != body:
+            raise RuntimeError("S3 returned different bytes than were written")
+        return {"bucket": self.bucket, "prefix": self.prefix, "round_trip_bytes": len(body)}
+
 
 _storage = None
+_storage_cfg: tuple | None = None
+_cfg_cache: tuple[float, dict] | None = None
+
+
+def storage_config() -> dict:
+    """Storage settings: the Settings page's "storage" section when saved there, otherwise the environment."""
+    global _cfg_cache
+    if _cfg_cache and time.time() - _cfg_cache[0] < 5:
+        return _cfg_cache[1]
+    s = get_settings()
+    cfg = {"backend": s.storage_backend, "bucket": s.s3_bucket, "region": s.s3_region, "prefix": s.s3_prefix}
+    try:
+        from .db import new_session
+        from .models import Setting
+        with new_session() as db:
+            row = db.get(Setting, "storage")
+            saved = dict(row.value) if row else {}
+        cfg.update({k: v for k, v in saved.items() if v})
+    except Exception:  # database not ready: environment only
+        pass
+    if cfg["prefix"] and not cfg["prefix"].endswith("/"):
+        cfg["prefix"] += "/"
+    _cfg_cache = (time.time(), cfg)
+    return cfg
 
 
 def storage():
-    global _storage
-    if _storage is None:
-        _storage = S3Storage() if get_settings().storage_backend == "s3" else LocalStorage()
+    global _storage, _storage_cfg
+    cfg = storage_config()
+    key = tuple(sorted(cfg.items()))
+    if _storage is None or key != _storage_cfg:
+        _storage = S3Storage(cfg) if cfg["backend"] == "s3" else LocalStorage()
+        _storage_cfg = key
     return _storage
 
 
 def reset_storage() -> None:
-    global _storage
-    _storage = None
+    global _storage, _storage_cfg, _cfg_cache
+    _storage = _storage_cfg = _cfg_cache = None

@@ -13,7 +13,9 @@ with a precise message instead of failing later in production.
       "id": "s1", "heading": "...", "location": "<environment id or free text>", "description": "...",
       "action": "...", "camera": "...",
       "lines": [{"speaker": "<character key>", "text": "...", "expression": "neutral", "shot": "wide|medium|close",
-                 "duration": 2.0, "delivery": "optional voice direction, e.g. whispered, panicked"}]
+                 "duration": 2.0, "delivery": "optional voice direction, e.g. whispered, panicked",
+                 "gesture": "optional acting gesture", "move": {"type": "enter|exit|walk_to|sit|stand|jump", "to": "seat|<key>"},
+                 "look_at": "<character key>", "reactions": [{"character": "<key>", "gesture": "...", "expression": "..."}]}]
   }]
 }
 """
@@ -46,7 +48,52 @@ def _str(obj: dict, key: str, where: str, required: bool = True, max_len: int = 
     return v
 
 
-def validate_script(doc: dict, known_characters: set[str] | None = None) -> dict:
+# Limits per format. Shorts keep their original limits; long episodes (D-L3: 3 acts, 5–7 minutes) allow more scenes and a
+# larger cast (still at most 4 on screen per scene, checked when the scene is built).
+LIMITS = {"short": {"scenes": 12, "characters": 4}, "long": {"scenes": 60, "characters": 8}}
+
+
+# Acting instructions (optional per line; the studio rig animator performs them). Unknown values are dropped, not
+# rejected, so a writer's creative wording never fails a whole script.
+GESTURES = ("none", "open_palms", "point", "shrug", "arms_up", "head_scratch", "hands_on_hips", "hand_on_chest",
+            "facepalm", "thumbs_up", "wave", "beat", "cross_arms", "hands_on_head")
+MOVES = ("enter", "exit", "walk_to", "sit", "stand", "jump")
+
+
+def acting(ln: dict, keys: list[str], where: str) -> dict:
+    out = {}
+    g = str(ln.get("gesture") or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if g in GESTURES and g != "none":
+        out["gesture"] = g
+    mv = ln.get("move")
+    if isinstance(mv, str):
+        mv = {"type": mv}
+    if isinstance(mv, dict) and str(mv.get("type", "")).lower() in MOVES:
+        m = {"type": str(mv["type"]).lower()}
+        to = str(mv.get("to") or "").strip().lower()
+        if to and (to in keys or to in ("seat", "left", "right", "center")):
+            m["to"] = to
+        out["move"] = m
+    look = str(ln.get("look_at") or "").strip()
+    if look in keys:
+        out["look_at"] = look
+    reacts = []
+    for r in ln.get("reactions") or []:
+        if isinstance(r, dict) and r.get("character") in keys:
+            rr = {"character": r["character"]}
+            rg = str(r.get("gesture") or "").strip().lower().replace(" ", "_")
+            if rg in GESTURES and rg != "none":
+                rr["gesture"] = rg
+            if r.get("expression"):
+                rr["expression"] = str(r["expression"])[:40].lower()
+            if len(rr) > 1:
+                reacts.append(rr)
+    if reacts:
+        out["reactions"] = reacts[:3]
+    return out
+
+
+def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: str = "short") -> dict:
     """Return a normalised copy of the script or raise ScriptError naming the first problem."""
     if not isinstance(doc, dict):
         raise ScriptError("script must be an object")
@@ -107,14 +154,15 @@ def validate_script(doc: dict, known_characters: set[str] | None = None) -> dict
             raise ScriptError(f"{where}.key {key!r} is not a character in the studio (create it under Characters first)")
         keys.append(key)
         out["characters"].append({"key": key, "role": _str(c, "role", where, required=False, max_len=200)})
-    if len(keys) > 4:
-        raise ScriptError("script.characters: at most 4 characters per episode")
+    lim = LIMITS[fmt]
+    if len(keys) > lim["characters"]:
+        raise ScriptError(f"script.characters: at most {lim['characters']} characters per episode")
 
     scenes = doc.get("scenes")
     if not isinstance(scenes, list) or not scenes:
         raise ScriptError("script.scenes must contain at least one scene")
-    if len(scenes) > 12:
-        raise ScriptError("script.scenes: at most 12 scenes")
+    if len(scenes) > lim["scenes"]:
+        raise ScriptError(f"script.scenes: at most {lim['scenes']} scenes")
     out["scenes"] = []
     seen = set()
     for si, s in enumerate(scenes):
@@ -152,13 +200,24 @@ def validate_script(doc: dict, known_characters: set[str] | None = None) -> dict
             delivery = _str(ln, "delivery", lw, required=False, max_len=120)
             if delivery:
                 line["delivery"] = delivery
+            line.update(acting(ln, keys, lw))
             if ln.get("duration") is not None:
                 d = ln["duration"]
                 if not isinstance(d, (int, float)) or not 0.8 <= d <= 8:
                     raise ScriptError(f"{lw}.duration must be between 0.8 and 8 seconds")
                 line["duration"] = round(float(d), 2)
             scene["lines"].append(line)
+        if s.get("act") is not None:
+            if s["act"] not in (1, 2, 3):
+                raise ScriptError(f"{where}.act must be 1, 2 or 3")
+            scene["act"] = s["act"]
+        elif fmt == "long":
+            raise ScriptError(f"{where}.act is required in a long episode (1, 2 or 3)")
         out["scenes"].append(scene)
+    if fmt == "long":
+        acts = [sc["act"] for sc in out["scenes"]]
+        if acts != sorted(acts):
+            raise ScriptError("script.scenes must run act 1, then act 2, then act 3")
     return out
 
 
