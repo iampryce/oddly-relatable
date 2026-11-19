@@ -176,6 +176,6 @@ No database restore is needed. Migration `0004` only adds a nullable column, whi
 4. **Fish's WAV encoding is unverified** without a real call. The code converts non-16-bit WAV with ffmpeg, which is present in the image.
 5. **The clip cache has no size limit.** It lives in the `work_data` volume (about 90 KB per second of speech) and goes into `backup.sh`'s media tarball.
 6. **Model field bug in the existing test.** The provider test for the other voice providers sends the Model field even when that field belongs to a different selected provider. This bug predates this branch and is not changed here; Fish avoids it.
-7. **A competing branch exists.** `feat/fish-voice` (2 commits, another session, 2026-11-19) adds Fish to the old Node `studio/`, not to `studio-app`. Recommend closing or deleting it so there is one Fish implementation.
+7. **The competing branch is gone.** `feat/fish-voice` (another session's Fish work on the old Node `studio/`) was no longer on GitHub when this branch was pushed, so there is now one Fish implementation.
 8. **Server disk is 70% full**, with 11 GB of local backups.
 9. **Media backup is still open.** The owner needs to decide whether to copy `work_data` (1.3 GB) off the server.
