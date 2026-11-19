@@ -9,6 +9,7 @@ import {ErrorBox} from '@/components/ui';
 const CAP_ORDER = ['script', 'transcription', 'vision', 'image', 'voice', 'motion', 'lipsync', 'sound', 'storage', 'publishing'];
 const CREDENTIALS: [string, string][] = [
   ['openai_api_key', 'OpenAI API key'], ['anthropic_api_key', 'Anthropic API key'], ['elevenlabs_api_key', 'ElevenLabs API key'],
+  ['fish_api_key', 'Fish Audio API key'],
   ['aws_access_key_id', 'AWS access key ID (S3)'], ['aws_secret_access_key', 'AWS secret access key (S3)'],
   ['youtube_client_id', 'YouTube OAuth client ID'], ['youtube_client_secret', 'YouTube OAuth client secret'],
   ['youtube_refresh_token', 'YouTube refresh token (set by "Connect YouTube")'], ['comfyui_token', 'ComfyUI access token (optional)'],
@@ -107,7 +108,8 @@ function CapabilityCard({id, cap, sections, data, reload}: {id: string; cap: any
       {id === 'image' && <div><label htmlFor="image-size">Size</label><select id="image-size" value={s.v.size} onChange={e => s.set('size', e.target.value)}><option>1024x1536</option><option>1024x1024</option></select></div>}
       {id === 'voice' && <div className="grid cols-2">
         <div><label htmlFor="voice-default">Default voice</label><input id="voice-default" value={s.v.default_voice} onChange={e => s.set('default_voice', e.target.value)} placeholder="alloy, an ElevenLabs voice id, or a Piper model file" /></div>
-        <div><label htmlFor="voice-gain">Voice level (0.2–2)</label><input id="voice-gain" type="number" step="0.1" min={0.2} max={2} value={s.v.gain ?? 1} onChange={e => s.set('gain', Number(e.target.value))} /></div></div>}
+        <div><label htmlFor="voice-gain">Voice level (0.2–2)</label><input id="voice-gain" type="number" step="0.1" min={0.2} max={2} value={s.v.gain ?? 1} onChange={e => s.set('gain', Number(e.target.value))} /></div>
+        <div><label htmlFor="voice-fish-default">Fish Audio default voice (used when Fish is the fallback, and by its test if no character has a Fish voice)</label><input id="voice-fish-default" value={s.v.fish_default_voice ?? ''} onChange={e => s.set('fish_default_voice', e.target.value)} placeholder="Fish voice id" /></div></div>}
       {id === 'voice' && <VoiceCompare />}
       {id === 'transcription' && <div><label htmlFor="tr-lang">Language (empty: detect)</label><input id="tr-lang" value={s.v.language} onChange={e => s.set('language', e.target.value)} placeholder="en" /></div>}
       {id === 'motion' && <>

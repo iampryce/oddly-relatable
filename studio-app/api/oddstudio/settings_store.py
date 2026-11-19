@@ -15,7 +15,9 @@ DEFAULTS: dict[str, dict] = {
     # Image generation (character poses, scene reference images). Off until the owner turns it on.
     "image": {"provider": "none", "model": "", "size": "1024x1536", "fallback": "none"},
     # Voiceover. "none": the video carries the engine's built-in SFX only. Each character's voice is set on the character.
-    "voice": {"provider": "none", "model": "", "voices": {}, "default_voice": "", "gain": 1.0, "fallback": "none"},
+    "voice": {"provider": "none", "model": "", "voices": {}, "default_voice": "", "gain": 1.0, "fallback": "none",
+              # Fish Audio voice id used when Fish is the fallback (or for its test when no character has a Fish voice)
+              "fish_default_voice": ""},
     # Media storage. "local": the server volume. "s3": new media goes to the bucket (credentials under Credentials);
     # media saved before the switch keeps being served from the server volume.
     "storage": {"backend": "", "bucket": "", "region": "", "prefix": "oddly-relatable/"},
@@ -42,7 +44,7 @@ DEFAULTS: dict[str, dict] = {
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
 IMAGE_PROVIDERS = ("none", "codex-cli", "openai")
-VOICE_PROVIDERS = ("none", "openai", "elevenlabs", "piper", "kokoro")
+VOICE_PROVIDERS = ("none", "openai", "elevenlabs", "piper", "kokoro", "fish")
 
 
 def get_section(db: Session, key: str) -> dict:
@@ -104,6 +106,7 @@ def integrations_status() -> dict:
         "openai_api_key": bool(secret("openai_api_key")),
         "anthropic_api_key": bool(secret("anthropic_api_key")),
         "elevenlabs_api_key": bool(secret("elevenlabs_api_key")),
+        "fish_api_key": bool(secret("fish_api_key")),
         "piper": bool(shutil.which(s.piper_bin)),
         "codex_cli": bool(shutil.which(s.codex_bin)),
         "youtube": bool(secret("youtube_client_id") and secret("youtube_client_secret") and secret("youtube_refresh_token")),

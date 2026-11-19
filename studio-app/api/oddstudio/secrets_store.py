@@ -22,6 +22,7 @@ SECRETS = {
     "openai_api_key": "OPENAI_API_KEY",
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "elevenlabs_api_key": "ELEVENLABS_API_KEY",
+    "fish_api_key": "FISH_API_KEY",
     "aws_access_key_id": "AWS_ACCESS_KEY_ID",
     "aws_secret_access_key": "AWS_SECRET_ACCESS_KEY",
     "youtube_client_id": "YOUTUBE_CLIENT_ID",

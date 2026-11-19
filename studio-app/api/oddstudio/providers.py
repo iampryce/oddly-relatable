@@ -352,6 +352,7 @@ def _image_generate_one(cfg: dict, prompt: str, out_file: Path, reference: Path 
 #   openai     gpt-4o-mini-tts (default model): accepts acting "instructions" (character voice style + line delivery).
 #   elevenlabs ElevenLabs text-to-speech: `voice` is an ElevenLabs voice id; strongest character voices.
 #   piper      local, free, CPU: `voice` is the path of a Piper .onnx voice model on the worker (PIPER_BIN).
+#   fish       Fish Audio (default model s2-pro): `voice` is a Fish voice model id (reference_id); optional speed.
 _test_voice = None
 _test_image = None
 
@@ -388,16 +389,17 @@ def resolve_piper_voice(voice: str) -> str:
     return voice
 
 
-def speak(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "") -> Path:
+def speak(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "", speed: float | None = None) -> Path:
     """Speak with the selected provider; on failure use the fallback provider with its default voice.
-    A character voice of the form "<engine>:<voice id>" (e.g. kokoro:bm_george, piper:en_GB-alan-medium.onnx) always
-    uses that engine: each character keeps one fixed voice and engine in every episode (owner decision 2026-11-17)."""
-    m = re.match(r"^(kokoro|piper|openai|elevenlabs):(.+)$", voice or "")
+    A character voice of the form "<engine>:<voice id>" (e.g. kokoro:bm_george, piper:en_GB-alan-medium.onnx,
+    fish:<reference_id>) always uses that engine: each character keeps one fixed voice and engine in every episode
+    (owner decision 2026-11-17). `speed` is the character's optional voice speed (used by Fish Audio)."""
+    m = re.match(r"^(kokoro|piper|openai|elevenlabs|fish):(.+)$", voice or "")
     if m:
         cfg, voice = {**cfg, "provider": m.group(1), "model": "" if m.group(1) != cfg.get("provider") else cfg.get("model", "")}, m.group(2)
     fb = cfg.get("fallback", "none")
     try:
-        return _speak_one(cfg, text, voice, out_file, instructions)
+        return _speak_one(cfg, text, voice, out_file, instructions, speed)
     except (ProviderError, ProviderNotConfigured) as e:
         if not fb or fb == "none" or fb == cfg.get("provider"):
             raise
@@ -406,15 +408,20 @@ def speak(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = 
         if fb == "piper":
             vs = piper_voices()
             fv = str(vs[0]) if vs else ""
+        elif fb == "fish":
+            fv = re.sub(r"^fish:", "", cfg.get("fish_default_voice") or "")
         return _speak_one({**cfg, "provider": fb, "model": "", "default_voice": fv}, text, fv, out_file, instructions)
 
 
-def _speak_one(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "") -> Path:
+def _speak_one(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "", speed: float | None = None) -> Path:
     p = cfg.get("provider", "none")
     s = get_settings()
     out_file.parent.mkdir(parents=True, exist_ok=True)
     if s.env == "test" and _test_voice is not None:
         return _test_voice(text, voice, instructions, out_file)
+    if p == "fish":
+        # Fish Audio has no separate acting-direction field: emotion tags such as [whisper] go inline in the line text.
+        return fish_speak(text, voice or cfg.get("default_voice") or "", out_file, model=cfg.get("model") or "", speed=speed)
     if p == "openai":
         if not secret("openai_api_key"):
             raise ProviderNotConfigured("openai voice: OPENAI_API_KEY is not set on the server")
@@ -464,6 +471,120 @@ def _speak_one(cfg: dict, text: str, voice: str, out_file: Path, instructions: s
         from . import kokoro
         return kokoro.speak(text, voice or cfg.get("default_voice") or "", out_file)
     raise ProviderNotConfigured("No voice provider is configured")
+
+
+FISH_TTS_URL = "https://api.fish.audio/v1/tts"
+FISH_CREDIT_URL = "https://api.fish.audio/wallet/self/api-credit"
+FISH_DEFAULT_MODEL = "s2-pro"
+FISH_SAMPLE_RATE = 44100
+FISH_RETRIES = 2                 # 429 / 5xx / network errors: at most two retries, with backoff
+FISH_BACKOFF = (1.0, 3.0)
+_sleep = time.sleep              # tests replace this so retries do not wait
+
+
+def _redact(msg: str, key: str) -> str:
+    """Error text never carries the API key (nor any bearer token echoed back by a proxy)."""
+    if key:
+        msg = msg.replace(key, "***")
+    return re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer ***", msg)
+
+
+def fish_cache_file(model: str, voice: str, speed: float, sample_rate: int, text: str) -> Path:
+    import hashlib
+    h = hashlib.sha256(json.dumps({"model": model, "voice": voice, "speed": speed, "sample_rate": sample_rate, "text": text},
+                                  sort_keys=True).encode()).hexdigest()
+    return get_settings().work_dir / "voice-cache" / "fish" / f"{h}.wav"
+
+
+def fish_speak(text: str, voice: str, out_file: Path, model: str = "", speed: float | None = None, use_cache: bool = True) -> Path:
+    """Fish Audio TTS (docs.fish.audio, POST /v1/tts). `voice` is a Fish voice model id (reference_id). Writes a 44.1 kHz
+    WAV, the same kind of file Piper and Kokoro produce, so Rhubarb lip sync and the audio bed take it unchanged.
+    Clips are cached by (model, voice, speed, sample rate, text): re-running a scene does not pay for the same line twice.
+    use_cache=False (the provider test) always calls the API, so a passing test proves synthesis works now."""
+    key = secret("fish_api_key")
+    if not key:
+        raise ProviderNotConfigured("fish: no Fish Audio API key (Settings > Credentials, or FISH_API_KEY on the server)")
+    if not voice:
+        raise ProviderNotConfigured("fish: assign a Fish voice to this character (Characters: fish:<voice id>) or set the Fish default voice")
+    model = model or FISH_DEFAULT_MODEL
+    speed = float(speed) if speed else 1.0
+    if not 0.5 <= speed <= 2.0:
+        raise ProviderError(f"fish: speed {speed} is outside 0.5-2.0")
+    f = out_file.with_suffix(".wav")
+    cached = fish_cache_file(model, voice, speed, FISH_SAMPLE_RATE, text)
+    if use_cache and cached.exists() and cached.stat().st_size > 44:
+        shutil.copyfile(cached, f)
+        return f
+    body = {"text": text, "reference_id": voice, "format": "wav", "sample_rate": FISH_SAMPLE_RATE, "latency": "normal",
+            "prosody": {"speed": speed}}
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "model": model}
+    last: ProviderError | None = None
+    for attempt in range(FISH_RETRIES + 1):
+        if attempt:
+            _sleep(FISH_BACKOFF[min(attempt - 1, len(FISH_BACKOFF) - 1)])
+        try:
+            r = httpx.post(FISH_TTS_URL, headers=headers, json=body, timeout=180)
+        except httpx.HTTPError as e:
+            last = ProviderError(_redact(f"fish: network error: {type(e).__name__}: {e}", key), transient=True)
+            continue
+        if r.status_code == 401:
+            raise ProviderError("fish: HTTP 401: the Fish Audio API key was rejected (check Settings > Credentials)")
+        if r.status_code == 402:
+            raise ProviderError(f"fish: HTTP 402: no API credit for model {model} (s2-pro needs paid credit; "
+                                f"set Model to s2.1-pro-free for the free tier)")
+        if r.status_code == 429 or r.status_code >= 500:
+            last = ProviderError(_redact(f"fish: HTTP {r.status_code}: {r.text[:300]}", key), transient=True)
+            continue
+        if r.status_code >= 400:
+            raise ProviderError(_redact(f"fish: HTTP {r.status_code}: {r.text[:500]}", key))
+        if not r.content.startswith(b"RIFF"):
+            raise ProviderError(f"fish: the answer was not WAV audio ({r.headers.get('content-type', 'unknown type')}, {len(r.content)} bytes)")
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(f".{uuid.uuid4().hex[:8]}.part")
+        tmp.write_bytes(r.content)
+        try:
+            _ensure_pcm16_wav(tmp)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.replace(cached)
+        shutil.copyfile(cached, f)
+        return f
+    raise last or ProviderError("fish: request failed", transient=True)
+
+
+def _ensure_pcm16_wav(path: Path) -> None:
+    """Rhubarb and the WAV reader expect integer PCM, as Piper and Kokoro write. Anything else (e.g. float WAV) is
+    converted in place to 16-bit PCM with FFmpeg."""
+    import wave
+    try:
+        with wave.open(str(path)) as w:
+            if w.getsampwidth() == 2 and w.getnframes() > 0:
+                return
+    except (wave.Error, EOFError):
+        pass
+    s = get_settings()
+    if not s.ffmpeg:
+        raise ProviderError("fish: the WAV answer is not 16-bit PCM and FFmpeg is not available to convert it")
+    conv = path.with_suffix(".pcm16.wav")
+    r = subprocess.run([s.ffmpeg, "-v", "error", "-y", "-i", str(path), "-c:a", "pcm_s16le", str(conv)],
+                       capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    if r.returncode != 0 or not conv.exists():
+        raise ProviderError(f"fish: could not convert the WAV answer to 16-bit PCM: {(r.stderr or r.stdout)[-300:]}")
+    conv.replace(path)
+
+
+def fish_credit() -> str:
+    """No-cost key check: the account's API credit balance (GET /wallet/self/api-credit)."""
+    key = secret("fish_api_key")
+    if not key:
+        raise ProviderNotConfigured("fish: no Fish Audio API key (Settings > Credentials, or FISH_API_KEY on the server)")
+    r = httpx.get(FISH_CREDIT_URL, headers={"Authorization": f"Bearer {key}"}, timeout=30)
+    if r.status_code == 401:
+        raise ProviderError("fish: HTTP 401: the Fish Audio API key was rejected (check Settings > Credentials)")
+    if r.status_code >= 400:
+        raise ProviderError(_redact(f"fish: HTTP {r.status_code}: {r.text[:300]}", key), transient=r.status_code == 429 or r.status_code >= 500)
+    return str(r.json().get("credit", ""))
 
 
 def audio_seconds(path: Path) -> float:

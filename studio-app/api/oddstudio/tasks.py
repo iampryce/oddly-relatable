@@ -392,7 +392,8 @@ def voice_preview(ctx: Ctx) -> dict:
     c = db.get(Character, job.character_id)
     cfg = get_section(db, "voice")
     text = job.payload.get("text") or f"Hi, I am {c.name}. Something is definitely wrong here."
-    f = speak(cfg, text, c.voice, ctx.folder("characters", c.key, "voice") / f"sample-job{job.id}", voice_direction(c, {"expression": "neutral"}))
+    f = speak(cfg, text, c.voice, ctx.folder("characters", c.key, "voice") / f"sample-job{job.id}", voice_direction(c, {"expression": "neutral"}),
+              speed=c.voice_speed)
     key = f"characters/{c.key}/voice-sample-job{job.id}{f.suffix}"
     storage().put_file(key, f, "audio/mpeg" if f.suffix == ".mp3" else "audio/wav")
     a = CharacterAsset(character_id=c.id, kind="voice-sample",
@@ -433,7 +434,7 @@ def scene_voice(ctx: Ctx) -> dict:
             continue
         # Voice per character (set under Characters); the old settings map and the default voice are fallbacks.
         voice = c.voice or (cfg.get("voices") or {}).get(ln["speaker"]) or cfg.get("default_voice", "")
-        f = speak(cfg, ln["text"], voice, folder / f"line-{i + 1}", voice_direction(c, ln))
+        f = speak(cfg, ln["text"], voice, folder / f"line-{i + 1}", voice_direction(c, ln), speed=c.voice_speed)
         seconds = audio_seconds(f)
         key = f"episodes/{ep.id}/r{ep.revision}/scenes/{sc.position}/voice/line-{i + 1}-job{job.id}{f.suffix}"
         a = store_asset(db, ep_id=ep.id, src=f, key=key, kind="voice", label=f"Scene {sc.position} line {i + 1} ({c.name})",

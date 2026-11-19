@@ -22,7 +22,7 @@ from .tasks import Ctx, store_asset, task
 TARGETS = {
     "text": ("codex-cli", "openai", "anthropic"),
     "image": ("codex-cli", "openai"),
-    "voice": ("piper", "openai", "elevenlabs", "kokoro"),
+    "voice": ("piper", "openai", "elevenlabs", "kokoro", "fish"),
     "storage": ("s3", "local"),
     "youtube": ("youtube",),
     "comfyui": ("comfyui",),
@@ -105,7 +105,29 @@ def provider_test(ctx: Ctx) -> dict:
                 if not vs:
                     raise RuntimeError("elevenlabs: the account has no voices")
                 voice = vs[0]["voice_id"]
-        f = providers.speak(cfg, TEST_LINE, voice, ctx.folder("provider-tests") / f"voice-{job.id}")
+        speed = None
+        if name == "fish":
+            # a configured character voice (fish:<id>) first, then the Fish default voice; the free credit check runs
+            # before the one paid line, so a bad key fails without spending anything
+            from .models import Character
+            c = db.query(Character).filter(Character.voice.like("fish:%")).order_by(Character.id).first()
+            if c is not None:
+                voice, speed = c.voice[5:], c.voice_speed
+                out["character"] = c.name
+            else:
+                voice = (cfg.get("fish_default_voice") or (cfg.get("default_voice") if cfg.get("provider") == "fish" else "") or "")
+                voice = voice[5:] if voice.startswith("fish:") else voice
+            if not voice:
+                raise providers.ProviderNotConfigured("fish: give a character a Fish voice (fish:<voice id>) or set the Fish default voice")
+            out["credit"] = providers.fish_credit()
+            ctx.log(f"fish: key accepted, API credit {out['credit']}")
+            # the saved Model belongs to the selected provider; the clip cache is bypassed so the line is really synthesised
+            model = cfg.get("model", "") if get_section(db, "voice").get("provider") == "fish" else ""
+            f = providers.fish_speak(TEST_LINE, voice, ctx.folder("provider-tests") / f"voice-{job.id}", model=model, speed=speed,
+                                     use_cache=False)
+            out["model"] = model or providers.FISH_DEFAULT_MODEL
+        else:
+            f = providers.speak(cfg, TEST_LINE, voice, ctx.folder("provider-tests") / f"voice-{job.id}")
         ct = "audio/mpeg" if f.suffix == ".mp3" else "audio/wav"
         a = store_asset(db, ep_id=None, src=f, key=f"provider-tests/voice-{name}-job{job.id}{f.suffix}", kind="provider-test",
                         label=f"Voice test ({name})", content_type=ct, job_id=job.id)

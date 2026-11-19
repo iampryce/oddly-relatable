@@ -50,6 +50,7 @@ class CharacterIn(BaseModel):
     default_expression: str = Field(default="neutral", max_length=40)
     voice: str = Field(default="", max_length=120)
     voice_style: str = Field(default="", max_length=600)
+    voice_speed: float | None = Field(default=None, ge=0.5, le=2.0)   # optional; Fish Audio prosody speed
 
 
 @router.get("/characters")
@@ -75,7 +76,7 @@ def update_character(cid: int, body: CharacterIn, db: Session = Depends(get_db))
     c = get_char(db, cid)
     if c.locked:
         # Approved repository artwork and its description stay locked; only the voice may be assigned.
-        c.voice, c.voice_style = body.voice, body.voice_style
+        c.voice, c.voice_style, c.voice_speed = body.voice, body.voice_style, body.voice_speed
         db.commit()
         return out(db, c)
     if body.key != c.key:

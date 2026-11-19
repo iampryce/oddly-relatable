@@ -47,6 +47,8 @@ CAPABILITIES: dict[str, dict] = {
         "kokoro": {"label": "Kokoro-82M (free, local CPU; Apache-2.0)", "needs": ["tool:kokoro"], "implemented": True},
         "openai": {"label": "OpenAI TTS", "needs": ["openai_api_key"], "implemented": True, "default_model": "gpt-4o-mini-tts"},
         "elevenlabs": {"label": "ElevenLabs", "needs": ["elevenlabs_api_key"], "implemented": True, "default_model": "eleven_multilingual_v2"},
+        "fish": {"label": "Fish Audio", "needs": ["fish_api_key"], "implemented": True, "default_model": "s2-pro",
+                 "note": "paid per character on s2-pro; Model s2.1-pro-free uses the free tier"},
     }},
     "motion": {"label": "Motion and character animation", "section": "motion", "providers": {
         "procedural-rig": {"label": "Studio 2D rig animator (procedural, CPU, free)", "needs": ["tool:rhubarb"], "implemented": True,

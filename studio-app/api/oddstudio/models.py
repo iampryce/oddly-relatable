@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -121,6 +121,8 @@ class Character(Timestamps, Base):
     # Voice: the voice id for the configured voice provider, and how this character speaks (fed to the voice model).
     voice: Mapped[str] = mapped_column(String(120), default="")
     voice_style: Mapped[str] = mapped_column(Text, default="")
+    # Optional speaking speed (0.5-2.0; empty = the provider's normal speed). Used by Fish Audio (prosody.speed).
+    voice_speed: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
 
 
 class CharacterAsset(Base):

@@ -4,7 +4,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 
-const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: ''};
+const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
 
 function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
@@ -12,7 +12,8 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
   const {busy, error, run} = useAction(onDone);
   const set = (k: string, v: string) => setF((x: any) => ({...x, [k]: v}));
   const body = () => ({key: f.key, name: f.name, description: f.description, visual_description: f.visual_description, bubble_style: f.bubble_style,
-                       scope: f.scope, episode_id: f.episode_id ?? null, default_expression: f.default_expression, voice: f.voice || '', voice_style: f.voice_style || ''});
+                       scope: f.scope, episode_id: f.episode_id ?? null, default_expression: f.default_expression, voice: f.voice || '', voice_style: f.voice_style || '',
+                       voice_speed: f.voice_speed === '' || f.voice_speed == null ? null : Number(f.voice_speed)});
   return (
     <div className="card stack">
       <h2>{initial.id ? `Edit ${initial.name}` : 'New character'}</h2>
@@ -32,8 +33,10 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
         <div><label htmlFor="characters-default-expression-7">Default expression</label><input id="characters-default-expression-7" value={f.default_expression} onChange={e => set('default_expression', e.target.value)} /></div>
       </div>
       <div className="grid cols-2">
-        <div><label htmlFor="characters-voice">Voice (provider voice: e.g. OpenAI "onyx", an ElevenLabs voice id, or a Piper model path)</label>
-          <input id="characters-voice" value={f.voice} onChange={e => set('voice', e.target.value)} placeholder="default voice if empty" /></div>
+        <div><label htmlFor="characters-voice">Voice (provider voice: e.g. OpenAI "onyx", an ElevenLabs voice id, a Piper model path, or fish:&lt;Fish voice id&gt;)</label>
+          <input id="characters-voice" value={f.voice} onChange={e => set('voice', e.target.value)} placeholder="default voice if empty" />
+          <label htmlFor="characters-voice-speed">Voice speed (0.5–2, empty = normal; Fish Audio)</label>
+          <input id="characters-voice-speed" type="number" step="0.05" min={0.5} max={2} value={f.voice_speed ?? ''} onChange={e => set('voice_speed', e.target.value)} /></div>
         <div><label htmlFor="characters-voice-style">How they sound (given to the voice model)</label>
           <textarea id="characters-voice-style" value={f.voice_style} onChange={e => set('voice_style', e.target.value)} placeholder="Age, pace, tone; e.g. deep, slow, deadpan" /></div>
       </div>
@@ -101,7 +104,7 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
             <span className="muted small"> Saves {c.name} for reuse in future stories.</span></div>}
         </div>)}
       <div className="row small">
-        <strong>Voice:</strong> {c.voice || <span className="muted">default</span>}{c.voice_style && <span className="muted">· {c.voice_style}</span>}
+        <strong>Voice:</strong> {c.voice || <span className="muted">default</span>}{c.voice_speed ? ` (speed ${c.voice_speed})` : ''}{c.voice_style && <span className="muted">· {c.voice_style}</span>}
         <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('voice', () => api(`/characters/${c.id}/voice/preview`, {body: {}}))}>Preview voice</button>
       </div>
       {sample && <audio controls preload="none" src={sample.url} style={{width: '100%'}} />}

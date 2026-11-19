@@ -35,11 +35,12 @@
 | Voices | `openai` | `OPENAI_API_KEY` | Voices such as `alloy`, `onyx`, `nova`, `shimmer`; supports acting direction |
 | Voices | `elevenlabs` | `ELEVENLABS_API_KEY` | Character voice = ElevenLabs voice id (from their voice library) |
 | Voices | `piper` | none (`PIPER_BIN`) | Free and local. Install the `piper` binary and `.onnx` voice models on the worker; voice = model path |
+| Voices | `fish` | `FISH_API_KEY` | Fish Audio. Character voice = `fish:<voice id>` (the Fish voice model's id, sent as `reference_id`), optional per-character speed 0.5–2. Default model `s2-pro` (needs paid credit); set Model to `s2.1-pro-free` for the free tier. Emotion tags such as `[whisper]` go inline in the line text. 44.1 kHz WAV output, cached by model, voice, speed, sample rate and text under `<work dir>/voice-cache/fish/`. The provider test checks the key against the free credit endpoint first, then voices one line with a character's Fish voice |
 | Character art | `openai` | `OPENAI_API_KEY` | Images API, transparent PNG |
 | Character art | `codex-cli` | none | ChatGPT subscription; only on a machine where Codex is signed in (see DEPLOYMENT.md §7) |
 | Scripts | `openai` / `anthropic` / `codex-cli` | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / none | |
 
-Keys live only in `/srv/stickman/shared/.env`. The dashboard shows whether each is configured, never its value.
+Keys can be entered under Settings > Credentials (stored encrypted in the database) or set in `/srv/stickman/shared/.env`; a key saved in Settings wins. The dashboard shows whether each is configured, never its value.
 
 ## 4. Estimated running costs
 
