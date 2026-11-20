@@ -41,6 +41,12 @@ EXPRESSION_GESTURE = [
 ]
 
 
+def line_texts(text: str) -> tuple[str, str]:
+    """(bubble text, lip-sync guide) for a line. The voice clip was made from the full line, performance tags included;
+    the bubble shows the words only, and Rhubarb is guided by the spoken words (a tag is acted, not said)."""
+    return engine.viewer_text(text), engine.strip_direction(text)
+
+
 def enabled(db) -> bool:
     return get_section(db, "motion").get("provider") == "procedural-rig"
 
@@ -164,9 +170,9 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             if clip:
                 local = storage().get_to_file(clip["key"], folder / "voice" / Path(clip["key"]).name)
                 seconds = clip["seconds"]
-                cues = cues_for(local, ln["text"])
+                cues = cues_for(local, line_texts(ln["text"])[1])
                 audio.append((local, t))
-            entry = {"speaker": k, "text": ln["text"], "start": round(t, 3), "end": round(t + seconds + BEAT, 3), "shot": ln.get("shot", "wide"),
+            entry = {"speaker": k, "text": line_texts(ln["text"])[0], "start": round(t, 3), "end": round(t + seconds + BEAT, 3), "shot": ln.get("shot", "wide"),
                      "expression": face_for(faces.get(k, {"neutral"}), chars_by_key[k], ln.get("expression", "")), "cues": cues}
             for f in ("gesture", "look_at", "reactions"):
                 if ln.get(f):
@@ -189,7 +195,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
 
     s = get_settings()
     from .tasks import current_script
-    hook = engine.strip_emoji((current_script(db, ep) or {}).get("hook") or ep.title)
+    hook = engine.viewer_text((current_script(db, ep) or {}).get("hook") or ep.title)
     # presentation (locked, owner 2026-11-17): comic speech bubbles by the speaker and a permanent top hook banner
     spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration, "captions": False,
             "bubbles": True, "hook": hook,

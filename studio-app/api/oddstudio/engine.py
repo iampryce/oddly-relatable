@@ -48,6 +48,25 @@ def engine_id(key: str) -> str:
 _EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
 
 
+# Performance directions written into a line for the voice engine (Fish Audio reads inline tags such as [whisper] or
+# [laughs]). They are spoken as acting, never shown: bubbles, captions and the hook show the words only. Only short
+# bracketed words count as directions, so text like "[2]" is left alone.
+DIRECTION_TAG = re.compile(r"\s*\[[A-Za-z][A-Za-z ,'\-]{0,38}\]\s*")
+
+
+def strip_direction(text: str) -> str:
+    """The words of a line without its performance tags (\"[whispers] Not now.\" -> \"Not now.\")."""
+    out = DIRECTION_TAG.sub(" ", text or "")
+    out = re.sub(r"\s+([,.!?;:\u2026])", r"\1", re.sub(r"\s{2,}", " ", out))
+    return out.strip()
+
+
+def viewer_text(text: str) -> str:
+    """What the viewer sees for a line (bubble or caption): no performance tags, no emoji; a line that is only a
+    direction (\"[laughs]\") shows the house style's silent beat \"...\"."""
+    return strip_emoji(strip_direction(text))
+
+
 def strip_emoji(text: str) -> str:
     """The bundled font has no emoji; they are removed from bubbles (the writer is also told not to use them)."""
     t = re.sub(r"\s{2,}", " ", _EMOJI.sub("", text)).strip()
@@ -134,7 +153,7 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
         for li in range(first, last):
             ln = sc.lines[li]
             speaker = chars_by_key[ln["speaker"]]
-            line = {"speaker": engine_id(speaker.key), "text": strip_emoji(ln["text"]), "pose": pose_for(speaker, ln.get("expression", ""))}
+            line = {"speaker": engine_id(speaker.key), "text": viewer_text(ln["text"]), "pose": pose_for(speaker, ln.get("expression", ""))}
             if li == first:   # every cast member needs a pose on the first line (the poses in effect at a split)
                 start_pose = {c.key: state.get(c.key, pose_for(c, ln.get("expression", "") if c is speaker else c.default_expression)) for c in chars}
                 start_pose[speaker.key] = pose_for(speaker, ln.get("expression", ""))
@@ -185,7 +204,7 @@ def build_story(*, episode_id: int, revision: int, title: str, script: dict, sce
         if index > 0:
             return story   # only the first segment carries the hook
     if script.get("hook"):
-        story["hook"] = {"text": script["hook"], "start": 0, "duration": 2.5}
+        story["hook"] = {"text": viewer_text(script["hook"]), "start": 0, "duration": 2.5}
     return story
 
 
