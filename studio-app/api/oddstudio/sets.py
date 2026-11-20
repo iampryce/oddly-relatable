@@ -123,6 +123,8 @@ def set_candidate(ctx: Ctx) -> dict:
     out = folder / f"{p['set_id']}-job{job.id}.png"
     from .tasks import style_version
     version = style_version(db)
+    if version == "v2":
+        cfg["background"] = None   # a set plate is its own scenery: no flat background instruction
     prompt = f"{set_style(version)}\nSetting: {p['description']}"
     providers.image_generate(cfg, prompt, out, reference=style_reference_for(db, version, folder))
     im = Image.open(out)

@@ -37,6 +37,42 @@ class HouseStyleRulesTest(unittest.TestCase):
         self.assertNotIn("{", r)
 
 
+class ImageBackgroundTest(unittest.TestCase):
+    """gpt-image-2 cannot draw transparency: the provider asks for a flat background. v1 keeps white (unchanged); v2
+    poses ask for mid-grey (white heads would merge with white); v2 set plates ask for none."""
+    def setUp(self):
+        self.env = Env().login()
+        self.env.client.put("/api/settings/credentials", json={"values": {"openai_api_key": "sk-test-bg"}})
+
+    def tearDown(self):
+        self.env.close()
+
+    def prompt_for(self, cfg):
+        import base64
+        from pathlib import Path
+        from unittest import mock
+        sent = {}
+
+        class R:
+            status_code = 200
+            def json(self):
+                return {"data": [{"b64_json": base64.b64encode(b"png").decode()}]}
+
+        def post(url, **kw):
+            sent.update(kw.get("json") or kw.get("data") or {})
+            return R()
+        with mock.patch("oddstudio.providers.httpx.post", side_effect=post):
+            providers._image_generate_one({"provider": "openai", **cfg}, "A figure.", Path(self.env.tmp) / "x.png")
+        return sent["prompt"]
+
+    def test_backgrounds(self):
+        self.assertIn("flat white colour", self.prompt_for({}))
+        grey = self.prompt_for({"background": "mid-grey (#808080)"})
+        self.assertIn("flat mid-grey (#808080) colour", grey)
+        self.assertNotIn("white colour", grey)
+        self.assertNotIn("Background:", self.prompt_for({"background": None}))
+
+
 class HouseStyleV2Test(unittest.TestCase):
     def setUp(self):
         self.env = Env().login()

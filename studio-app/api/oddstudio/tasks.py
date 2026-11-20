@@ -335,6 +335,8 @@ def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cf
     style = style_reference(ctx, version)
     refs = [r for r in (ref, style) if r is not None]
     ctx.log(f"Generating '{expression}' in house style {version} with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
+    if version == "v2":
+        cfg = {**cfg, "background": "mid-grey (#808080)"}
     image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify, version), out, refs or None)
     if engine.make_cutout(out):
         ctx.log(f"'{expression}': background or halo removed")
