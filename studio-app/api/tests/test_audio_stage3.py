@@ -185,6 +185,13 @@ class MediaTest(Flow):
             out2 = AP.mux_original(video, wav, 6.0, tmp / "out2.mp4")
             self.assertEqual(AP.probe(out2, "a")["codec"], "aac", "a WAV recording is encoded once")
             self.assertAlmostEqual(AP.probe(out2)["duration"], 6.0, delta=0.05)
+            # a cut-off last line removed (end_at): video AND audio end there (a copied AAC stream ends on its own
+            # packet boundary, a few ms later; nothing of the recording runs on past it)
+            for src in (aac, wav):
+                cut = AP.mux_original(video, src, 4.0, tmp / f"cut-{src.name}.mp4")
+                self.assertAlmostEqual(AP.probe(cut, "v")["duration"], 4.0, delta=1 / 30)
+                self.assertAlmostEqual(AP.probe(cut, "a")["duration"], 4.0, delta=0.025)
+            self.assertAlmostEqual(AP.probe(AP.as_wav(aac, 4.0, tmp / "end.wav"))["duration"], 4.0, delta=0.005)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
