@@ -38,8 +38,12 @@ DEFAULTS: dict[str, dict] = {
         "Original, relatable everyday comedy with expressive stickman characters. Short scenes, fast setups, "
         "exaggerated reactions, a clear escalation and an unexpected twist near the end. Comedic timing: setup, "
         "pause, reaction, payoff. Dialogue is short (bubbles hold one short sentence). Silent reaction beats use "
-        "short sounds like \"...\", \"!!\" or \"Hm.\". Family-friendly for a general audience. Never copy existing "
-        "creators' characters, catchphrases or specific sketches; take inspiration only from the general genre.")},
+        "short sounds like \"...\", \"!!\" or \"Hm.\". Adult-oriented, relatable humor for grown-ups; no explicit "
+        "sexual content. Never copy existing creators' characters, catchphrases or specific sketches; take inspiration "
+        "only from the general genre."),
+        # House style of all new character and set images: v1 (the original look, kept as rollback) | v2 (adult minimal
+        # stick-figure style, owner decision 2026-11-20). Existing approved art is never changed by switching.
+        "style_version": "v1"},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -84,6 +88,10 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         raise ValueError("storage.backend must be local or s3")
     if key == "voice" and "gain" in value and not (isinstance(value["gain"], (int, float)) and 0.2 <= value["gain"] <= 2):
         raise ValueError("voice.gain must be between 0.2 and 2")
+    if key == "creative" and "style_version" in value:
+        from .house_style import STYLE_VERSIONS
+        if value["style_version"] not in STYLE_VERSIONS:
+            raise ValueError(f"creative.style_version must be one of {', '.join(STYLE_VERSIONS)}")
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)

@@ -4,7 +4,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 
-const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null};
+const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null, skin_tone: ''};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
 
 function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
@@ -13,7 +13,7 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
   const set = (k: string, v: string) => setF((x: any) => ({...x, [k]: v}));
   const body = () => ({key: f.key, name: f.name, description: f.description, visual_description: f.visual_description, bubble_style: f.bubble_style,
                        scope: f.scope, episode_id: f.episode_id ?? null, default_expression: f.default_expression, voice: f.voice || '', voice_style: f.voice_style || '',
-                       voice_speed: f.voice_speed === '' || f.voice_speed == null ? null : Number(f.voice_speed)});
+                       voice_speed: f.voice_speed === '' || f.voice_speed == null ? null : Number(f.voice_speed), skin_tone: f.skin_tone || ''});
   return (
     <div className="card stack">
       <h2>{initial.id ? `Edit ${initial.name}` : 'New character'}</h2>
@@ -35,6 +35,8 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
       <div className="grid cols-2">
         <div><label htmlFor="characters-voice">Voice (provider voice: e.g. OpenAI "onyx", an ElevenLabs voice id, a Piper model path, or fish:&lt;Fish voice id&gt;)</label>
           <input id="characters-voice" value={f.voice} onChange={e => set('voice', e.target.value)} placeholder="default voice if empty" />
+          <label htmlFor="characters-skin">Skin tone (art style v2; empty = white head like the rest of the cast)</label>
+          <input id="characters-skin" value={f.skin_tone || ''} maxLength={40} onChange={e => set('skin_tone', e.target.value)} placeholder="e.g. warm medium brown" />
           <label htmlFor="characters-voice-speed">Voice speed (0.5–2, empty = normal; Fish Audio)</label>
           <input id="characters-voice-speed" type="number" step="0.05" min={0.5} max={2} value={f.voice_speed ?? ''} onChange={e => set('voice_speed', e.target.value)} /></div>
         <div><label htmlFor="characters-voice-style">How they sound (given to the voice model)</label>

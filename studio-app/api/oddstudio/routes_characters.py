@@ -51,6 +51,7 @@ class CharacterIn(BaseModel):
     voice: str = Field(default="", max_length=120)
     voice_style: str = Field(default="", max_length=600)
     voice_speed: float | None = Field(default=None, ge=0.5, le=2.0)   # optional; Fish Audio prosody speed
+    skin_tone: str = Field(default="", max_length=40)                    # house style v2: optional flat skin tone (white if empty)
 
 
 @router.get("/characters")
@@ -76,7 +77,7 @@ def update_character(cid: int, body: CharacterIn, db: Session = Depends(get_db))
     c = get_char(db, cid)
     if c.locked:
         # Approved repository artwork and its description stay locked; only the voice may be assigned.
-        c.voice, c.voice_style, c.voice_speed = body.voice, body.voice_style, body.voice_speed
+        c.voice, c.voice_style, c.voice_speed, c.skin_tone = body.voice, body.voice_style, body.voice_speed, body.skin_tone
         db.commit()
         return out(db, c)
     if body.key != c.key:
@@ -245,7 +246,8 @@ def restyle(cid: int, body: RestyleIn, db: Session = Depends(get_db)):
         raise HTTPException(409, "locked character")
     if not secret("openai_api_key", db):
         raise HTTPException(409, "the restyle uses the verified OpenAI image provider: save the OpenAI key first")
-    desc = body.visual_description or house_style.RESTYLE_DESCRIPTIONS.get(c.key)
+    from .settings_store import get_section
+    desc = body.visual_description or house_style.restyle_description(get_section(db, "creative").get("style_version", "v1"), c.key)
     if not desc:
         raise HTTPException(422, "give the simplified visual description for this character")
     c.visual_description = desc
