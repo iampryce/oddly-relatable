@@ -23,6 +23,19 @@ from .config import REPO_ROOT, get_settings
 ROW = "_sets"
 STYLE_REFERENCE = REPO_ROOT / "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png"
 from .house_style import SET_STYLE as STYLE  # noqa: E402  (the locked house style)
+from .house_style import set_style  # noqa: E402
+
+
+def style_reference_for(db, version: str, folder: Path) -> Path | None:
+    """v1: the approved cozy living-room plate. v2: the first approved v2 set (none yet: text only, so the v1 look
+    cannot leak into v2 through the reference)."""
+    if version != "v2":
+        return STYLE_REFERENCE
+    v2 = sorted(((k, r) for k, r in approved(db).items() if r.get("style_version") == "v2"), key=lambda kv: kv[1].get("created", 0))
+    if not v2:
+        return None
+    spec = plate_for(db, v2[0][0], folder)
+    return Path(spec["plate"]) if spec else None
 
 
 def records(db) -> dict:
@@ -108,8 +121,12 @@ def set_candidate(ctx: Ctx) -> dict:
         cfg["model"] = ""
     folder = ctx.folder("sets", p["set_id"])
     out = folder / f"{p['set_id']}-job{job.id}.png"
-    prompt = f"{STYLE}\nSetting: {p['description']}"
-    providers.image_generate(cfg, prompt, out, reference=STYLE_REFERENCE)
+    from .tasks import style_version
+    version = style_version(db)
+    if version == "v2":
+        cfg["background"] = None   # a set plate is its own scenery: no flat background instruction
+    prompt = f"{set_style(version)}\nSetting: {p['description']}"
+    providers.image_generate(cfg, prompt, out, reference=style_reference_for(db, version, folder))
     im = Image.open(out)
     w, h = im.size
     a = store_asset(db, ep_id=None, src=out, key=f"sets/{p['set_id']}/{out.name}", kind="set-candidate",
@@ -120,7 +137,8 @@ def set_candidate(ctx: Ctx) -> dict:
                      label=f"Set candidate staging: {p['label']}", content_type="image/png", job_id=job.id)
     recs = records(db)
     recs[p["set_id"]] = {"label": p["label"], "description": p["description"], "status": "candidate", "asset_id": a.id,
-                         "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id}
+                         "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id,
+                         "style_version": version}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")
     return {"set_id": p["set_id"], "asset_id": a.id, "width": w, "height": h}

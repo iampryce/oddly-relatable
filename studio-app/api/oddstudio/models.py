@@ -130,6 +130,8 @@ class Character(Timestamps, Base):
     voice_style: Mapped[str] = mapped_column(Text, default="")
     # Optional speaking speed (0.5-2.0; empty = the provider's normal speed). Used by Fish Audio (prosody.speed).
     voice_speed: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    # House style v2: heads are flat white unless the character has its own flat skin tone (e.g. "warm medium brown").
+    skin_tone: Mapped[str] = mapped_column(String(40), default="")
 
 
 class CharacterAsset(Base):
@@ -145,6 +147,7 @@ class CharacterAsset(Base):
     feet: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     figure_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="review")  # review | approved | rejected
+    style_version: Mapped[str] = mapped_column(String(4), default="v1")   # house style the pose was drawn in (v1 | v2)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

@@ -244,8 +244,14 @@ export default function Settings() {
             <div><label htmlFor="prod-max">Maximum length (seconds)</label><input id="prod-max" type="number" min={10} max={60} value={v.max_seconds} onChange={e => set('max_seconds', Number(e.target.value))} /></div>
             <div><label htmlFor="prod-end">End card text</label><input id="prod-end" value={v.end_card} onChange={e => set('end_card', e.target.value)} /></div>
           </div>)}</Section>
-        <Section name="creative" title="House comedy style (given to the AI writer)" value={s.creative}>{(v, set) => (
-          <textarea style={{minHeight: 160}} value={v.house_style} onChange={e => set('house_style', e.target.value)} />)}</Section>
+        <Section name="creative" title="House comedy style (given to the AI writer)" value={s.creative}>{(v, set) => (<>
+          <textarea style={{minHeight: 160}} value={v.house_style} onChange={e => set('house_style', e.target.value)} />
+          <div style={{marginTop: 12}}><label htmlFor="style-version">Art style for new character and set images</label>
+            <select id="style-version" value={v.style_version || 'v1'} onChange={e => set('style_version', e.target.value)}>
+              <option value="v1">v1: original style (rollback)</option>
+              <option value="v2">v2: adult minimal stick-figure style, cinematic sets</option></select>
+            <p className="muted small">Applies to new pose sheets, restyles and set candidates. Approved art is never changed by switching.</p></div>
+        </>)}</Section>
       </div>
     </>);
 }

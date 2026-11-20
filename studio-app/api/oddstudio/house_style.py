@@ -33,3 +33,66 @@ RESTYLE_DESCRIPTIONS = {
     "maya": "Maya: warm medium-brown skin; a dark-brown bob haircut drawn as one smooth flat shape; a plain flat "
             "mustard-yellow sleeveless top; simple brown rounded shoes.",
 }
+
+# ======================================================================================================================
+# House style v2 (owner decision 2026-11-20), selected by Settings > creative.style_version = "v2". v1 above stays
+# unchanged as the rollback. Target: minimal ADULT stick-figure comedy (white heads, solid black oval eyes, heavy angled
+# brows, thin mouth line, one flat cap or hair shape, tall lanky proportions, black limbs with blob hands and feet) on
+# cinematic painted sets with warm/cool light. Never a children's cartoon look.
+STYLE_VERSIONS = ("v1", "v2")
+
+_CHARACTER_RULES_V2 = (
+    "HOUSE STYLE v2 (strict): an ADULT stick-figure comedy character drawn in a minimal, confident 2D line style for a "
+    "grown-up audience. Proportions: tall and lanky; the head is about 28% of the total height (never more than 30%), the "
+    "torso about 30%, long legs about 40%; narrow shoulders; long arms that reach mid-thigh. Head: a plain slightly tall "
+    "circle filled {head_fill} with a bold black outline; NO ears, NO nose, NO cheeks, NO shading, NO stubble, NO freckles, "
+    "NO make-up, NO jewellery. Eyes: two small SOLID BLACK vertical ovals with NO whites, NO outline and NO highlights, set "
+    "wide apart at mid-head. Brows: two HEAVY thick black wedges, clearly angled to show the mood. Mouth: a short thin black "
+    "line (straight, wavy or slightly off-centre); open only for shouting or laughing, without teeth detail. Hair or "
+    "headwear: ONE flat colour cap-like shape sitting on top of the head with a bold outline (no strands, no texture), "
+    "never covering the eyes. Torso: a plain tapered {torso_fill} shape from the neck to the hips with a bold outline, or "
+    "ONE plain adult garment (shirt, blazer, work polo) in a single muted flat colour with no logos, pockets, drawstrings, "
+    "prints or knit texture. Arms and legs: SOLID BLACK single lines of one even bold weight, never hollow tubes and never "
+    "skin-coloured. Hands: small solid black blobs with simply suggested fingers (thumb, pointing finger or fist), never "
+    "mittens or gloves. Feet: small solid black elongated blobs, NO shoes. One bold clean black outline weight everywhere, "
+    "flat colours only, no gradients, no shading. Colours: black, {base_colour} and at most ONE muted accent colour (for "
+    "example brick red, slate blue, olive, charcoal, camel or deep teal); no pastels, no neon. The look is understated and "
+    "adult, NOT a children's cartoon: no big round eyes, no oversized baby head, no chubby or rounded body, no cute details.")
+
+SET_STYLE_V2 = (
+    "Background plate for an adult 2D animated comedy, vertical 2:3 composition, EMPTY of people and characters. Cinematic "
+    "painted illustration in the style of a frame from a feature animated film for grown-ups: smooth painted rendering with "
+    "soft gradients, NO outlines, NO brush or paper texture, NO storybook look. Muted, slightly desaturated palette with "
+    "motivated lighting: warm interior lamp light against cool blue window or night light, with a clear warm/cool contrast. "
+    "Real depth: a few large simple shapes in the foreground slightly out of focus, a sharp mid-ground, a softly blurred far "
+    "background. Sparse, believable adult interior with only the furniture the setting needs; no clutter, no toys, no cute "
+    "props, no posters with text. Camera at a standing adult's eye height with gentle perspective. The lower third must be "
+    "open, flat floor where characters will stand, with no furniture or objects blocking it. No text, no people, no "
+    "animals, no characters.")
+
+RESTYLE_DESCRIPTIONS_V2 = {
+    "leo": "Leo: a flat dark-brown short side-parted hair cap shape; plain white torso; no garment.",
+    "ben": "Ben: a flat slate-blue flat-cap (newsboy cap) shape; plain white torso under a charcoal open blazer.",
+    "maya": "Maya: a flat near-black chin-length bob hair cap shape with a side part; plain white torso under a brick-red "
+            "collared shirt.",
+}
+
+
+def character_rules(version: str = "v1", skin_tone: str = "") -> str:
+    """The character rules for a style version. v2 heads (and a bare torso) are flat WHITE, or the character's own flat
+    skin tone when one is set (owner decision 2026-11-20: white by default, optional per-character skin tone)."""
+    if version != "v2":
+        return CHARACTER_RULES
+    tone = (skin_tone or "").strip()
+    if tone:
+        fill = f"with a flat {tone} skin colour (no shading, no blush)"
+        return _CHARACTER_RULES_V2.format(head_fill=fill, torso_fill=f"{tone} skin-coloured", base_colour=f"white, {tone}")
+    return _CHARACTER_RULES_V2.format(head_fill="flat WHITE", torso_fill="WHITE", base_colour="white")
+
+
+def set_style(version: str = "v1") -> str:
+    return SET_STYLE_V2 if version == "v2" else SET_STYLE
+
+
+def restyle_description(version: str, key: str) -> str | None:
+    return (RESTYLE_DESCRIPTIONS_V2 if version == "v2" else RESTYLE_DESCRIPTIONS).get(key)

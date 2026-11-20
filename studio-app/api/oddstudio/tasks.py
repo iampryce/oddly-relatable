@@ -249,7 +249,39 @@ def prepare_characters(ctx: Ctx) -> dict[str, Character]:
     return out
 
 
-def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False) -> str:
+def style_version(db: Session) -> str:
+    """The house style new character and set images are drawn in (Settings > creative.style_version)."""
+    v = get_section(db, "creative").get("style_version", "v1")
+    return v if v in house_style.STYLE_VERSIONS else "v1"
+
+
+def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False) -> str:
+    """House style v2 (owner decision 2026-11-20): adult minimal stick-figure style. A flat mid-grey background, because
+    white heads and torsos would merge with a white one and break the cut-out. Expressions keep the neutral body: the
+    acting rig uses only the heads, and the face carries the acting with restraint."""
+    refs = []
+    if with_identity and simplify:
+        refs.append("IMAGE 1 is THIS character's previous design in an OLDER style: keep only who they are (hair or cap shape and "
+                    "colour, garment colour) and redraw them completely in house style v2 above: no ears, no nose, solid black "
+                    "oval eyes without whites, tall lanky adult proportions, black blob hands and feet, no shoes.")
+    elif with_identity:
+        refs.append("IMAGE 1 is THIS character: keep them identical (head shape and size, hair or cap shape and colour, torso or "
+                    "garment, line weight, proportions and stance); only the face changes.")
+    if with_style:
+        refs.append(f"The {'LAST' if with_identity else 'attached'} image is the show's HOUSE STYLE v2 reference (a different "
+                    "character): match its drawing style exactly (line weight, eye, brow and mouth style, head-to-body "
+                    "proportions, flat colours) but do NOT copy that character's cap, hair, garment or colours.")
+    return (f"Full-body 2D character for an animated comedy for grown-ups: an ADULT, standing upright and facing the viewer "
+            f"in a relaxed neutral stance with the arms hanging at the sides, whole body visible with space around it, on a "
+            f"plain flat mid-grey (#808080) background; no scenery, no floor, no shadow, no text. "
+            f"{house_style.character_rules('v2', c.skin_tone or '')} Character: {c.name}. Appearance: {c.visual_description}. "
+            f"Expression: {expression}, shown with restraint through the brows, the eyes and a small mouth change; the body "
+            f"and stance stay exactly as in the neutral pose. " + " ".join(refs))
+
+
+def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False, version: str = "v1") -> str:
+    if version == "v2":
+        return pose_prompt_v2(c, expression, with_identity, with_style, simplify)
     """Image prompt for one pose. References are attached in this order: the character's own approved/neutral pose
     (identity), then the house-style reference (the show's locked lead character)."""
     refs = []
@@ -273,9 +305,18 @@ def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: 
             + " ".join(refs))
 
 
-def style_reference(ctx: Ctx) -> Path | None:
-    """The house style: the locked lead character's approved neutral pose (read only; never modified)."""
+def style_reference(ctx: Ctx, version: str = "v1") -> Path | None:
+    """The house style: the locked lead character's approved neutral pose (read only; never modified). In v2, the first
+    approved v2 neutral pose (the lead's when it has one); none yet means text-only generation, so the v1 look cannot
+    leak into v2 through the reference image."""
     db = ctx.db
+    if version == "v2":
+        q = (db.query(CharacterAsset).join(Character, Character.id == CharacterAsset.character_id)
+             .filter(CharacterAsset.kind == "pose", CharacterAsset.status == "approved", CharacterAsset.style_version == "v2",
+                     CharacterAsset.expression == "neutral")
+             .order_by(Character.locked.desc(), CharacterAsset.id))
+        a = q.first()
+        return storage().get_to_file(a.storage_key, ctx.folder("characters", "_style-v2") / Path(a.storage_key).name) if a else None
     lead = db.query(Character).filter_by(locked=True).order_by(Character.id).first()
     if lead is None:
         return None
@@ -286,33 +327,41 @@ def style_reference(ctx: Ctx) -> Path | None:
     return storage().get_to_file(a.storage_key, ctx.folder("characters", "_style") / Path(a.storage_key).name)
 
 
-def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict, simplify: bool = False) -> tuple[CharacterAsset, Path]:
+def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict, simplify: bool = False,
+                   version: str = "v1") -> tuple[CharacterAsset, Path]:
     folder = ctx.folder("characters", c.key, "generated")
     # The attempt number keeps every generation as its own file: a retried sheet never overwrites earlier evidence.
     out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}-a{ctx.job.attempts}.png"
-    style = style_reference(ctx)
+    style = style_reference(ctx, version)
     refs = [r for r in (ref, style) if r is not None]
-    ctx.log(f"Generating '{expression}' with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
-    image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify), out, refs or None)
+    ctx.log(f"Generating '{expression}' in house style {version} with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
+    if version == "v2":
+        cfg = {**cfg, "background": "mid-grey (#808080)"}
+    image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify, version), out, refs or None)
     if engine.make_cutout(out):
         ctx.log(f"'{expression}': background or halo removed")
     info = engine.analyse_pose(out)
-    key = f"characters/{c.key}/poses/{out.name}"
+    key = f"characters/{c.key}/poses/{'v2/' if version == 'v2' else ''}{out.name}"
     storage().put_file(key, out, "image/png")
     a = CharacterAsset(character_id=c.id, kind="pose", expression=expression, storage_key=key, sha256=sha256_file(out),
-                       width=info["width"], height=info["height"], feet=info["feet"], figure_height=info["figure_height"], status="review")
+                       width=info["width"], height=info["height"], feet=info["feet"], figure_height=info["figure_height"], status="review",
+                       style_version=version)
     ctx.db.add(a)
     ctx.db.commit()
     return a, out
 
 
-def _reference_for(ctx: Ctx, c: Character) -> Path | None:
-    """Consistency anchor: an approved neutral pose, else any approved pose, else the owner's reference image."""
+def _reference_for(ctx: Ctx, c: Character, version: str | None = None) -> Path | None:
+    """Consistency anchor: an approved neutral pose, else any approved pose, else the owner's reference image. With a
+    style version, only poses drawn in that style anchor (a v1 pose must not pull a v2 drawing back to the old look)."""
     db = ctx.db
-    a = (db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved", expression="neutral").first()
-         or db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").first()
+    poses = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose")
+    if version:
+        poses = poses.filter(CharacterAsset.style_version == version)
+    a = (poses.filter_by(status="approved", expression="neutral").first()
+         or poses.filter_by(status="approved").first()
          # A sheet still in review: its neutral pose anchors a re-drawn expression, so the sheet stays one identity.
-         or db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review", expression="neutral").order_by(CharacterAsset.id.desc()).first()
+         or poses.filter_by(status="review", expression="neutral").order_by(CharacterAsset.id.desc()).first()
          or db.query(CharacterAsset).filter_by(character_id=c.id, kind="reference").order_by(CharacterAsset.id.desc()).first())
     if not a:
         return None
@@ -323,7 +372,8 @@ def _reference_for(ctx: Ctx, c: Character) -> Path | None:
 def character_pose(ctx: Ctx) -> dict:
     """One extra expression pose for a character (owner-started)."""
     c = ctx.db.get(Character, ctx.job.character_id)
-    a, _ = _generate_pose(ctx, c, ctx.job.payload["expression"], _reference_for(ctx, c), get_section(ctx.db, "image"))
+    a, _ = _generate_pose(ctx, c, ctx.job.payload["expression"], _reference_for(ctx, c, style_version(ctx.db)), get_section(ctx.db, "image"),
+                          version=style_version(ctx.db))
     if c.art_status != "approved":
         c.art_status = "review"
     ctx.db.commit()
@@ -338,6 +388,7 @@ def character_sheet(ctx: Ctx) -> dict:
     db, job = ctx.db, ctx.job
     c = db.get(Character, job.character_id)
     cfg = get_section(db, "image")
+    version = job.payload.get("style_version") or style_version(db)
     restyle = bool(job.payload.get("restyle"))
     if job.payload.get("provider"):
         cfg = {**cfg, "provider": job.payload["provider"], "model": "", "fallback": "none"}
@@ -347,19 +398,20 @@ def character_sheet(ctx: Ctx) -> dict:
     # A restyle draws the new neutral from the current design simplified into the house style ("simplify"), or from
     # the house style alone; the rest of the sheet is anchored on the new neutral.
     simplify_from = _reference_for(ctx, c) if restyle and job.payload.get("from_current") else None
-    ref = None if restyle else _reference_for(ctx, c)
+    ref = None if restyle else _reference_for(ctx, c, version)
     entries = []
     for i, exp in enumerate(wanted):
         statuses = ["review"] if restyle else ["review", "approved"]   # a restyle redraws approved expressions too
         existing = db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
-                                                   CharacterAsset.expression == exp, CharacterAsset.status.in_(statuses)).first()
+                                                   CharacterAsset.expression == exp, CharacterAsset.status.in_(statuses),
+                                                   CharacterAsset.style_version == version).first()
         if existing:
             f = storage().get_to_file(existing.storage_key, ctx.folder("characters", c.key, "sheet") / Path(existing.storage_key).name)
         else:
             if ref is None and simplify_from is not None:
-                _, f = _generate_pose(ctx, c, exp, simplify_from, cfg, simplify=True)
+                _, f = _generate_pose(ctx, c, exp, simplify_from, cfg, simplify=True, version=version)
             else:
-                _, f = _generate_pose(ctx, c, exp, ref, cfg)
+                _, f = _generate_pose(ctx, c, exp, ref, cfg, version=version)
         if ref is None:
             ref = f   # the first pose anchors the rest of the sheet
         entries.append((exp, f))

@@ -294,9 +294,13 @@ def _image_generate_one(cfg: dict, prompt: str, out_file: Path, reference: Path 
         if body["model"].startswith("gpt-image-1"):
             body["background"] = "transparent"
         else:
-            # asked for "transparent", gpt-image-2 paints a fake checkerboard that the cut-out cannot remove
-            body["prompt"] = (prompt.replace("transparent (or flat white)", "flat white").replace("transparent", "flat white")
-                              + "\nBackground: one plain, solid, flat white colour. No checkerboard or transparency pattern.")
+            # asked for "transparent", gpt-image-2 paints a fake checkerboard that the cut-out cannot remove. cfg
+            # "background": the flat colour to ask for (default white, as before); None for images with their own scenery
+            # (set plates). House style v2 poses use mid-grey: white heads would merge with a white background.
+            bg = cfg.get("background", "white")
+            body["prompt"] = prompt.replace("transparent (or flat white)", "flat white").replace("transparent", "flat white")
+            if bg:
+                body["prompt"] += f"\nBackground: one plain, solid, flat {bg} colour. No checkerboard or transparency pattern."
         refs = [] if reference is None else ([reference] if isinstance(reference, Path) else list(reference))
         if cfg.get("use_reference") and refs:
             # style reference (sets): the image-edit endpoint takes reference images with the prompt
