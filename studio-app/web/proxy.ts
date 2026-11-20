@@ -14,6 +14,8 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// /api must stay excluded: when this proxy runs on a request, Next.js buffers its body and passes on only the first
+// 10 MB (proxyClientMaxBodySize) with a warning, which would silently cut uploads (lib/proxyMatcher.test.ts).
 export const config = {
   matcher: ['/((?!login|api|_next/static|_next/image|favicon.ico).*)'],
 };

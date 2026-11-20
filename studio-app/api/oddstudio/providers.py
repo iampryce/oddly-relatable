@@ -94,15 +94,8 @@ def codex_workdir(kind: str):
 class TextProvider:
     name = "none"
 
-    # images: optional local image files (JPEG/PNG) shown to the model with the prompt (Stage 1b video hints)
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
+    def complete_json(self, system: str, prompt: str) -> dict:
         raise ProviderNotConfigured("No text provider is configured. Choose one in Settings > AI providers.")
-
-
-def _image_b64(path) -> tuple[str, str]:
-    p = Path(path)
-    media = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
-    return media, base64.b64encode(p.read_bytes()).decode()
 
 
 class CodexText(TextProvider):
@@ -111,7 +104,7 @@ class CodexText(TextProvider):
     def __init__(self, model: str = ""):
         self.model = model
 
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
+    def complete_json(self, system: str, prompt: str) -> dict:
         s = get_settings()
         exe = shutil.which(s.codex_bin)
         if not exe:
@@ -121,8 +114,6 @@ class CodexText(TextProvider):
             cmd = [exe, "exec", "--sandbox", "read-only", "--skip-git-repo-check", "-C", tmp, "-o", str(out)]
             if self.model:
                 cmd += ["-m", self.model]
-            for img in images or []:
-                cmd += ["-i", str(img)]
             full = f"{system}\n\n{prompt}\n\nReturn ONLY the JSON object, with no commentary."
             try:
                 r = subprocess.run(cmd + ["-"], input=full, capture_output=True, text=True, encoding="utf-8",
@@ -142,19 +133,15 @@ class OpenAIText(TextProvider):
         self.model = model or "gpt-4.1-mini"
         self.temperature = temperature
 
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
+    def complete_json(self, system: str, prompt: str) -> dict:
         key = secret("openai_api_key")
         if not key:
             raise ProviderNotConfigured("openai: OPENAI_API_KEY is not set on the server")
-        user: str | list = prompt
-        if images:
-            user = [{"type": "text", "text": prompt}] + [
-                {"type": "image_url", "image_url": {"url": f"data:{m};base64,{b}", "detail": "low"}} for m, b in map(_image_b64, images)]
         r = httpx.post("https://api.openai.com/v1/chat/completions", timeout=180,
                        headers={"Authorization": f"Bearer {key}"},
                        json={"model": self.model, "temperature": self.temperature,
                              "response_format": {"type": "json_object"},
-                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]})
         if r.status_code >= 400:
             raise http_error("openai", r)
         return extract_json(r.json()["choices"][0]["message"]["content"])
@@ -173,25 +160,21 @@ class AnthropicText(TextProvider):
     SAMPLING_MODELS = ("claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5",
                        "claude-opus-4-1", "claude-opus-4-0", "claude-sonnet-4-0", "claude-3")
 
-    def payload(self, system: str, prompt: str, images: list | None = None) -> dict:
-        content: str | list = prompt + "\n\nReturn ONLY the JSON object."
-        if images:
-            content = [{"type": "image", "source": {"type": "base64", "media_type": m, "data": b}} for m, b in map(_image_b64, images)] \
-                + [{"type": "text", "text": content}]
+    def payload(self, system: str, prompt: str) -> dict:
         body = {"model": self.model,
                 # non-streaming request: ~16k leaves room for the script plus (adaptive) thinking, under HTTP timeouts
                 "max_tokens": 16000, "system": system,
-                "messages": [{"role": "user", "content": content}]}
+                "messages": [{"role": "user", "content": prompt + "\n\nReturn ONLY the JSON object."}]}
         if self.model.startswith(self.SAMPLING_MODELS):
             body["temperature"] = self.temperature
         return body
 
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
+    def complete_json(self, system: str, prompt: str) -> dict:
         key = secret("anthropic_api_key")
         if not key:
             raise ProviderNotConfigured("anthropic: ANTHROPIC_API_KEY is not set on the server")
         r = httpx.post("https://api.anthropic.com/v1/messages", timeout=300,
-                       headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json=self.payload(system, prompt, images))
+                       headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json=self.payload(system, prompt))
         if r.status_code >= 400:
             raise http_error("anthropic", r)
         data = r.json()
@@ -212,14 +195,11 @@ class FakeText(TextProvider):
             raise ProviderNotConfigured("the fake text provider exists only for automated tests")
         self.responder = responder
 
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
-        global test_last_images
-        test_last_images = [Path(i).name for i in images or []]     # tests check which images were sent
+    def complete_json(self, system: str, prompt: str) -> dict:
         return self.responder(system, prompt)
 
 
 _test_text_responder = None
-test_last_images: list[str] = []
 
 
 def set_test_text_responder(fn) -> None:
@@ -235,15 +215,14 @@ class FallbackText(TextProvider):
         self.name = f"{primary.name}>{fallback.name}"
         self.used = primary.name
 
-    def complete_json(self, system: str, prompt: str, images: list | None = None) -> dict:
-        args = (system, prompt, images) if images else (system, prompt)   # providers without image support still work
+    def complete_json(self, system: str, prompt: str) -> dict:
         try:
-            out = self.primary.complete_json(*args)
+            out = self.primary.complete_json(system, prompt)
             self.used = self.primary.name
             return out
         except (ProviderError, ProviderNotConfigured) as e:
             fallback_log(f"text: {self.primary.name} failed ({str(e)[:200]}); using fallback {self.fallback.name}")
-            out = self.fallback.complete_json(*args)
+            out = self.fallback.complete_json(system, prompt)
             self.used = self.fallback.name
             return out
 

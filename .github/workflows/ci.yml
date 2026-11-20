@@ -35,6 +35,9 @@ jobs:
       - name: Backup, restore and housekeeping scripts (simulation)
         working-directory: .
         run: bash studio-app/deploy/tests/simulate-backups.sh
+      - name: Deploy with the HTTPS proxy checks (simulation)
+        working-directory: .
+        run: bash studio-app/deploy/tests/simulate-deploy.sh
 
   renderer:
     name: Renderer unit tests

@@ -313,8 +313,13 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, db: Sess
         if not info["audio"]:
             raise HTTPException(422, f"this {kind} file has no audio track")
         if is_video:
-            if not get_settings().ffmpeg:
-                raise HTTPException(503, "FFmpeg is not configured on this server (FFMPEG), so video files cannot be read")
+            if not (get_settings().ffmpeg and get_settings().ffprobe):
+                raise HTTPException(503, "FFmpeg and FFprobe are not configured on this server (FFMPEG, FFPROBE), so video files cannot be read")
+            if hints:
+                try:
+                    hints_vision_config(db)
+                except ValueError as e:
+                    raise HTTPException(409, str(e))
             seconds = info["duration"]
             limit = MAX_SOURCE_SECONDS if ep.format == "short" else MAX_SECONDS[ep.format]
             if seconds is not None and seconds > limit + 0.5:
@@ -685,8 +690,11 @@ def audio_media_prepare(ctx: Ctx) -> dict:
         finally:
             src.unlink(missing_ok=True)       # the original video is never kept: only its audio is used
         ctx.log("Original video deleted")
+        seconds = media.probe(out)["duration"]
+        if seconds is None:
+            raise media.MediaError("the length of the extracted audio could not be read")
         try:
-            msg = accept_audio(db, ep, out, "audio/mp4", ".m4a", media.probe(out)["duration"],
+            msg = accept_audio(db, ep, out, "audio/mp4", ".m4a", seconds,
                                {"type": "video", "original_deleted": True, "hints_requested": bool(p.get("hints"))})
         except HTTPException as e:
             raise media.MediaError(str(e.detail)) from None
@@ -738,12 +746,27 @@ def clean_hints(ans: dict) -> dict:
     return {"people_count": n, "setting": short(ans.get("setting"), 6, 60), "mood": short(ans.get("mood"), 4, 40)}
 
 
+API_VISION = ("openai", "anthropic")    # the hints use the studio's API vision provider only, never a Codex login
+
+
+def hints_vision_config(db: Session) -> dict:
+    """Settings > Video and visual analysis, if it is an API provider (OpenAI / Anthropic with the studio's key);
+    otherwise ValueError. A fallback that is not an API provider is dropped."""
+    from .settings_store import get_section
+    cfg = dict(get_section(db, "vision"))
+    if cfg.get("provider") not in API_VISION:
+        raise ValueError("video hints need an API vision provider: set Settings > Video and visual analysis to "
+                         "OpenAI or Anthropic (the Codex login is never used for them)")
+    if cfg.get("fallback") not in API_VISION:
+        cfg["fallback"] = "none"
+    return cfg
+
+
 @task
 def audio_media_hints(ctx: Ctx) -> dict:
-    """Casting and setting hints from the sampled frames (people count, setting, mood only); the frames are deleted
-    when this job ends, whatever happens."""
-    from .providers import text_provider
-    from .settings_store import get_section
+    """Casting and setting hints from the sampled frames (people count, setting, mood only), asked of the studio's API
+    vision provider (its token usage is recorded); the frames are deleted when this job ends, whatever happens."""
+    from . import analysis
     db, job = ctx.db, ctx.job
     ep = db.get(Episode, job.episode_id)
     p = job.payload or {}
@@ -754,17 +777,28 @@ def audio_media_hints(ctx: Ctx) -> dict:
         if sm.get("full_asset_id") != p.get("full_asset_id") or not frames:
             ctx.log("No frames for the current upload; nothing to do.")
             return {"skipped": True}
-        ans = text_provider(get_section(db, "text")).complete_json(HINTS_SYSTEM, HINTS_PROMPT, images=frames)
+        try:
+            cfg = hints_vision_config(db)
+        except ValueError as e:
+            db.add(Event(episode_id=ep.id, kind="episode", message=f"No hints from the video: {e}"))
+            db.commit()
+            return {"skipped": str(e)}
+        analysis.last_vision_usage.clear()
+        ans = analysis.analyse_images(cfg, frames, HINTS_SYSTEM + "\n\n" + HINTS_PROMPT)
+        usage = dict(analysis.last_vision_usage)
         hints = clean_hints(ans if isinstance(ans, dict) else {})
         db.refresh(ep)
         tr = dict(ep.audio_transcript or {})
-        tr["media_hints"] = {**hints, "frames": len(frames), "job_id": job.id}
+        tr["media_hints"] = {**hints, "frames": len(frames), "job_id": job.id, "usage": usage}
         ep.audio_transcript = tr
         people = "?" if hints["people_count"] is None else hints["people_count"]
         db.add(Event(episode_id=ep.id, kind="episode", message=f"Hints from the video: {people} people, "
                                                               f"{hints['setting'] or '?'}, {hints['mood'] or '?'} (frames deleted)"))
         db.commit()
-        return {**hints, "frames": len(frames)}
+        if usage:
+            ctx.log(f"Vision call: {usage.get('provider')} {usage.get('model')}, {usage.get('input_tokens')} input / "
+                    f"{usage.get('output_tokens')} output tokens")
+        return {**hints, "frames": len(frames), "usage": usage}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

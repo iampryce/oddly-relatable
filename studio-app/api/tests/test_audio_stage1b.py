@@ -175,17 +175,28 @@ class VideoTest(Base):
         self.assertIn("no audio track", r.text)
         self.assertEqual(self.uploads(), [])
 
+    def vision(self, fn, provider="openai"):
+        self.assertEqual(self.c.put("/api/settings/vision", json={"provider": provider}).status_code, 200)
+        self.seen = []
+        def wrapped(cfg, images, question):
+            self.seen.append((cfg["provider"], [Path(i).name for i in images], question))
+            return fn(cfg, images, question)
+        analysis.set_test_analysis(transcriber=lambda cfg, audio: dict(TRANSCRIPT), vision=wrapped)
+
     def test_hints_people_setting_mood_only_and_frames_deleted(self):
-        providers.set_test_text_responder(lambda s, p: {"people_count": 2, "setting": "small office, daytime", "mood": "tense",
-                                                        "description": "a tall man with a beard", "names": ["X"]})
+        self.vision(lambda c, i, q: {"people_count": 2, "setting": "small office, daytime", "mood": "tense",
+                                     "description": "a tall man with a beard", "names": ["X"]})
         eid = self.create()
         self.assertEqual(self.upload(eid, make_media(self.media, "clip.mp4", 3), "video/mp4", hints=True).status_code, 200)
         self.env.run_jobs(["audio_media_prepare"])
         self.assertTrue(any(n.startswith("hints-") for n in self.uploads()), "frames wait for the hints job")
         ran = self.env.run_jobs(["audio_media_hints"])
         self.assertEqual(ran[0][1], "succeeded", ran)
-        self.assertEqual(len(providers.test_last_images), 6)
-        self.assertTrue(all(n.endswith(".jpg") for n in providers.test_last_images))
+        provider, images, question = self.seen[0]
+        self.assertEqual(provider, "openai", "the studio's API vision provider")
+        self.assertEqual(len(images), 6)
+        self.assertTrue(all(n.endswith(".jpg") for n in images))
+        self.assertIn("Never describe, identify or name anyone", question)
         self.assertEqual(self.uploads(), [], "the frames are deleted after the hints")
         h = self.state(eid)["media_hints"]
         self.assertEqual({k: h[k] for k in ("people_count", "setting", "mood", "frames")},
@@ -196,9 +207,9 @@ class VideoTest(Base):
         self.assertEqual(self.state(eid)["media_hints"]["people_count"], 2, "hints survive the transcription")
 
     def test_frames_are_deleted_even_when_the_hints_fail(self):
-        def boom(s, p):
+        def boom(c, i, q):
             raise providers.ProviderError("model down")
-        providers.set_test_text_responder(boom)
+        self.vision(boom)
         eid = self.create()
         self.upload(eid, make_media(self.media, "clip.mp4", 3), "video/mp4", hints=True)
         self.env.run_jobs(["audio_media_prepare"])
@@ -206,6 +217,45 @@ class VideoTest(Base):
         self.assertEqual(ran[0][1], "failed", ran)
         self.assertEqual(self.uploads(), [], "frames deleted although the job failed")
         self.assertIsNone(self.state(eid)["media_hints"])
+
+    def test_hints_need_an_api_vision_provider_never_codex(self):
+        eid = self.create()
+        clip = make_media(self.media, "clip.mp4", 2)
+        r = self.upload(eid, clip, "video/mp4", hints=True)            # vision provider: none (the default)
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("Codex login is never used", r.text)
+        self.assertEqual(self.uploads(), [], "nothing is kept when the hints cannot be made")
+        from oddstudio.audio_first import hints_vision_config
+        from oddstudio.db import new_session
+        from oddstudio.settings_store import put_section
+        with new_session() as s:
+            with self.assertRaises(ValueError):
+                put_section(s, "vision", {"provider": "codex-cli", "model": "", "fallback": "none"})   # not selectable
+            put_section(s, "vision", {"provider": "none", "model": "", "fallback": "none"})
+            with self.assertRaises(ValueError):
+                hints_vision_config(s)
+            put_section(s, "vision", {"provider": "anthropic", "model": "", "fallback": "openai"})
+            self.assertEqual(hints_vision_config(s)["provider"], "anthropic")
+            s.commit()
+        from oddstudio import audio_first
+        from oddstudio.settings_store import get_section as real
+        audio_first_get = lambda db, key: {**real(db, key), "fallback": "codex-cli"} if key == "vision" else real(db, key)
+        import oddstudio.settings_store as ss
+        ss.get_section, old = audio_first_get, ss.get_section
+        try:
+            with new_session() as s:
+                self.assertEqual(hints_vision_config(s)["fallback"], "none", "a non-API fallback is dropped")
+        finally:
+            ss.get_section = old
+        # switched off after the upload: the job makes no call and still deletes the frames
+        self.vision(lambda c, i, q: {"people_count": 1})
+        self.assertEqual(self.upload(eid, clip, "video/mp4", hints=True).status_code, 200)
+        self.env.run_jobs(["audio_media_prepare"])
+        self.assertEqual(self.c.put("/api/settings/vision", json={"provider": "none"}).status_code, 200)
+        ran = self.env.run_jobs(["audio_media_hints"])
+        self.assertEqual(ran[0][1], "succeeded", ran)
+        self.assertEqual(self.seen, [], "no vision call")
+        self.assertEqual(self.uploads(), [])
 
     def test_extraction_failure_deletes_the_video_and_returns_to_upload(self):
         from oddstudio import media

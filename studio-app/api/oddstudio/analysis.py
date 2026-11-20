@@ -101,8 +101,12 @@ def _transcribe_one(p: str, cfg: dict, audio: Path) -> dict:
 
 
 # ---------------------------------------------------------------- visual analysis
+last_vision_usage: dict = {}      # provider, model and token usage of the last vision call (cost tracking)
+
+
 def analyse_images(cfg: dict, images: list[Path], question: str) -> dict:
-    """Ask a vision model about one or more frames; returns its JSON answer."""
+    """Ask a vision model about one or more frames; returns its JSON answer. `last_vision_usage` then holds the
+    provider, model and the token usage the API reported for the call."""
     if _testing() and _test_vision:
         return _test_vision(cfg, images, question)
     p = cfg.get("provider", "none")
@@ -115,6 +119,11 @@ def analyse_images(cfg: dict, images: list[Path], question: str) -> dict:
         from .providers import fallback_log
         fallback_log(f"vision: {p} failed; using fallback {fb}")
         return _vision_one(fb, {**cfg, "model": ""}, images, question)
+
+
+def _record_usage(provider: str, model: str, tokens_in, tokens_out) -> None:
+    last_vision_usage.clear()
+    last_vision_usage.update(provider=provider, model=model, input_tokens=tokens_in, output_tokens=tokens_out)
 
 
 def _b64(p: Path) -> tuple[str, str]:
@@ -135,7 +144,10 @@ def _vision_one(p: str, cfg: dict, images: list[Path], question: str) -> dict:
                              "messages": [{"role": "user", "content": content}]})
         if r.status_code >= 400:
             raise http_error("openai vision", r)
-        return extract_json(r.json()["choices"][0]["message"]["content"])
+        data = r.json()
+        u = data.get("usage") or {}
+        _record_usage("openai", data.get("model") or cfg.get("model") or "gpt-4.1-mini", u.get("prompt_tokens"), u.get("completion_tokens"))
+        return extract_json(data["choices"][0]["message"]["content"])
     if p == "anthropic":
         key = secret("anthropic_api_key")
         if not key:
@@ -149,6 +161,8 @@ def _vision_one(p: str, cfg: dict, images: list[Path], question: str) -> dict:
         if r.status_code >= 400:
             raise http_error("anthropic vision", r)
         data = r.json()
+        u = data.get("usage") or {}
+        _record_usage("anthropic", data.get("model") or cfg.get("model") or "claude-sonnet-5-5", u.get("input_tokens"), u.get("output_tokens"))
         if data.get("stop_reason") == "refusal":
             raise ProviderError("anthropic vision: the model declined this request")
         return extract_json("".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"))

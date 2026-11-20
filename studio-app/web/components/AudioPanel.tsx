@@ -94,6 +94,9 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
           <input id="audio-file" type="file" accept="audio/*,video/*" disabled={!!act.busy}
                  onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f, {hints: hints && isVideoFile(f)}); setDirty(false); setSelected(new Set()); }); }} />
         </div>}
+        {!st.transcript && st.audio && st.allowed_actions.includes('transcribe_audio') && st.stage !== 'audio_transcribing' &&
+          <p className="small">The audio is ready but not transcribed{st.last_error ? ' (the last attempt failed)' : ''}. <button className="btn sm" disabled={!!act.busy}
+            onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe</button></p>}
         {st.stage === 'audio_preparing' && <div className="alert">Extracting the audio from the video (the video file is deleted afterwards)…</div>}
         {st.stage === 'audio_transcribing' && <div className="alert">Transcribing the audio into timed lines…</div>}
         {st.source_media && !st.source_media.preparing && <p className="muted small">
