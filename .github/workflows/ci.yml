@@ -36,6 +36,17 @@ jobs:
         working-directory: .
         run: bash studio-app/deploy/tests/simulate-backups.sh
 
+  renderer:
+    name: Renderer unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Banner layout (no canvas needed)
+        run: node --test production/animation/*.test.mjs
+
   web:
     name: Web typecheck and build
     runs-on: ubuntu-24.04
