@@ -87,6 +87,17 @@ def update_character(cid: int, body: CharacterIn, db: Session = Depends(get_db))
     return out(db, c)
 
 
+class SuggestVoiceIn(BaseModel):
+    use_ai: bool = True
+
+
+@router.post("/characters/{cid}/suggest-voice")
+def suggest_voice(cid: int, body: SuggestVoiceIn, db: Session = Depends(get_db)):
+    """Suggest a voice from the library for this character. Nothing is saved: the page puts it in the form and the owner saves."""
+    from .voice_library import suggest
+    return suggest(db, get_char(db, cid), use_ai=body.use_ai)
+
+
 class ReferenceIn(BaseModel):
     png_base64: str = Field(max_length=12_000_000)
 

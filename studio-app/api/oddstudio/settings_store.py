@@ -17,7 +17,9 @@ DEFAULTS: dict[str, dict] = {
     # Voiceover. "none": the video carries the engine's built-in SFX only. Each character's voice is set on the character.
     "voice": {"provider": "none", "model": "", "voices": {}, "default_voice": "", "gain": 1.0, "fallback": "none",
               # Fish Audio voice id used when Fish is the fallback (or for its test when no character has a Fish voice)
-              "fish_default_voice": ""},
+              "fish_default_voice": "",
+              # Approved Fish voices for auto-casting, one per line: voice id | label | him/her/neutral | description
+              "library": ""},
     # Media storage. "local": the server volume. "s3": new media goes to the bucket (credentials under Credentials);
     # media saved before the switch keeps being served from the server volume.
     "storage": {"backend": "", "bucket": "", "region": "", "prefix": "oddly-relatable/"},

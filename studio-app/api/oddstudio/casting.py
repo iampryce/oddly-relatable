@@ -20,15 +20,20 @@ def writer_characters(db: Session, episode_id: int | None) -> list[Character]:
 
 def register_new_characters(db: Session, episode_id: int, script: dict) -> list[str]:
     """Create the characters a script introduces (idempotent: existing keys are reused, never overwritten)."""
+    from .voice_library import assign_new, used_ids
     made = []
+    taken = used_ids(db)
     for c in script.get("new_characters", []):
         if db.query(Character).filter_by(key=c["key"]).first():
             continue
-        db.add(Character(key=c["key"], name=c["name"], description=c["description"], visual_description=c["visual_description"],
+        new = Character(key=c["key"], name=c["name"], description=c["description"], visual_description=c["visual_description"],
                          bubble_style=c["bubble_style"], voice_style=c.get("voice_style", ""), scope="episode",
                          episode_id=episode_id, engine_character=f"studio-{c['key']}", art_status="none",
-                         default_expression="neutral"))
-        db.add(Event(episode_id=episode_id, kind="character", message=f"New character introduced by the script: {c['name']}"))
+                         default_expression="neutral")
+        db.add(new)
+        label = assign_new(db, new, taken)
+        db.add(Event(episode_id=episode_id, kind="character", message=f"New character introduced by the script: {c['name']}"
+                     + (f" (voice picked from the library: {label})" if label else "")))
         made.append(c["key"])
     db.flush()
     return made
