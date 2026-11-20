@@ -5,11 +5,11 @@
 #   media.tar.gz  the work_data volume (local media storage: videos, stills, poses, voice clips)
 #   SHA256SUMS    checksums of both
 # Redis is not backed up: it only carries job IDs, and the worker re-announces queued jobs from PostgreSQL on start.
-# Keeps the newest $KEEP backups (default 14). Optional off-box copy: set OFFSITE_S3=s3://bucket/prefix and have the AWS
+# Keeps the newest $KEEP backups (default 7). Optional off-box copy: set OFFSITE_S3=s3://bucket/prefix and have the AWS
 # CLI configured for this user.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
-KEEP=${KEEP:-14}
+KEEP=${KEEP:-7}
 COMPOSE=(docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/current/studio-app/deploy/docker-compose.yml")
 if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env"; then COMPOSE+=(-f "$ROOT/current/studio-app/deploy/docker-compose.public.yml"); fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
