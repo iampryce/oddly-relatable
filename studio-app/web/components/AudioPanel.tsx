@@ -23,6 +23,9 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
   const [lines, setLines] = useState<Line[] | null>(null);
   const [dirty, setDirty] = useState(false);
   const [splitting, setSplitting] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [bulkSpeaker, setBulkSpeaker] = useState('');
   const player = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number | null>(null);
 
@@ -55,9 +58,26 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
             {...l, id: `${l.id}b`, start: second[0].start, text: text(second), words: second}, ...lines!.slice(i + 1)]);
     setSplitting(null);
   };
+  // bulk speaker (Stage 1c): click a checkbox, shift-click another to select the range between them
+  const toggle = (i: number, shift: boolean) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (shift && anchor !== null) {
+        const [a, b] = anchor < i ? [anchor, i] : [i, anchor];
+        for (let k = a; k <= b; k++) next.add(k);
+      } else if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+    setAnchor(i);
+  };
+  const applyBulk = () => {
+    const sp = bulkSpeaker.trim().slice(0, 40);
+    update(lines!.map((l, k) => (selected.has(k) ? {...l, speaker: sp} : l)));
+    setSelected(new Set());
+  };
   const save = () => act.run('save', async () => {
     await api(`/episodes/${episodeId}/audio/lines`, {method: 'PUT', body: {lines: lines!.map(({start, end, text, speaker, words}) => ({start, end, text, speaker, words}))}});
-    setDirty(false);
+    setDirty(false); setSelected(new Set());
   });
   const applySuggestedLabels = () => {
     const ls = st.cast_suggestion?.line_speakers || {};
@@ -94,10 +114,19 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
           </div></div>
         <p className="muted small">Give each line a speaker (any label, or a character key). Split a line where the speaker changes; merge lines one speaker says together. Timing always comes from the audio.</p>
         <datalist id="speaker-options">{speakerOptions.map(s => <option key={s} value={s} />)}</datalist>
+        {editable && <div className="row" style={{flexWrap: 'wrap'}}>
+          <button className="btn sm" onClick={() => setSelected(new Set(lines.map((_, k) => k)))}>Select all</button>
+          <button className="btn sm" disabled={!selected.size} onClick={() => setSelected(new Set())}>Clear selection</button>
+          <span className="muted small">{selected.size} selected (shift-click selects a range)</span>
+          <input list="speaker-options" aria-label="Speaker for the selected lines" style={{width: 180}} value={bulkSpeaker} placeholder="speaker" onChange={e => setBulkSpeaker(e.target.value)} />
+          <button className="btn sm" disabled={!selected.size || !bulkSpeaker.trim()} onClick={applyBulk}>Set speaker for selected</button>
+        </div>}
         <div className="table-wrap"><table>
-          <thead><tr><th>Time</th><th>Speaker</th><th>Line</th><th></th></tr></thead>
+          <thead><tr>{editable && <th></th>}<th>Time</th><th>Speaker</th><th>Line</th><th></th></tr></thead>
           <tbody>{lines.map((l, i) => (
             <tr key={`${l.id}-${i}`}>
+              {editable && <td><input type="checkbox" style={{width: 'auto'}} aria-label={`Select line ${i + 1}`} checked={selected.has(i)}
+                                      onChange={() => {}} onClick={e => toggle(i, (e as any).shiftKey)} /></td>}
               <td className="small" style={{whiteSpace: 'nowrap'}}><button className="btn sm" aria-label={`Play line ${i + 1}`} onClick={() => play(l)}>▶</button> {fmt(l.start)}–{fmt(l.end)}</td>
               <td style={{minWidth: 140}}><input list="speaker-options" value={l.speaker} disabled={!editable} placeholder="who says it" onChange={e => setLine(i, {speaker: e.target.value.slice(0, 40)})} /></td>
               <td>{splitting === i
@@ -112,6 +141,8 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
         </table></div>
         {!dirty && st.unlabelled_lines > 0 && <p className="muted small">{st.unlabelled_lines} line(s) have no speaker yet.</p>}
       </div>}
+
+      {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
 
       {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
     </div>
@@ -170,6 +201,71 @@ function CastCard({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: n
                 </div>}
           </div>); })}
         <div className="row"><button className="btn primary" disabled={dirty || !!act.busy || pending.some(l => { const c = get(l); return c.mode === 'existing' ? !c.character_key : !c.new.key || !c.new.name; })} onClick={apply}>Apply the cast</button></div>
+      </>}
+    </div>
+  );
+}
+
+// Stage 1c: re-split lines at natural beats (proposal only until applied; one-click Undo), and a cut-off last line.
+function LineQuality({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: number; act: ReturnType<typeof useAction>; dirty: boolean; onApplied: () => void}) {
+  const [cues, setCues] = useState<string>((st.cues || []).join(', '));
+  const [prop, setProp] = useState<any | null>(null);
+  const [edit, setEdit] = useState<Line[]>([]);
+  useEffect(() => { if (!prop) setCues((st.cues || []).join(', ')); }, [st.cues, prop]);
+  const propose = () => act.run('propose', async () => {
+    const p = await api(`/episodes/${episodeId}/audio/normalise`, {body: {cues: cues.split(',').map(c => c.trim()).filter(Boolean)}});
+    setProp(p); setEdit(p.proposal);
+  });
+  const apply = () => act.run('apply', async () => {
+    await api(`/episodes/${episodeId}/audio/lines`, {method: 'PUT', body: {keep_previous: true,
+      lines: edit.map(({start, end, text, speaker, words}) => ({start, end, text, speaker, words}))}});
+    setProp(null); onApplied();
+  });
+  const undo = () => act.run('undo', async () => { await api(`/episodes/${episodeId}/audio/lines/undo`, {method: 'POST'}); onApplied(); });
+  const fragment = (action: 'end_before' | 'keep') => act.run('fragment', async () => {
+    await api(`/episodes/${episodeId}/audio/fragment`, {body: {action}}); onApplied();
+  });
+  const mergeNext = (i: number) => {
+    const a = edit[i], b = edit[i + 1];
+    if (!b || a.speaker !== b.speaker) return;
+    setEdit([...edit.slice(0, i), {...a, end: b.end, text: `${a.text} ${b.text}`.trim(), words: [...a.words, ...b.words]}, ...edit.slice(i + 2)]);
+  };
+  const before = new Set((prop?.current || []).map((l: Line) => l.text));
+  return (
+    <div className="card stack">
+      <div className="spread"><h2 style={{margin: 0}}>Tidy lines</h2>
+        {st.can_undo && <button className="btn sm" disabled={!!act.busy} onClick={undo}>Undo last tidy</button>}</div>
+      {st.fragment && <div className="alert">
+        The last line looks cut off: <strong>“{st.fragment.text}”</strong> ({st.fragment.reasons.join('; ')}).
+        <div className="row" style={{marginTop: 8}}>
+          <button className="btn sm" disabled={!!act.busy || dirty} onClick={() => fragment('end_before')}>End the episode before this line</button>
+          <button className="btn sm" disabled={!!act.busy || dirty} onClick={() => fragment('keep')}>Keep it</button>
+        </div></div>}
+      <p className="muted small">Re-splits the lines at natural beats: sentence ends, the cue phrases below, and pauses (0.4 s at punctuation, 1 s anywhere). Nothing changes until you apply the proposal.</p>
+      <div className="row">
+        <input aria-label="Cue phrases" value={cues} onChange={e => setCues(e.target.value)} placeholder="cue phrases, comma separated (e.g. To my, I leave)" />
+        <button className="btn" disabled={!!act.busy || dirty} onClick={propose}>Propose</button>
+      </div>
+      {dirty && <p className="muted small">Save your line edits first: the proposal starts from the saved lines.</p>}
+      {prop && <>
+        {!prop.changed && <p className="muted">The lines already follow these beats.</p>}
+        <div className="grid cols-2">
+          <div><h3>Before ({prop.current.length} lines)</h3>
+            <ol className="small">{prop.current.map((l: Line) => <li key={l.id}>{l.text}</li>)}</ol></div>
+          <div><h3>After ({edit.length} lines)</h3>
+            <ol className="small">{edit.map((l, i) => (
+              <li key={`${l.id}-${i}`} style={{marginBottom: 4}}>
+                <input value={l.text} aria-label={`Proposed line ${i + 1}`} style={before.has(l.text) ? undefined : {borderColor: '#c2531b'}}
+                       onChange={e => setEdit(edit.map((x, k) => (k === i ? {...x, text: e.target.value} : x)))} />
+                <span className="muted"> {l.speaker || 'no speaker'}</span>
+                {i < edit.length - 1 && edit[i + 1].speaker === l.speaker && <button className="btn sm" style={{marginLeft: 6}} onClick={() => mergeNext(i)}>Merge with next</button>}
+              </li>))}</ol></div>
+        </div>
+        <p className="muted small">Changed lines are outlined. Edit the text or merge lines here; speakers and timing come from the audio.</p>
+        <div className="row">
+          <button className="btn primary" disabled={!!act.busy} onClick={apply}>Apply</button>
+          <button className="btn" onClick={() => setProp(null)}>Discard</button>
+        </div>
       </>}
     </div>
   );

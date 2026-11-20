@@ -1,0 +1,1454 @@
+{
+ "note": "Owner's Stage 1 test (episode 6, 'Will test'): one speaker, 2:32. Word timings and punctuated text exactly as transcribed by OpenAI whisper-1; used to test the line normaliser.",
+ "provider": "openai",
+ "model": "whisper-1",
+ "duration": 151.57,
+ "text": "Being of sound mind and in the presence of witnesses, I hereby bequeath my estate as follows. To my nephew, Ralph, the most bone-idle lentitudinous toad I've ever had the painful displeasure to know, I leave my yacht, the one I used to play with in the bath. To my mother-in-law, Sydney, who in my opinion would feel more at home living with diseased rats in the crumbling sewers of Buenos Aires and who never returned the tin of green paint I lent him, I leave nothing. To my niece, Winifred, who provided me with abundant personal comfort on that traumatic day when she fell under a train and caused me sizable distress when she survived, I leave a tin of green paint, the one her uncle Sydney still owes me. To my brother, Ronald, who frittered, nay, squandered every penny he managed to scrounge on cheap alcohol, loose women and K-Tel records, I leave the contents of my safe deposit box, the passkey of which is hidden under a stone somewhere in Canada. To Mr. and Mrs. Crabtree, my next-door neighbours, undoubtedly the most bigoted, class-conscious right-wing Nazi racists that it's ever been my displeasure to know, I leave my house to a large family of Pakistanis. And finally, to my young wife, who while we were married slept with more men than an Eskimo's had fish supper, I leave the remainder of my estate on the condition that within one week of this reading she woos and eventually marries the Ayatollah Khomeini. Failing this condition, the entire estate goes to the man who has helped me more than any other person in my life, my solicitor. Thank you, ladies and ",
+ "words": [
+  {
+   "start": 2.68,
+   "end": 3.4,
+   "word": "Being"
+  },
+  {
+   "start": 3.4,
+   "end": 3.68,
+   "word": "of"
+  },
+  {
+   "start": 3.68,
+   "end": 4.06,
+   "word": "sound"
+  },
+  {
+   "start": 4.06,
+   "end": 4.4,
+   "word": "mind"
+  },
+  {
+   "start": 4.4,
+   "end": 4.58,
+   "word": "and"
+  },
+  {
+   "start": 4.58,
+   "end": 4.76,
+   "word": "in"
+  },
+  {
+   "start": 4.76,
+   "end": 5.18,
+   "word": "the"
+  },
+  {
+   "start": 5.18,
+   "end": 5.18,
+   "word": "presence"
+  },
+  {
+   "start": 5.18,
+   "end": 5.98,
+   "word": "of"
+  },
+  {
+   "start": 5.98,
+   "end": 5.98,
+   "word": "witnesses"
+  },
+  {
+   "start": 6.34,
+   "end": 6.34,
+   "word": "I"
+  },
+  {
+   "start": 6.34,
+   "end": 6.74,
+   "word": "hereby"
+  },
+  {
+   "start": 6.74,
+   "end": 7.06,
+   "word": "bequeath"
+  },
+  {
+   "start": 7.06,
+   "end": 7.38,
+   "word": "my"
+  },
+  {
+   "start": 7.38,
+   "end": 7.72,
+   "word": "estate"
+  },
+  {
+   "start": 7.72,
+   "end": 8.08,
+   "word": "as"
+  },
+  {
+   "start": 8.48,
+   "end": 8.48,
+   "word": "follows"
+  },
+  {
+   "start": 9.6,
+   "end": 9.6,
+   "word": "To"
+  },
+  {
+   "start": 9.6,
+   "end": 9.86,
+   "word": "my"
+  },
+  {
+   "start": 9.86,
+   "end": 10.24,
+   "word": "nephew"
+  },
+  {
+   "start": 10.52,
+   "end": 11.08,
+   "word": "Ralph"
+  },
+  {
+   "start": 12.02,
+   "end": 12.3,
+   "word": "the"
+  },
+  {
+   "start": 12.3,
+   "end": 12.68,
+   "word": "most"
+  },
+  {
+   "start": 12.68,
+   "end": 13.04,
+   "word": "bone"
+  },
+  {
+   "start": 13.04,
+   "end": 13.44,
+   "word": "idle"
+  },
+  {
+   "start": 13.44,
+   "end": 14.42,
+   "word": "lentitudinous"
+  },
+  {
+   "start": 14.42,
+   "end": 14.86,
+   "word": "toad"
+  },
+  {
+   "start": 14.86,
+   "end": 15.96,
+   "word": "I've"
+  },
+  {
+   "start": 15.96,
+   "end": 16.18,
+   "word": "ever"
+  },
+  {
+   "start": 16.18,
+   "end": 16.36,
+   "word": "had"
+  },
+  {
+   "start": 16.36,
+   "end": 16.58,
+   "word": "the"
+  },
+  {
+   "start": 16.58,
+   "end": 16.9,
+   "word": "painful"
+  },
+  {
+   "start": 16.9,
+   "end": 17.4,
+   "word": "displeasure"
+  },
+  {
+   "start": 17.4,
+   "end": 17.76,
+   "word": "to"
+  },
+  {
+   "start": 17.76,
+   "end": 18.0,
+   "word": "know"
+  },
+  {
+   "start": 18.22,
+   "end": 19.32,
+   "word": "I"
+  },
+  {
+   "start": 19.32,
+   "end": 19.5,
+   "word": "leave"
+  },
+  {
+   "start": 19.5,
+   "end": 20.26,
+   "word": "my"
+  },
+  {
+   "start": 20.26,
+   "end": 20.26,
+   "word": "yacht"
+  },
+  {
+   "start": 21.92,
+   "end": 22.06,
+   "word": "the"
+  },
+  {
+   "start": 22.06,
+   "end": 22.18,
+   "word": "one"
+  },
+  {
+   "start": 22.18,
+   "end": 22.44,
+   "word": "I"
+  },
+  {
+   "start": 22.44,
+   "end": 22.52,
+   "word": "used"
+  },
+  {
+   "start": 22.52,
+   "end": 22.88,
+   "word": "to"
+  },
+  {
+   "start": 22.88,
+   "end": 22.88,
+   "word": "play"
+  },
+  {
+   "start": 22.88,
+   "end": 23.04,
+   "word": "with"
+  },
+  {
+   "start": 23.04,
+   "end": 23.2,
+   "word": "in"
+  },
+  {
+   "start": 23.2,
+   "end": 23.4,
+   "word": "the"
+  },
+  {
+   "start": 23.4,
+   "end": 23.78,
+   "word": "bath"
+  },
+  {
+   "start": 25.8,
+   "end": 26.52,
+   "word": "To"
+  },
+  {
+   "start": 26.52,
+   "end": 26.88,
+   "word": "my"
+  },
+  {
+   "start": 26.88,
+   "end": 27.48,
+   "word": "mother"
+  },
+  {
+   "start": 27.48,
+   "end": 27.5,
+   "word": "in"
+  },
+  {
+   "start": 27.5,
+   "end": 27.5,
+   "word": "law"
+  },
+  {
+   "start": 28.04,
+   "end": 28.04,
+   "word": "Sydney"
+  },
+  {
+   "start": 28.96,
+   "end": 29.2,
+   "word": "who"
+  },
+  {
+   "start": 29.2,
+   "end": 29.2,
+   "word": "in"
+  },
+  {
+   "start": 29.2,
+   "end": 29.58,
+   "word": "my"
+  },
+  {
+   "start": 29.58,
+   "end": 29.94,
+   "word": "opinion"
+  },
+  {
+   "start": 29.94,
+   "end": 30.2,
+   "word": "would"
+  },
+  {
+   "start": 30.2,
+   "end": 30.46,
+   "word": "feel"
+  },
+  {
+   "start": 30.46,
+   "end": 30.72,
+   "word": "more"
+  },
+  {
+   "start": 30.72,
+   "end": 31.18,
+   "word": "at"
+  },
+  {
+   "start": 31.18,
+   "end": 31.18,
+   "word": "home"
+  },
+  {
+   "start": 31.18,
+   "end": 31.42,
+   "word": "living"
+  },
+  {
+   "start": 31.42,
+   "end": 31.82,
+   "word": "with"
+  },
+  {
+   "start": 31.82,
+   "end": 32.2,
+   "word": "diseased"
+  },
+  {
+   "start": 32.2,
+   "end": 32.64,
+   "word": "rats"
+  },
+  {
+   "start": 32.64,
+   "end": 32.84,
+   "word": "in"
+  },
+  {
+   "start": 32.84,
+   "end": 33.38,
+   "word": "the"
+  },
+  {
+   "start": 33.38,
+   "end": 33.38,
+   "word": "crumbling"
+  },
+  {
+   "start": 33.38,
+   "end": 33.76,
+   "word": "sewers"
+  },
+  {
+   "start": 33.76,
+   "end": 34.16,
+   "word": "of"
+  },
+  {
+   "start": 34.16,
+   "end": 34.44,
+   "word": "Buenos"
+  },
+  {
+   "start": 34.44,
+   "end": 34.78,
+   "word": "Aires"
+  },
+  {
+   "start": 34.78,
+   "end": 35.9,
+   "word": "and"
+  },
+  {
+   "start": 35.9,
+   "end": 36.18,
+   "word": "who"
+  },
+  {
+   "start": 36.18,
+   "end": 36.38,
+   "word": "never"
+  },
+  {
+   "start": 36.38,
+   "end": 36.92,
+   "word": "returned"
+  },
+  {
+   "start": 36.92,
+   "end": 37.26,
+   "word": "the"
+  },
+  {
+   "start": 37.26,
+   "end": 37.26,
+   "word": "tin"
+  },
+  {
+   "start": 37.26,
+   "end": 37.48,
+   "word": "of"
+  },
+  {
+   "start": 37.48,
+   "end": 37.82,
+   "word": "green"
+  },
+  {
+   "start": 37.82,
+   "end": 38.1,
+   "word": "paint"
+  },
+  {
+   "start": 38.1,
+   "end": 38.54,
+   "word": "I"
+  },
+  {
+   "start": 38.54,
+   "end": 38.54,
+   "word": "lent"
+  },
+  {
+   "start": 38.54,
+   "end": 38.82,
+   "word": "him"
+  },
+  {
+   "start": 39.46,
+   "end": 40.22,
+   "word": "I"
+  },
+  {
+   "start": 40.22,
+   "end": 40.68,
+   "word": "leave"
+  },
+  {
+   "start": 40.68,
+   "end": 42.32,
+   "word": "nothing"
+  },
+  {
+   "start": 42.84,
+   "end": 43.18,
+   "word": "To"
+  },
+  {
+   "start": 43.18,
+   "end": 43.58,
+   "word": "my"
+  },
+  {
+   "start": 43.58,
+   "end": 43.68,
+   "word": "niece"
+  },
+  {
+   "start": 43.84,
+   "end": 44.28,
+   "word": "Winifred"
+  },
+  {
+   "start": 44.92,
+   "end": 45.42,
+   "word": "who"
+  },
+  {
+   "start": 45.42,
+   "end": 45.74,
+   "word": "provided"
+  },
+  {
+   "start": 45.74,
+   "end": 46.06,
+   "word": "me"
+  },
+  {
+   "start": 46.06,
+   "end": 46.76,
+   "word": "with"
+  },
+  {
+   "start": 46.76,
+   "end": 46.76,
+   "word": "abundant"
+  },
+  {
+   "start": 46.76,
+   "end": 47.42,
+   "word": "personal"
+  },
+  {
+   "start": 47.42,
+   "end": 47.76,
+   "word": "comfort"
+  },
+  {
+   "start": 47.76,
+   "end": 48.0,
+   "word": "on"
+  },
+  {
+   "start": 48.0,
+   "end": 48.26,
+   "word": "that"
+  },
+  {
+   "start": 48.26,
+   "end": 48.6,
+   "word": "traumatic"
+  },
+  {
+   "start": 48.6,
+   "end": 49.12,
+   "word": "day"
+  },
+  {
+   "start": 49.12,
+   "end": 49.78,
+   "word": "when"
+  },
+  {
+   "start": 49.78,
+   "end": 50.1,
+   "word": "she"
+  },
+  {
+   "start": 50.1,
+   "end": 50.2,
+   "word": "fell"
+  },
+  {
+   "start": 50.2,
+   "end": 50.46,
+   "word": "under"
+  },
+  {
+   "start": 50.46,
+   "end": 51.14,
+   "word": "a"
+  },
+  {
+   "start": 51.14,
+   "end": 51.14,
+   "word": "train"
+  },
+  {
+   "start": 51.14,
+   "end": 52.54,
+   "word": "and"
+  },
+  {
+   "start": 52.54,
+   "end": 52.84,
+   "word": "caused"
+  },
+  {
+   "start": 52.84,
+   "end": 53.2,
+   "word": "me"
+  },
+  {
+   "start": 53.2,
+   "end": 53.64,
+   "word": "sizable"
+  },
+  {
+   "start": 53.64,
+   "end": 54.26,
+   "word": "distress"
+  },
+  {
+   "start": 54.26,
+   "end": 54.54,
+   "word": "when"
+  },
+  {
+   "start": 54.54,
+   "end": 54.76,
+   "word": "she"
+  },
+  {
+   "start": 54.76,
+   "end": 55.44,
+   "word": "survived"
+  },
+  {
+   "start": 56.7,
+   "end": 58.2,
+   "word": "I"
+  },
+  {
+   "start": 58.2,
+   "end": 58.62,
+   "word": "leave"
+  },
+  {
+   "start": 58.62,
+   "end": 60.06,
+   "word": "a"
+  },
+  {
+   "start": 60.06,
+   "end": 60.06,
+   "word": "tin"
+  },
+  {
+   "start": 60.06,
+   "end": 60.3,
+   "word": "of"
+  },
+  {
+   "start": 60.3,
+   "end": 60.72,
+   "word": "green"
+  },
+  {
+   "start": 60.72,
+   "end": 61.22,
+   "word": "paint"
+  },
+  {
+   "start": 62.66,
+   "end": 62.82,
+   "word": "the"
+  },
+  {
+   "start": 62.82,
+   "end": 63.06,
+   "word": "one"
+  },
+  {
+   "start": 63.06,
+   "end": 63.34,
+   "word": "her"
+  },
+  {
+   "start": 63.34,
+   "end": 63.7,
+   "word": "uncle"
+  },
+  {
+   "start": 63.7,
+   "end": 64.16,
+   "word": "Sydney"
+  },
+  {
+   "start": 64.16,
+   "end": 64.68,
+   "word": "still"
+  },
+  {
+   "start": 64.68,
+   "end": 64.76,
+   "word": "owes"
+  },
+  {
+   "start": 64.98,
+   "end": 65.62,
+   "word": "me"
+  },
+  {
+   "start": 66.04,
+   "end": 66.68,
+   "word": "To"
+  },
+  {
+   "start": 66.68,
+   "end": 66.92,
+   "word": "my"
+  },
+  {
+   "start": 66.92,
+   "end": 67.26,
+   "word": "brother"
+  },
+  {
+   "start": 67.4,
+   "end": 67.96,
+   "word": "Ronald"
+  },
+  {
+   "start": 68.62,
+   "end": 68.88,
+   "word": "who"
+  },
+  {
+   "start": 68.88,
+   "end": 69.5,
+   "word": "frittered"
+  },
+  {
+   "start": 69.82,
+   "end": 70.08,
+   "word": "nay"
+  },
+  {
+   "start": 70.26,
+   "end": 70.64,
+   "word": "squandered"
+  },
+  {
+   "start": 70.64,
+   "end": 71.28,
+   "word": "every"
+  },
+  {
+   "start": 71.28,
+   "end": 71.56,
+   "word": "penny"
+  },
+  {
+   "start": 71.56,
+   "end": 71.8,
+   "word": "he"
+  },
+  {
+   "start": 71.8,
+   "end": 72.1,
+   "word": "managed"
+  },
+  {
+   "start": 72.1,
+   "end": 72.42,
+   "word": "to"
+  },
+  {
+   "start": 72.92,
+   "end": 72.92,
+   "word": "scrounge"
+  },
+  {
+   "start": 72.92,
+   "end": 73.74,
+   "word": "on"
+  },
+  {
+   "start": 73.74,
+   "end": 74.06,
+   "word": "cheap"
+  },
+  {
+   "start": 74.06,
+   "end": 74.62,
+   "word": "alcohol"
+  },
+  {
+   "start": 74.78,
+   "end": 75.04,
+   "word": "loose"
+  },
+  {
+   "start": 75.04,
+   "end": 75.28,
+   "word": "women"
+  },
+  {
+   "start": 75.28,
+   "end": 75.54,
+   "word": "and"
+  },
+  {
+   "start": 75.54,
+   "end": 75.86,
+   "word": "K"
+  },
+  {
+   "start": 75.86,
+   "end": 76.04,
+   "word": "Tel"
+  },
+  {
+   "start": 76.04,
+   "end": 76.76,
+   "word": "records"
+  },
+  {
+   "start": 76.86,
+   "end": 78.84,
+   "word": "I"
+  },
+  {
+   "start": 78.84,
+   "end": 79.06,
+   "word": "leave"
+  },
+  {
+   "start": 79.06,
+   "end": 79.5,
+   "word": "the"
+  },
+  {
+   "start": 79.5,
+   "end": 79.76,
+   "word": "contents"
+  },
+  {
+   "start": 79.76,
+   "end": 80.02,
+   "word": "of"
+  },
+  {
+   "start": 80.02,
+   "end": 80.3,
+   "word": "my"
+  },
+  {
+   "start": 80.3,
+   "end": 80.74,
+   "word": "safe"
+  },
+  {
+   "start": 80.74,
+   "end": 81.06,
+   "word": "deposit"
+  },
+  {
+   "start": 81.06,
+   "end": 81.8,
+   "word": "box"
+  },
+  {
+   "start": 82.66,
+   "end": 82.76,
+   "word": "the"
+  },
+  {
+   "start": 82.76,
+   "end": 83.32,
+   "word": "passkey"
+  },
+  {
+   "start": 83.32,
+   "end": 83.54,
+   "word": "of"
+  },
+  {
+   "start": 83.54,
+   "end": 83.76,
+   "word": "which"
+  },
+  {
+   "start": 83.76,
+   "end": 84.32,
+   "word": "is"
+  },
+  {
+   "start": 84.32,
+   "end": 84.32,
+   "word": "hidden"
+  },
+  {
+   "start": 84.32,
+   "end": 84.72,
+   "word": "under"
+  },
+  {
+   "start": 84.72,
+   "end": 85.68,
+   "word": "a"
+  },
+  {
+   "start": 85.68,
+   "end": 86.1,
+   "word": "stone"
+  },
+  {
+   "start": 86.1,
+   "end": 86.8,
+   "word": "somewhere"
+  },
+  {
+   "start": 86.8,
+   "end": 88.12,
+   "word": "in"
+  },
+  {
+   "start": 88.12,
+   "end": 88.12,
+   "word": "Canada"
+  },
+  {
+   "start": 91.38,
+   "end": 91.92,
+   "word": "To"
+  },
+  {
+   "start": 91.92,
+   "end": 92.12,
+   "word": "Mr"
+  },
+  {
+   "start": 92.12,
+   "end": 92.58,
+   "word": "and"
+  },
+  {
+   "start": 92.58,
+   "end": 92.82,
+   "word": "Mrs"
+  },
+  {
+   "start": 92.86,
+   "end": 93.66,
+   "word": "Crabtree"
+  },
+  {
+   "start": 93.88,
+   "end": 94.04,
+   "word": "my"
+  },
+  {
+   "start": 94.04,
+   "end": 94.44,
+   "word": "next"
+  },
+  {
+   "start": 94.44,
+   "end": 94.54,
+   "word": "door"
+  },
+  {
+   "start": 94.54,
+   "end": 95.08,
+   "word": "neighbours"
+  },
+  {
+   "start": 96.28,
+   "end": 96.68,
+   "word": "undoubtedly"
+  },
+  {
+   "start": 96.68,
+   "end": 97.02,
+   "word": "the"
+  },
+  {
+   "start": 97.02,
+   "end": 97.42,
+   "word": "most"
+  },
+  {
+   "start": 97.42,
+   "end": 97.7,
+   "word": "bigoted"
+  },
+  {
+   "start": 98.0,
+   "end": 98.34,
+   "word": "class"
+  },
+  {
+   "start": 98.34,
+   "end": 98.68,
+   "word": "conscious"
+  },
+  {
+   "start": 98.68,
+   "end": 99.34,
+   "word": "right"
+  },
+  {
+   "start": 99.34,
+   "end": 99.38,
+   "word": "wing"
+  },
+  {
+   "start": 99.38,
+   "end": 99.94,
+   "word": "Nazi"
+  },
+  {
+   "start": 99.94,
+   "end": 100.52,
+   "word": "racists"
+  },
+  {
+   "start": 100.52,
+   "end": 102.22,
+   "word": "that"
+  },
+  {
+   "start": 102.22,
+   "end": 102.22,
+   "word": "it's"
+  },
+  {
+   "start": 102.22,
+   "end": 102.48,
+   "word": "ever"
+  },
+  {
+   "start": 102.48,
+   "end": 102.64,
+   "word": "been"
+  },
+  {
+   "start": 102.64,
+   "end": 102.86,
+   "word": "my"
+  },
+  {
+   "start": 102.86,
+   "end": 103.3,
+   "word": "displeasure"
+  },
+  {
+   "start": 103.3,
+   "end": 103.62,
+   "word": "to"
+  },
+  {
+   "start": 103.62,
+   "end": 103.9,
+   "word": "know"
+  },
+  {
+   "start": 104.22,
+   "end": 104.52,
+   "word": "I"
+  },
+  {
+   "start": 104.52,
+   "end": 104.66,
+   "word": "leave"
+  },
+  {
+   "start": 104.66,
+   "end": 105.58,
+   "word": "my"
+  },
+  {
+   "start": 105.58,
+   "end": 105.58,
+   "word": "house"
+  },
+  {
+   "start": 105.58,
+   "end": 107.04,
+   "word": "to"
+  },
+  {
+   "start": 107.04,
+   "end": 107.28,
+   "word": "a"
+  },
+  {
+   "start": 107.28,
+   "end": 107.52,
+   "word": "large"
+  },
+  {
+   "start": 107.52,
+   "end": 107.84,
+   "word": "family"
+  },
+  {
+   "start": 107.84,
+   "end": 108.1,
+   "word": "of"
+  },
+  {
+   "start": 108.1,
+   "end": 111.0,
+   "word": "Pakistanis"
+  },
+  {
+   "start": 115.72,
+   "end": 115.88,
+   "word": "And"
+  },
+  {
+   "start": 115.88,
+   "end": 116.4,
+   "word": "finally"
+  },
+  {
+   "start": 116.56,
+   "end": 116.68,
+   "word": "to"
+  },
+  {
+   "start": 116.68,
+   "end": 116.88,
+   "word": "my"
+  },
+  {
+   "start": 116.88,
+   "end": 117.48,
+   "word": "young"
+  },
+  {
+   "start": 117.48,
+   "end": 117.58,
+   "word": "wife"
+  },
+  {
+   "start": 117.72,
+   "end": 118.2,
+   "word": "who"
+  },
+  {
+   "start": 118.2,
+   "end": 119.18,
+   "word": "while"
+  },
+  {
+   "start": 119.18,
+   "end": 119.36,
+   "word": "we"
+  },
+  {
+   "start": 119.36,
+   "end": 119.58,
+   "word": "were"
+  },
+  {
+   "start": 119.58,
+   "end": 119.94,
+   "word": "married"
+  },
+  {
+   "start": 119.94,
+   "end": 120.3,
+   "word": "slept"
+  },
+  {
+   "start": 120.3,
+   "end": 120.56,
+   "word": "with"
+  },
+  {
+   "start": 120.56,
+   "end": 120.9,
+   "word": "more"
+  },
+  {
+   "start": 120.9,
+   "end": 121.16,
+   "word": "men"
+  },
+  {
+   "start": 121.16,
+   "end": 121.32,
+   "word": "than"
+  },
+  {
+   "start": 121.32,
+   "end": 121.58,
+   "word": "an"
+  },
+  {
+   "start": 121.58,
+   "end": 122.12,
+   "word": "Eskimo's"
+  },
+  {
+   "start": 122.12,
+   "end": 122.3,
+   "word": "had"
+  },
+  {
+   "start": 122.3,
+   "end": 122.52,
+   "word": "fish"
+  },
+  {
+   "start": 122.52,
+   "end": 122.88,
+   "word": "supper"
+  },
+  {
+   "start": 123.12,
+   "end": 125.18,
+   "word": "I"
+  },
+  {
+   "start": 125.18,
+   "end": 125.4,
+   "word": "leave"
+  },
+  {
+   "start": 125.4,
+   "end": 125.78,
+   "word": "the"
+  },
+  {
+   "start": 125.78,
+   "end": 126.02,
+   "word": "remainder"
+  },
+  {
+   "start": 126.02,
+   "end": 126.32,
+   "word": "of"
+  },
+  {
+   "start": 126.32,
+   "end": 126.68,
+   "word": "my"
+  },
+  {
+   "start": 126.68,
+   "end": 127.06,
+   "word": "estate"
+  },
+  {
+   "start": 127.66,
+   "end": 128.26,
+   "word": "on"
+  },
+  {
+   "start": 128.26,
+   "end": 128.46,
+   "word": "the"
+  },
+  {
+   "start": 128.46,
+   "end": 128.8,
+   "word": "condition"
+  },
+  {
+   "start": 128.8,
+   "end": 129.12,
+   "word": "that"
+  },
+  {
+   "start": 129.12,
+   "end": 129.26,
+   "word": "within"
+  },
+  {
+   "start": 129.26,
+   "end": 129.76,
+   "word": "one"
+  },
+  {
+   "start": 129.76,
+   "end": 129.8,
+   "word": "week"
+  },
+  {
+   "start": 129.8,
+   "end": 129.98,
+   "word": "of"
+  },
+  {
+   "start": 129.98,
+   "end": 130.24,
+   "word": "this"
+  },
+  {
+   "start": 130.24,
+   "end": 130.62,
+   "word": "reading"
+  },
+  {
+   "start": 130.62,
+   "end": 131.26,
+   "word": "she"
+  },
+  {
+   "start": 131.26,
+   "end": 131.58,
+   "word": "woos"
+  },
+  {
+   "start": 131.58,
+   "end": 131.84,
+   "word": "and"
+  },
+  {
+   "start": 131.84,
+   "end": 132.38,
+   "word": "eventually"
+  },
+  {
+   "start": 132.38,
+   "end": 132.8,
+   "word": "marries"
+  },
+  {
+   "start": 132.8,
+   "end": 133.56,
+   "word": "the"
+  },
+  {
+   "start": 133.56,
+   "end": 134.28,
+   "word": "Ayatollah"
+  },
+  {
+   "start": 134.28,
+   "end": 134.84,
+   "word": "Khomeini"
+  },
+  {
+   "start": 136.94,
+   "end": 136.94,
+   "word": "Failing"
+  },
+  {
+   "start": 136.94,
+   "end": 137.3,
+   "word": "this"
+  },
+  {
+   "start": 137.3,
+   "end": 137.76,
+   "word": "condition"
+  },
+  {
+   "start": 137.96,
+   "end": 138.06,
+   "word": "the"
+  },
+  {
+   "start": 138.06,
+   "end": 138.58,
+   "word": "entire"
+  },
+  {
+   "start": 138.58,
+   "end": 139.02,
+   "word": "estate"
+  },
+  {
+   "start": 139.02,
+   "end": 139.36,
+   "word": "goes"
+  },
+  {
+   "start": 139.36,
+   "end": 139.56,
+   "word": "to"
+  },
+  {
+   "start": 139.56,
+   "end": 139.76,
+   "word": "the"
+  },
+  {
+   "start": 139.76,
+   "end": 140.12,
+   "word": "man"
+  },
+  {
+   "start": 140.12,
+   "end": 141.1,
+   "word": "who"
+  },
+  {
+   "start": 141.1,
+   "end": 141.36,
+   "word": "has"
+  },
+  {
+   "start": 141.36,
+   "end": 141.56,
+   "word": "helped"
+  },
+  {
+   "start": 141.56,
+   "end": 141.88,
+   "word": "me"
+  },
+  {
+   "start": 141.88,
+   "end": 142.06,
+   "word": "more"
+  },
+  {
+   "start": 142.06,
+   "end": 142.22,
+   "word": "than"
+  },
+  {
+   "start": 142.22,
+   "end": 142.44,
+   "word": "any"
+  },
+  {
+   "start": 142.44,
+   "end": 142.74,
+   "word": "other"
+  },
+  {
+   "start": 142.74,
+   "end": 143.12,
+   "word": "person"
+  },
+  {
+   "start": 143.12,
+   "end": 143.3,
+   "word": "in"
+  },
+  {
+   "start": 143.3,
+   "end": 143.54,
+   "word": "my"
+  },
+  {
+   "start": 143.54,
+   "end": 143.98,
+   "word": "life"
+  },
+  {
+   "start": 145.14,
+   "end": 145.42,
+   "word": "my"
+  },
+  {
+   "start": 145.42,
+   "end": 145.82,
+   "word": "solicitor"
+  },
+  {
+   "start": 145.94,
+   "end": 146.22,
+   "word": "Thank"
+  },
+  {
+   "start": 146.22,
+   "end": 146.38,
+   "word": "you"
+  },
+  {
+   "start": 146.4,
+   "end": 146.52,
+   "word": "ladies"
+  },
+  {
+   "start": 146.52,
+   "end": 147.06,
+   "word": "and"
+  }
+ ]
+}

@@ -36,6 +36,7 @@ from .db import get_db
 from .models import Asset, Character, Episode, Event, Review
 from .queue import enqueue
 from .workflow import GateError, require, set_stage
+from . import line_normaliser as LN
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
@@ -140,9 +141,31 @@ def state(db: Session, ep: Episode) -> dict:
             "unlabelled_lines": sum(1 for ln in lines if not ln.get("speaker")),
             "speakers_without_character": [s for s in sp if s not in keys],
             "cast_suggestion": tr.get("cast_suggestion"),
+            # Stage 1c: line quality (cue phrases, one-level Undo, a cut-off last line)
+            "cues": tr.get("cues", LN.DEFAULT_CUES),
+            "can_undo": bool(tr.get("lines_previous")),
+            "end_at": tr.get("end_at"),
+            "fragment": fragment_of(tr),
             "characters": [{"key": c.key, "name": c.name, "scope": c.scope, "voice_style": c.voice_style}
                            for c in sorted(keys.values(), key=lambda c: c.id)
                            if c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id]}
+
+
+def fragment_of(tr: dict) -> dict | None:
+    """The last line, if it looks cut off and the owner has not decided about it yet."""
+    lines = tr.get("lines", [])
+    if not lines or tr.get("end_at") is not None:
+        return None
+    frag = LN.trailing_fragment(lines, tr.get("text", ""), tr.get("duration"))
+    ack = tr.get("fragment_ack") or {}
+    if frag and ack.get("text") == frag["text"] and ack.get("end") == frag["end"]:
+        return None   # the owner chose to keep this exact line
+    return frag
+
+
+def remember(tr: dict) -> None:
+    """Keep the current lines (and audio end) so one click can undo the next change."""
+    tr["lines_previous"] = {"lines": tr.get("lines", []), "end_at": tr.get("end_at")}
 
 
 # ------------------------------------------------------------------ create + upload
@@ -253,6 +276,7 @@ class LineIn(BaseModel):
 
 class LinesIn(BaseModel):
     lines: list[LineIn] = Field(min_length=1, max_length=MAX_LINES)
+    keep_previous: bool = False   # an applied proposal (normaliser): the lines before it can be restored with Undo
 
 
 @router.put("/episodes/{eid}/audio/lines")
@@ -277,10 +301,88 @@ def save_lines(eid: int, body: LinesIn, db: Session = Depends(get_db)):
         lines.append({"id": f"l{i + 1}", "start": round(ln.start, 3), "end": round(ln.end, 3), "text": ln.text.strip(),
                       "speaker": speaker, "words": [w.model_dump() for w in ln.words]})
         prev_end = ln.end
+    if body.keep_previous:
+        remember(tr)
+    else:
+        tr.pop("lines_previous", None)   # Undo restores the lines before the last applied proposal only while nothing
+                                        # was edited since; an ordinary save makes the current lines the reference
     tr["lines"], tr["edited"] = lines, True
     ep.audio_transcript = tr
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Audio lines saved ({len(lines)} lines, "
                                                             f"{sum(1 for x in lines if not x['speaker'])} without a speaker)"))
+    db.commit()
+    return state(db, ep)
+
+
+# ------------------------------------------------------------------ line quality (Stage 1c)
+class NormaliseIn(BaseModel):
+    cues: list[str] | None = Field(default=None, max_length=20)
+
+
+@router.post("/episodes/{eid}/audio/normalise")
+def normalise(eid: int, body: NormaliseIn, db: Session = Depends(get_db)):
+    """A proposal only (nothing is saved but the cue phrases): the current lines re-split at natural beats, for the
+    owner to review side by side, edit and apply (PUT /audio/lines with keep_previous) or discard."""
+    ep = audio_episode(db, eid)
+    gate(ep, "label_audio")
+    tr = dict(ep.audio_transcript or {})
+    if body.cues is not None:
+        cues = list(dict.fromkeys(c.strip()[:40] for c in body.cues if c and c.strip()))
+        if tr.get("cues") != cues:
+            tr["cues"] = cues
+            ep.audio_transcript = tr
+            db.commit()
+    cues = tr.get("cues", LN.DEFAULT_CUES)
+    current = tr.get("lines", [])
+    proposal = LN.propose_lines(current, tr.get("text", ""), cues)
+    return {"cues": cues, "current": current, "proposal": proposal,
+            "fragment": LN.trailing_fragment(proposal, tr.get("text", ""), tr.get("duration")),
+            "changed": [ln["text"] for ln in proposal] != [ln["text"] for ln in current]}
+
+
+@router.post("/episodes/{eid}/audio/lines/undo")
+def undo_lines(eid: int, db: Session = Depends(get_db)):
+    """One-click Undo of the last applied proposal or fragment decision."""
+    ep = audio_episode(db, eid)
+    gate(ep, "label_audio")
+    tr = dict(ep.audio_transcript or {})
+    prev = tr.pop("lines_previous", None)
+    if not prev:
+        raise HTTPException(409, "there is nothing to undo")
+    tr["lines"], tr["end_at"] = prev["lines"], prev.get("end_at")
+    tr.pop("fragment_ack", None)
+    ep.audio_transcript = tr
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Audio lines restored ({len(prev['lines'])} lines)"))
+    db.commit()
+    return state(db, ep)
+
+
+class FragmentIn(BaseModel):
+    action: Literal["end_before", "keep"]
+
+
+@router.post("/episodes/{eid}/audio/fragment")
+def decide_fragment(eid: int, body: FragmentIn, db: Session = Depends(get_db)):
+    """A cut-off last line: end the episode before it (the line is removed and the audio will end at its start), or
+    keep it as it is."""
+    ep = audio_episode(db, eid)
+    gate(ep, "label_audio")
+    tr = dict(ep.audio_transcript or {})
+    frag = fragment_of(tr)
+    if not frag:
+        raise HTTPException(409, "the last line does not look cut off")
+    if body.action == "keep":
+        tr["fragment_ack"] = {"text": frag["text"], "end": frag["end"]}
+        msg = f"Kept the last line as it is: {frag['text']!r}"
+    else:
+        if len(tr.get("lines", [])) < 2:
+            raise HTTPException(409, "the only line cannot be removed")
+        remember(tr)
+        tr["lines"] = [ln for ln in tr["lines"] if ln["id"] != frag["line_id"]]
+        tr["end_at"] = frag["start"]
+        msg = f"The episode ends before the cut-off line at {frag['start']:.2f} s: {frag['text']!r}"
+    ep.audio_transcript = tr
+    db.add(Event(episode_id=ep.id, kind="episode", message=msg))
     db.commit()
     return state(db, ep)
 
