@@ -55,14 +55,18 @@ def components(mask: np.ndarray) -> list[np.ndarray]:
     return comps
 
 
-def find_neck(rgba: np.ndarray) -> dict:
-    """Top of the figure and the neck (narrowest outline row between 30% and 50% of the height)."""
+NECK_RANGE = {"v1": (0.30, 0.50), "v2": (0.15, 0.45)}   # v2 heads are about 30% of the height: the neck sits higher
+
+
+def find_neck(rgba: np.ndarray, style: str = "v1") -> dict:
+    """Top of the figure and the neck (narrowest outline row in the style's neck range of the height)."""
     a = rgba[:, :, 3] > 128
     rows = np.nonzero(a.any(1))[0]
     top, bot = int(rows[0]), int(rows[-1])
     H = bot - top
     best = None
-    for y in range(top + int(0.30 * H), top + int(0.50 * H)):
+    lo, hi = NECK_RANGE[style]
+    for y in range(top + int(lo * H), top + int(hi * H)):
         r = runs(a[y])
         w = sum(e - s + 1 for s, e in r)
         if r and (best is None or w < best[1]):
@@ -70,14 +74,15 @@ def find_neck(rgba: np.ndarray) -> dict:
     return {"top": top, "bottom": bot, "height": H, "neck": [(best[2][0][0] + best[2][-1][1]) / 2, best[0]]}
 
 
-def measure_body(rgba: np.ndarray) -> dict:
+def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
     a = rgba[:, :, 3] > 128
     rows = np.nonzero(a.any(1))[0]
     top, bot = int(rows[0]), int(rows[-1])
     H = bot - top
-    # neck: narrowest single-run row between 30% and 50% of the height
+    # neck: narrowest single-run row in the style's neck range (v1: 30-50% of the height)
     best = None
-    for y in range(top + int(0.30 * H), top + int(0.50 * H)):
+    lo, hi = NECK_RANGE[style]
+    for y in range(top + int(lo * H), top + int(hi * H)):
         r = runs(a[y])
         w = sum(e - s + 1 for s, e in r)
         if r and (best is None or w < best[1]):
@@ -199,6 +204,120 @@ def face_features(rgba: np.ndarray, top: int, neck_y: int, neck_x: float) -> dic
     return {"eyes": eyes, "mouth": mouth, "skin": [int(v) for v in skin]}
 
 
+def detect_style(rgba: np.ndarray) -> str:
+    """v1 heads have white eye discs with a dark pupil inside; house style v2 heads (owner decision 2026-11-20) have solid
+    black eyes and no whites at all. Looks at the top 45% of the figure only."""
+    a = rgba[:, :, 3] > 128
+    rows = np.nonzero(a.any(1))[0]
+    top, bot = int(rows[0]), int(rows[-1])
+    head = rgba[top: top + int(0.45 * (bot - top))]
+    rgb = head[:, :, :3].astype(int)
+    alpha = head[:, :, 3] > 128
+    white = (alpha & (rgb.min(2) > 225))[::2, ::2]
+    area = alpha.sum() / 4
+    discs = []
+    for c in components(white):
+        if not (0.002 * area < len(c) < 0.25 * area):
+            continue
+        (y0, x0), (y1, x1) = c.min(0) * 2, c.max(0) * 2
+        box = rgb[y0:y1 + 1, x0:x1 + 1]
+        if box.size and 0.03 < (box.max(2) < 90).mean() < 0.6:   # a dark pupil inside the white disc
+            discs.append((len(c), (y0 + y1) / 2, y1 - y0 + 1))
+    # v1: a PAIR of eye whites, similar in size and at the same height (a white v2 head and torso are neither)
+    for i in range(len(discs)):
+        for j in range(i + 1, len(discs)):
+            (n1, y1_, h1), (n2, y2_, h2) = discs[i], discs[j]
+            if max(n1, n2) / min(n1, n2) < 1.6 and abs(y1_ - y2_) < 0.5 * max(h1, h2):
+                return "v1"
+    return "v2"
+
+
+def _holes(mask: np.ndarray) -> list[np.ndarray]:
+    """Components of ~mask that do not touch the border of the (cropped) mask: the shapes enclosed by it."""
+    H, W = mask.shape
+    out = []
+    for c in components(~mask):
+        if c[:, 0].min() == 0 or c[:, 1].min() == 0 or c[:, 0].max() == H - 1 or c[:, 1].max() == W - 1:
+            continue
+        out.append(c)
+    return out
+
+
+def face_features_v2(rgba: np.ndarray, top: int, neck_y: int, neck_x: float) -> dict:
+    """House style v2 face: the head's fill (white or the character's skin tone) is the largest light region; the eyes are
+    the two similar, roughly round or upright solid black shapes enclosed by it at about the same height; the mouth is
+    the biggest enclosed mark below them (a thin line, an O or a D). Also measures the mouth's curve (positive: the
+    middle is lower than the corners, a smile; negative: a frown) so spoken mouth shapes keep the expression."""
+    head = rgba[top:neck_y]
+    rgb = head[:, :, :3].astype(int)
+    alpha = head[:, :, 3] > 128
+    light = alpha & (rgb.max(2) > 110)
+    small = components(light[::2, ::2])
+    big = max(small, key=len)
+    (y0, x0), (y1, x1) = big.min(0) * 2, big.max(0) * 2 + 1
+    fill = np.zeros_like(light)
+    fill[big[:, 0] * 2, big[:, 1] * 2] = True
+    from PIL import ImageFilter as F
+    fill = (np.array(Image.fromarray(fill.astype(np.uint8) * 255).filter(F.MaxFilter(3))) > 0) & light
+    skin = np.median(rgb[fill], 0)
+    crop = fill[y0:y1 + 1, x0:x1 + 1]
+    feats = []
+    for c in _holes(crop):
+        cy, cx = c[:, 0].mean() + y0, c[:, 1].mean() + x0
+        h = c[:, 0].max() - c[:, 0].min() + 1
+        w = c[:, 1].max() - c[:, 1].min() + 1
+        feats.append({"c": c, "cx": float(cx), "cy": float(cy), "w": float(w), "h": float(h), "n": len(c)})
+    head_w = x1 - x0
+    tiny = 0.0004 * fill.sum()
+    cands = [f for f in feats if f["n"] > tiny and f["h"] >= 0.85 * f["w"] and f["cy"] < y0 + 0.75 * (y1 - y0)]
+    best = None
+    for i in range(len(cands)):
+        for j in range(i + 1, len(cands)):
+            a, b = cands[i], cands[j]
+            if abs(a["cx"] - b["cx"]) < 0.15 * head_w:
+                continue
+            score = abs(a["cy"] - b["cy"]) / max(a["h"], b["h"]) + abs(a["n"] - b["n"]) / max(a["n"], b["n"])
+            if best is None or score < best[0]:
+                best = (score, a, b)
+    if best is None:
+        raise ValueError("v2 face: could not find two solid black eyes")
+    eyes = []
+    for f in sorted(best[1:], key=lambda f: f["cx"]):
+        r = max(f["w"], f["h"]) / 2
+        eyes.append({"cx": f["cx"], "cy": f["cy"] + top, "w": f["w"], "h": f["h"], "pupil": {"cx": f["cx"], "cy": f["cy"] + top, "r": float(r)}})
+    eye_cx = (eyes[0]["cx"] + eyes[1]["cx"]) / 2
+    eye_dx = eyes[1]["cx"] - eyes[0]["cx"]
+    eye_bottom = max(e["cy"] + e["h"] / 2 for e in eyes) - top
+    under = [f for f in feats if f is not best[1] and f is not best[2] and f["cy"] - f["h"] / 2 > eye_bottom
+             and abs(f["cx"] - eye_cx) < 0.45 * eye_dx and f["n"] > tiny]
+    if under:
+        mf = max(under, key=lambda f: f["n"])
+        c = mf["c"]
+        mx0, mx1 = c[:, 1].min() + x0, c[:, 1].max() + x0
+        my0, my1 = c[:, 0].min() + y0, c[:, 0].max() + y0
+        w = mx1 - mx0 + 1
+        side = c[c[:, 1] + x0 < mx0 + 0.2 * w]
+        side2 = c[c[:, 1] + x0 > mx1 - 0.2 * w]
+        mid = c[np.abs(c[:, 1] + x0 - (mx0 + mx1) / 2) < 0.1 * w]
+        curve = 0.0
+        if len(side) and len(side2) and len(mid) and (my1 - my0 + 1) < 0.5 * w:   # only a line-like mouth has a curve
+            curve = float(np.clip((mid[:, 0].mean() - (side[:, 0].mean() + side2[:, 0].mean()) / 2) / w, -0.3, 0.3))
+        color = [int(v) for v in np.median(rgb[c[:, 0] + y0, c[:, 1] + x0], 0)]
+    else:   # no visible mouth: a short line's place under the eyes
+        mx0, mx1 = eye_cx - 0.25 * eye_dx, eye_cx + 0.25 * eye_dx
+        my0 = my1 = eye_bottom + 0.45 * (neck_y - top - eye_bottom)
+        curve, color = 0.0, [18, 18, 18]
+    mouth = {"x0": float(mx0), "x1": float(mx1), "y0": float(my0 + top), "y1": float(my1 + top)}
+    mouth["cx"], mouth["cy"] = (mouth["x0"] + mouth["x1"]) / 2, (mouth["y0"] + mouth["y1"]) / 2
+    mouth["w"], mouth["h"] = mouth["x1"] - mouth["x0"], mouth["y1"] - mouth["y0"]
+    mouth["color"], mouth["curve"] = color, round(curve, 3)
+    return {"eyes": eyes, "mouth": mouth, "skin": [int(v) for v in skin], "style": "v2"}
+
+
+def features(rgba: np.ndarray, top: int, neck_y: int, neck_x: float, style: str) -> dict:
+    return face_features_v2(rgba, top, neck_y, neck_x) if style == "v2" else face_features(rgba, top, neck_y, neck_x)
+
+
 def chin_row(rgba: np.ndarray, top: int, neck_y: int, face: dict) -> int:
     """Bottom of the face's skin region (the chin). A turtleneck or collar can hide the neck, so the narrowest row
     of the outline is not always under the chin."""
@@ -258,7 +377,7 @@ def cut_head(rgba: np.ndarray, body: dict, face: dict, out: Path, name: str, exp
     head = Image.composite(skin, head, erase)
     d = ImageDraw.Draw(head)
     arr = np.array(head)
-    for e in ([] if expression else face["eyes"]):
+    for e in ([] if expression or face.get("style") == "v2" else face["eyes"]):
         p = e["pupil"]
         # the eye's own white (slightly warm in the art), sampled around the pupil
         ring = arr[int(p["cy"] - 2.2 * p["r"]):int(p["cy"] + 2.2 * p["r"]), int(p["cx"] - 2.2 * p["r"]):int(p["cx"] + 2.2 * p["r"])].reshape(-1, 4)
@@ -328,12 +447,13 @@ def main():
     head_only = sys.argv[4] if len(sys.argv) > 4 and sys.argv[3] == "--head-only" else None
     if head_only:
         rig = json.loads((out / "rig.json").read_text())
-        b = find_neck(rgba)   # expression poses can raise arms: only the head is needed
-        face = face_features(rgba, b["top"], b["neck"][1], b["neck"][0])
+        style = rig.get("style", "v1")
+        b = find_neck(rgba, style)   # expression poses can raise arms: only the head is needed
+        face = features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
         chin = chin_row(rgba, b["top"], b["neck"][1], face)
         if chin + 4 < b["neck"][1]:
             b["neck"][1] = chin + 4
-            face = face_features(rgba, b["top"], b["neck"][1], b["neck"][0])
+            face = features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
         head = cut_head(rgba, b, face, out, head_only, expression=True)
         # express the extra head relative to its own neck so it can be swapped onto the rig's neck; its eyes are kept
         # as drawn (the expression lives in them), only the mouth is live
@@ -341,17 +461,20 @@ def main():
         (out / "rig.json").write_text(json.dumps(rig, indent=1))
         print("added head", head_only, "mouth", face["mouth"]["w"], "x", face["mouth"]["h"])
         return
-    body = measure_body(rgba)
-    face = face_features(rgba, body["top"], body["neck"][1], body["neck"][0])
+    style = detect_style(rgba)
+    body = measure_body(rgba, style)
+    face = features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
     chin = chin_row(rgba, body["top"], body["neck"][1], face)
     if chin + 4 < body["neck"][1]:
         # a collar hides the neck: cut the head at the chin and look for the mouth above it
         body["neck"][1] = chin + 4
-        face = face_features(rgba, body["top"], body["neck"][1], body["neck"][0])
+        face = features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
     head = cut_head(rgba, body, face, out, "neutral")
     parts = cut_body(rgba, body, out)
     rig = {"source": src.name, "image_size": [rgba.shape[1], rgba.shape[0]], "body": body, "parts": parts,
-           "faces": {"neutral": {**face, **head, "neck": body["neck"]}}}
+           "faces": {"neutral": {**face, **head, "neck": body["neck"], **({"static_eyes": True} if style == "v2" else {})}}}
+    if style == "v2":
+        rig["style"] = "v2"   # v1 rig.json stays exactly as before (no key)
     (out / "rig.json").write_text(json.dumps(rig, indent=1))
     debug_image(rgba, rig, out)
     print(json.dumps({k: body[k] for k in ("neck", "shoulder_l", "hand_l", "hip_l", "ankle_l", "line_width")}),

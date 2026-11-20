@@ -17,8 +17,9 @@ class HouseStyleRulesTest(unittest.TestCase):
 
     def test_v2_rules_remove_every_kids_cue(self):
         r = house_style.character_rules("v2")
-        for must in ("ADULT", "about 28% of the total height", "SOLID BLACK vertical ovals with NO whites", "NO ears", "NO nose",
-                     "HEAVY thick black wedges", "short thin black line", "black blobs", "NO shoes", "flat WHITE",
+        for must in ("ADULT", "about 30% of the total height", "SOLID BLACK vertical ovals with NO whites", "NO ears", "NO nose",
+                     "HEAVY thick black wedges", "short thin black line", "CHUNKY solid black rounded blobs", "NO fingers drawn",
+                     "clearly TAPERS", "clearly OPEN solid black oval", "HEAVY, confident black lines", "NO shoes", "flat WHITE",
                      "NOT a children's cartoon"):
             self.assertIn(must, r)
         for kid in ("mitten hands", "round expressive eyes", "rounded shoes", "small round ears", "natural skin tone"):
@@ -26,6 +27,9 @@ class HouseStyleRulesTest(unittest.TestCase):
         s = house_style.set_style("v2")
         self.assertIn("warm interior lamp light against cool blue", s)
         self.assertIn("NO storybook look", s)
+        self.assertIn("2D PAINTED ILLUSTRATION", s)
+        self.assertIn("NOT photographic, NOT a photo, NOT a 3D render", s)
+        self.assertIn("BRIGHT, readable mid-tones", s)
         for kid in ("cozy", "storybook texture", "rich but gentle"):
             self.assertNotIn(kid, s)
         self.assertNotIn("{", r + s)   # every placeholder filled

@@ -94,6 +94,8 @@ export async function loadRig(dir, figureHeight, opts = {}) {
       skin: `rgb(${fc.skin.join(',')})`,
       lips: opts.lips ? `rgb(${fc.mouth.color.join(',')})` : '#111',
       static_eyes: !!fc.static_eyes,   // expression faces keep their drawn eyes (the expression lives in them)
+      style: fc.style || rig.style || 'v1',   // v2: solid black eyes, thin-line mouth (house style v2)
+      curve: (fc.mouth && fc.mouth.curve) || 0,   // v2: the expression's mouth bend, kept while speaking
     };
   }
   Object.assign(c, c.faces.neutral);   // the neutral face is the default
@@ -127,7 +129,31 @@ function hand(ctx, j, e, lw, kind) {
   ctx.restore();
 }
 
+// House style v2 (overlay lip sync, owner decision 2026-11-20): Rhubarb shapes drawn as solid black ink in the line
+// style, sized to the face's own mouth; closed shapes keep the expression's bend (smile or frown); no teeth or tongue.
+function mouthShapeV2(ctx, c, v, lw) {
+  const m = c.mouth, mw = Math.max(m.w, 40);
+  if (v === 'X') { ctx.drawImage(c.mouthRest, c.mouthRestOff.x, c.mouthRestOff.y); return; }
+  const ink = '#121212', bend = clamp(c.curve || 0, -0.3, 0.3);
+  ctx.save(); ctx.translate(m.x, m.y);
+  const line = (w, wid, dy = 0) => { ctx.beginPath(); ctx.moveTo(-w / 2, dy); ctx.quadraticCurveTo(0, dy + 2 * bend * w, w / 2, dy); ctx.lineWidth = wid; ctx.lineCap = 'round'; ctx.strokeStyle = ink; ctx.stroke(); };
+  const oval = (w, h) => { ctx.beginPath(); ctx.ellipse(0, h / 2 - lw * 0.3, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fillStyle = ink; ctx.fill(); };
+  switch (v) {
+    case 'A': line(mw * 0.9, lw * 0.7); break;                        // M B P: closed
+    case 'G': line(mw * 0.8, lw * 0.7, lw * 0.25); break;             // F V: closed, lower lip tucked
+    case 'B': oval(mw * 0.8, Math.max(lw * 0.9, mw * 0.14)); break;   // most consonants: a narrow slit
+    case 'C': oval(mw * 0.6, mw * 0.32); break;                       // EH: small open
+    case 'E': oval(mw * 0.5, mw * 0.36); break;                       // AO ER: rounded
+    case 'H': oval(mw * 0.55, mw * 0.3); break;                       // L
+    case 'D': oval(mw * 0.72, mw * 0.55); break;                      // AA: wide open
+    case 'F': oval(mw * 0.3, mw * 0.32); break;                       // OO W: small round O
+    default: oval(mw * 0.6, mw * 0.32);
+  }
+  ctx.restore();
+}
+
 function mouthShape(ctx, c, v, lw) {
+  if (c.style === 'v2') return mouthShapeV2(ctx, c, v, lw);
   const m = c.mouth, mw = Math.max(m.w, 70);
   if (v === 'X') { ctx.drawImage(c.mouthRest, c.mouthRestOff.x, c.mouthRestOff.y); return; }
   ctx.save(); ctx.translate(m.x, m.y + (VISEME_OPEN[v] || 0) * mw * 0.12);
@@ -150,6 +176,14 @@ function drawHead(ctx, c0, p) {
   const c = {...c0, ...(c0.faces[p.expression] || c0.faces.neutral)};
   ctx.drawImage(c.head, c.headOff.x, c.headOff.y);
   const lw = c.lw;
+  if (c.style === 'v2' && p.blink > 0.5) {
+    // v2 blink: the solid black eye closes to a short heavy line
+    for (const e of c.eyes) {
+      ctx.fillStyle = c.skin; ctx.beginPath(); ctx.ellipse(e.x, e.y, e.w / 2 + 3, e.h / 2 + 3, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(e.x - e.w * 0.75, e.y + e.h * 0.1); ctx.lineTo(e.x + e.w * 0.75, e.y + e.h * 0.1);
+      ctx.lineWidth = lw * 0.6; ctx.lineCap = 'round'; ctx.strokeStyle = '#121212'; ctx.stroke();
+    }
+  }
   for (const e of c.static_eyes ? [] : c.eyes) {
     // pupil: live, constrained inside the eye white
     const maxX = e.w / 2 - e.r - 8, maxY = e.h / 2 - e.r - 8;

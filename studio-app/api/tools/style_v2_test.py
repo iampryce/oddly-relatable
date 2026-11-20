@@ -11,7 +11,10 @@ Spend control: every image call is counted and estimated from the response's usa
 high-quality image plus input image/text tokens). A call is refused when spent + a worst case of $0.25 would exceed
 --budget, and never more than --max-images calls are made.
 
-    python tools/style_v2_test.py --out /out [--budget 4.0] [--max-images 16]
+    python tools/style_v2_test.py --out /out [--budget 4.0] [--max-images 16] [--model gpt-image-2.6-sunburst] [--key-from-env]
+
+--key-from-env: use OPENAI_API_KEY from the environment only (a dedicated, budget-capped test key) and never connect to
+the studio database (the production key in Settings is then out of reach).
 """
 from __future__ import annotations
 
@@ -46,8 +49,9 @@ class BudgetStop(RuntimeError):
 
 
 class Spend:
-    def __init__(self, budget: float, max_calls: int):
+    def __init__(self, budget: float, max_calls: int, per_token: bool = False):
         self.budget, self.max_calls, self.calls, self.spent, self.log = budget, max_calls, 0, 0.0, []
+        self.per_token = per_token
 
     def guard(self, what: str):
         if self.calls >= self.max_calls:
@@ -58,7 +62,12 @@ class Spend:
     def record(self, what: str, usage: dict | None, seconds: float):
         u = usage or {}
         d = u.get("input_tokens_details") or {}
-        cost = 0.165 + d.get("image_tokens", 0) * 10e-6 + d.get("text_tokens", 0) * 5e-6 if u else WORST_CALL
+        if not u:
+            cost = WORST_CALL
+        elif self.per_token:      # gpt-image-2.5/2.6: $30 / 1M output tokens, $8 / 1M image input, $5 / 1M text input
+            cost = u.get("output_tokens", 0) * 30e-6 + d.get("image_tokens", 0) * 8e-6 + d.get("text_tokens", 0) * 5e-6
+        else:                     # gpt-image-2: $0.165 per high-quality 1024x1536 image plus input tokens
+            cost = 0.165 + d.get("image_tokens", 0) * 10e-6 + d.get("text_tokens", 0) * 5e-6
         self.calls += 1
         self.spent += cost
         self.log.append({"image": what, "estimated_usd": round(cost, 4), "usage": u, "seconds": round(seconds, 1)})
@@ -69,7 +78,16 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=float, default=4.0)
     ap.add_argument("--max-images", type=int, default=16)
+    ap.add_argument("--model", default="", help="image model (default: the studio's image setting, else gpt-image-2)")
+    ap.add_argument("--key-from-env", action="store_true", help="OPENAI_API_KEY from the environment; no database access")
     a = ap.parse_args()
+    if a.key_from_env:
+        import os
+        if not os.environ.get("OPENAI_API_KEY"):
+            print(json.dumps({"errors": ["--key-from-env: OPENAI_API_KEY is not set"]}))
+            return 2
+        # an empty database URL: secret() finds no Settings row and falls back to the environment variable
+        os.environ["DATABASE_URL"] = f"sqlite:///{Path(a.out).resolve() / 'no-studio-db.sqlite'}"
     out = Path(a.out)
     for d in ("raw", "poses", "sets", "rig", "clip"):
         (out / d).mkdir(parents=True, exist_ok=True)
@@ -82,10 +100,13 @@ def main() -> int:
     from oddstudio.settings_store import get_section
     from oddstudio.tasks import pose_prompt_v2
 
-    with new_session() as db:                     # read only
-        image_cfg = get_section(db, "image")
-    cfg = {"provider": "openai", "model": image_cfg.get("model", ""), "size": "1024x1536", "fallback": "none"}
-    spend = Spend(a.budget, a.max_images)
+    if a.key_from_env:
+        image_cfg = {}
+    else:
+        with new_session() as db:                 # read only
+            image_cfg = get_section(db, "image")
+    cfg = {"provider": "openai", "model": a.model or image_cfg.get("model", ""), "size": "1024x1536", "fallback": "none"}
+    spend = Spend(a.budget, a.max_images, per_token=cfg["model"].startswith(("gpt-image-2.5", "gpt-image-2.6")))
     report = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "model": cfg["model"] or "gpt-image-2 (default)",
               "size": cfg["size"], "character": vars(CHARACTER), "images": [], "checks": {}, "errors": []}
 
