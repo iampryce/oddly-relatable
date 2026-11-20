@@ -647,6 +647,10 @@ def after_job(db: Session, job: Job) -> None:
         set_stage(ep, "audio_labelling" if (ep.audio_transcript or {}).get("lines") else "audio_upload")
         ep.last_error = job.error[:2000]
         db.commit()
+    elif job.kind == "audio_scenes" and job.status == "failed":
+        set_stage(ep, "script_review" if ep.script_version else "audio_labelling")
+        ep.last_error = job.error[:2000]
+        db.commit()
     elif job.kind == "audio_media_prepare" and job.status == "failed":
         # the video could not be prepared (its file is already deleted): upload again
         set_stage(ep, "audio_upload")
@@ -759,3 +763,4 @@ from . import comparison  # noqa: E402,F401
 from . import voice_compare  # noqa: E402,F401
 from . import sets  # noqa: E402,F401
 from . import audio_first  # noqa: E402,F401
+from . import audio_scenes  # noqa: E402,F401

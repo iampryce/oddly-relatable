@@ -157,6 +157,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
 
       {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
       {st.stage === 'audio_labelling' && <SilentCastCard st={st} episodeId={episodeId} act={act} />}
+      {(st.stage === 'audio_labelling' || st.stage === 'script_review') && <ScenesCard st={st} episodeId={episodeId} act={act} dirty={dirty} />}
     </div>
   );
 }
@@ -187,6 +188,27 @@ function TrimCard({st, episodeId, act, hasLines, onApplied}: {st: any; episodeId
         <button className="btn primary" disabled={!!err || !!act.busy} onClick={apply}>Use this window</button>
       </div>
       {err && <p className="small" style={{color: 'var(--bad, #b00)'}}>{err}</p>}
+    </div>
+  );
+}
+
+// Stage 2: the scenes are built around the recorded lines (runs of consecutive lines; cuts only between lines).
+function ScenesCard({st, episodeId, act, dirty}: {st: any; episodeId: number; act: ReturnType<typeof useAction>; dirty: boolean}) {
+  const keys = new Set(st.characters.map((c: any) => c.key));
+  const lines: any[] = st.lines || [];
+  const notCast = lines.filter(l => !keys.has(l.speaker)).length;
+  const ready = lines.length > 0 && notCast === 0 && !dirty;
+  const build = (mode: string) => act.run('scenes', () => api(`/episodes/${episodeId}/audio/scenes`, {body: {mode}}));
+  return (
+    <div className="card stack">
+      <h2 style={{margin: 0}}>Scenes</h2>
+      <p className="muted small">The scenes are built around the recording: each scene is a run of recorded lines, a cut falls only between two lines, and the words, speakers and timing never change. The AI writer chooses the cuts and how each line is acted (expression, gesture, who they look at, shot, silent reactions); if it is not set up or its plan breaks these rules, the simple split is used (a new scene at each long pause). You review and approve the result in the Script tab.</p>
+      {st.stage === 'audio_labelling' && !ready && <div className="alert warn small">{dirty ? 'Save the lines first.' : notCast ? `${notCast} line(s) do not have a cast character as speaker yet: label them and apply the cast.` : 'Transcribe the audio first.'}</div>}
+      <div className="row">
+        <button className="btn primary" disabled={!ready || !!act.busy || !st.allowed_actions.includes('build_audio_scenes')} onClick={() => build('writer')}>{st.stage === 'script_review' ? 'Rebuild the scenes (AI writer)' : 'Build the scenes (AI writer)'}</button>
+        <button className="btn" disabled={!ready || !!act.busy || !st.allowed_actions.includes('build_audio_scenes')} onClick={() => build('simple')}>Simple split</button>
+        {st.allowed_actions.includes('reopen_audio_labels') && <button className="btn" disabled={!!act.busy} onClick={() => act.run('reopen', () => api(`/episodes/${episodeId}/audio/reopen-labels`, {method: 'POST'}))}>Back to labels and cast</button>}
+      </div>
     </div>
   );
 }

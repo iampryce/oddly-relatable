@@ -8,6 +8,7 @@ import CastPanel from '@/components/CastPanel';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
 import AudioPanel from '@/components/AudioPanel';
+import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
 
 const TABS = ['Audio', 'Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
 type Tab = typeof TABS[number];
@@ -109,6 +110,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
   const s = ep.script?.content;
   const job = lastJob(ep, 'generate_act') || lastJob(ep, 'generate_script') || lastJob(ep, 'regenerate_section');
   const long = ep.format === 'long';
+  const audio = ep.source === 'audio';   // Stage 2: scenes around the recorded dialogue (built in the Audio tab)
   const save = () => act.run('save', async () => { await api(`/episodes/${ep.id}/script`, {method: 'PUT', body: {content: draft, note}}); setDraft(null); });
   const regen = (section: string) => act.run('regen', () => api(`/episodes/${ep.id}/script/regenerate-section`, {body: {section, instruction}}));
   if (draft) {
@@ -148,12 +150,17 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
         {draft.scenes.map((sc: Scene, i: number) => (
           <div key={i} className="card">
             <div className="spread"><h3>Scene {i + 1}</h3>
-              <button className="btn sm danger" disabled={draft.scenes.length === 1} onClick={() => set('scenes', draft.scenes.filter((_: any, j: number) => j !== i))}>Remove scene</button></div>
+              {!audio && <button className="btn sm danger" disabled={draft.scenes.length === 1} onClick={() => set('scenes', draft.scenes.filter((_: any, j: number) => j !== i))}>Remove scene</button>}
+              {audio && <span className="row">
+                {sc.lines.length > 1 && <select aria-label="Split this scene" value="" style={{width: 'auto'}} onChange={e => { const k = Number(e.target.value); if (k) setDraft((d: any) => ({...d, scenes: splitScene(d.scenes, i, k)})); }}>
+                  <option value="">Split after line…</option>{sc.lines.slice(0, -1).map((l: any, k: number) => <option key={k} value={k + 1}>{l.line_id || k + 1}: {l.text.slice(0, 30)}</option>)}</select>}
+                {i > 0 && <button className="btn sm" onClick={() => set('scenes', joinWithPrevious(draft.scenes, i))}>Join with the scene before</button>}
+              </span>}</div>
             <SceneEditor scene={sc} characters={characters.filter(c => castKeys.includes(c.key))} environments={environments}
                          onChange={n => set('scenes', draft.scenes.map((x: any, j: number) => (j === i ? n : x)))} />
           </div>))}
         <div className="card row">
-          <button className="btn" onClick={() => set('scenes', [...draft.scenes, {id: `s${draft.scenes.length + 1}`, heading: `Scene ${draft.scenes.length + 1}`, location: '', description: '', action: '', camera: '', lines: [{speaker: castKeys[0] || '', text: '', expression: 'neutral', shot: 'wide'}]}])}>Add scene</button>
+          {!audio && <button className="btn" onClick={() => set('scenes', [...draft.scenes, {id: `s${draft.scenes.length + 1}`, heading: `Scene ${draft.scenes.length + 1}`, location: '', description: '', action: '', camera: '', lines: [{speaker: castKeys[0] || '', text: '', expression: 'neutral', shot: 'wide'}]}])}>Add scene</button>}
           <input style={{flex: 1, minWidth: 200}} placeholder="What changed (optional)" value={note} onChange={e => setNote(e.target.value)} />
           <button className="btn primary" disabled={!!act.busy} onClick={save}>Save as new version</button>
           <button className="btn" onClick={() => setDraft(null)}>Cancel</button>
@@ -169,6 +176,11 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
           <h2>No scenes yet</h2>
           <p className="muted">Long episodes are written from the approved three-act outline (Outline tab), act by act.</p>
           {ep.stage === 'outline_approved' && <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('dev', () => api(`/episodes/${ep.id}/script/generate`, {body: {}}))}>Develop scenes act by act</button>}
+        </div>
+      ) : !s && audio ? (
+        <div className="card stack">
+          <h2>No scenes yet</h2>
+          <p className="muted">An audio episode's scenes are built around the recorded lines: label the speakers, set up the cast, then build the scenes in the Audio tab.</p>
         </div>
       ) : !s ? (
         <div className="card stack">
@@ -189,7 +201,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
                 {ep.approved_script_version === ep.script.version && <> · <span className="badge good">approved</span></>}</div></div>
               <div className="row">
                 <button className="btn" disabled={!can('edit_script')} onClick={() => setDraft(JSON.parse(JSON.stringify(s)))}>Edit</button>
-                <button className="btn" disabled={!can('generate_script') || !!act.busy} onClick={() => act.run('gen', () => api(`/episodes/${ep.id}/script/generate`, {body: {instruction}}))}>Regenerate all</button>
+                {!audio && <button className="btn" disabled={!can('generate_script') || !!act.busy} onClick={() => act.run('gen', () => api(`/episodes/${ep.id}/script/generate`, {body: {instruction}}))}>Regenerate all</button>}
               </div>
             </div>
             <div className="grid cols-3" style={{marginTop: 12}}>
@@ -209,11 +221,12 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
                 <button className="btn sm" disabled={!can('regenerate_section') || !!act.busy} onClick={() => regen(`act:${sc.act}`)}>Rewrite act {sc.act}</button></div>)}
             <div className="card">
               <div className="spread"><h3>{sc.heading}</h3>
-                <button className="btn sm" disabled={!can('regenerate_section') || !!act.busy} onClick={() => regen(`scene:${sc.id}`)}>Regenerate this scene</button></div>
+                {!audio && <button className="btn sm" disabled={!can('regenerate_section') || !!act.busy} onClick={() => regen(`scene:${sc.id}`)}>Regenerate this scene</button>}</div>
               <SceneView scene={sc} characters={characters} />
             </div>
             </div>))}
-          {can('regenerate_section') && (
+          {audio && <div className="alert info small">The dialogue comes from the recording. Scenes are runs of recorded lines (a cut falls only between two lines). Edit to change headings, expressions and shots or to join scenes; to rebuild the scenes, use the Audio tab.</div>}
+          {can('regenerate_section') && !audio && (
             <div className="card row">
               <input style={{flex: 1, minWidth: 220}} placeholder="Instruction for regeneration, e.g. 'make the twist darker'" value={instruction} onChange={e => setInstruction(e.target.value)} />
               {['title', 'hook', 'twist'].map(x => <button key={x} className="btn sm" disabled={!!act.busy} onClick={() => regen(x)}>Regenerate {x}</button>)}
@@ -262,7 +275,7 @@ function StoryboardTab({ep, can, act, characters, environments}: Ctx) {
               <div className="row">
                 {can('reject_storyboard') && <label className="row small" style={{fontWeight: 400}}><input type="checkbox" style={{width: 'auto'}} checked={marked.includes(sc.id)} onChange={e => setMarked(e.target.checked ? [...marked, sc.id] : marked.filter(x => x !== sc.id))} />mark for revision</label>}
                 <button className="btn sm" disabled={!can('edit_scene')} onClick={() => { setEditing(sc.id); setDraft({...sc}); }}>Edit</button>
-                <button className="btn sm" disabled={!can('regenerate_scene') || !!act.busy} onClick={() => act.run('rs', () => api(`/episodes/${ep.id}/scenes/${sc.id}/regenerate`, {body: {instruction: instruction || sc.revision_note}}))}>Regenerate</button>
+                {ep.source !== 'audio' && <button className="btn sm" disabled={!can('regenerate_scene') || !!act.busy} onClick={() => act.run('rs', () => api(`/episodes/${ep.id}/scenes/${sc.id}/regenerate`, {body: {instruction: instruction || sc.revision_note}}))}>Regenerate</button>}
                 <button className="btn sm" disabled={!can('scene_reference') || !!act.busy} onClick={() => act.run('ref', () => api(`/episodes/${ep.id}/scenes/${sc.id}/reference`, {method: 'POST'}))}>Refresh stills</button>
               </div>
             </div>

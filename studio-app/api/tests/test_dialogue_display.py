@@ -72,7 +72,7 @@ class DialogueDisplayTest(unittest.TestCase):
         self.assertEqual(self.new_episode()["dialogue_display"], "captions")
         self.assertEqual(self.c.put("/api/settings/production", json={"dialogue_display": "subtitles"}).status_code, 422)
         a = self.c.post("/api/audio-episodes", json={"title": "Audio", "rights_confirmed": True, "rights_source": "own_recording"}).json()
-        self.assertEqual(a["dialogue_display"], "captions")
+        self.assertEqual(a["dialogue_display"], "none", "audio episodes start with none (owner, Stage 2): the recording carries the dialogue")
 
     def test_change_per_episode(self):
         ep = self.new_episode()
