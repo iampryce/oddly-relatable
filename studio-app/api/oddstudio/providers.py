@@ -534,6 +534,7 @@ def fish_speak(text: str, voice: str, out_file: Path, model: str = "", speed: fl
     f = out_file.with_suffix(".wav")
     cached = fish_cache_file(model, voice, speed, FISH_SAMPLE_RATE, text)
     if use_cache and cached.exists() and cached.stat().st_size > 44:
+        fix_streaming_wav(cached)   # clips cached before this fix carry the streaming header
         shutil.copyfile(cached, f)
         return f
     body = {"text": text, "reference_id": voice, "format": "wav", "sample_rate": FISH_SAMPLE_RATE, "latency": "normal",
@@ -563,6 +564,7 @@ def fish_speak(text: str, voice: str, out_file: Path, model: str = "", speed: fl
         cached.parent.mkdir(parents=True, exist_ok=True)
         tmp = cached.with_suffix(f".{uuid.uuid4().hex[:8]}.part")
         tmp.write_bytes(r.content)
+        fix_streaming_wav(tmp)
         try:
             _ensure_pcm16_wav(tmp)
         except Exception:
@@ -572,6 +574,35 @@ def fish_speak(text: str, voice: str, out_file: Path, model: str = "", speed: fl
         shutil.copyfile(cached, f)
         return f
     raise last or ProviderError("fish: request failed", transient=True)
+
+
+def fix_streaming_wav(path: Path, write: bool = True) -> bool:
+    """Fish Audio streams its WAV answer, so the header carries placeholder sizes (RIFF and data size 0xFFFFFFxx):
+    FFprobe and Python's wave module read past them, but Rhubarb refuses the file (\"Could not open sound file\").
+    Rewrites both sizes from the real file length, in place. Returns True if the header was (or, with write=False,
+    would be) changed."""
+    import struct
+    with open(path, "r+b" if write else "rb") as f:
+        data = f.read()
+        if len(data) < 44 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+            return False
+        changed = False
+        if struct.unpack("<I", data[4:8])[0] != len(data) - 8:
+            if write:
+                f.seek(4); f.write(struct.pack("<I", len(data) - 8))
+            changed = True
+        off = 12
+        while off + 8 <= len(data):
+            cid, size = data[off:off + 4], struct.unpack("<I", data[off + 4:off + 8])[0]
+            if cid == b"data":
+                real = len(data) - (off + 8)
+                if size != real:
+                    if write:
+                        f.seek(off + 4); f.write(struct.pack("<I", real))
+                    changed = True
+                break
+            off += 8 + size + (size & 1)
+        return changed
 
 
 def _ensure_pcm16_wav(path: Path) -> None:

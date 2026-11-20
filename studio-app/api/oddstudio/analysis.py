@@ -172,6 +172,13 @@ def lipsync(audio: Path, text: str = "") -> dict:
         wav = audio.with_suffix(".lipsync.wav")
         subprocess.run([get_settings().ffmpeg or "ffmpeg", "-v", "error", "-y", "-i", str(audio), "-ac", "1", "-ar", "22050", str(wav)],
                        check=True, timeout=300, stdin=subprocess.DEVNULL)
+    else:
+        # a streamed WAV (Fish Audio) has placeholder sizes Rhubarb refuses: repair a separate copy, never the input
+        from .providers import fix_streaming_wav
+        if fix_streaming_wav(audio, write=False):
+            wav = audio.with_suffix(".lipsync.wav")
+            shutil.copyfile(audio, wav)
+            fix_streaming_wav(wav)
     cmd = [exe, "-q", "-f", "json", str(wav)]
     if text:
         dialog = wav.with_suffix(".dialog.txt")
