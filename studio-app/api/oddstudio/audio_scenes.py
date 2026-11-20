@@ -72,7 +72,7 @@ def _acting(raw: dict, keys: set[str]) -> dict:
     e = str((raw or {}).get("expression") or "neutral").strip().lower()[:40]
     out["expression"] = e or "neutral"
     shot = str((raw or {}).get("shot") or "").strip().lower()
-    out["shot"] = shot if shot in SHOTS else "medium"
+    out["shot"] = shot if shot in SHOTS else "wide"   # the same default as a script-first line
     g = str((raw or {}).get("gesture") or "").strip().lower().replace(" ", "_").replace("-", "_")
     if g in GESTURES and g != "none":
         out["gesture"] = g
@@ -110,6 +110,8 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
         scenes.append({"id": f"s{i + 1}", "heading": str(s.get("heading") or f"Scene {i + 1}")[:200],
                        "location": str(s.get("location") or "")[:80], "description": str(s.get("description") or ""),
                        "action": str(s.get("action") or ""), "camera": str(s.get("camera") or "")[:400], "lines": sl})
+        if fmt == "long":   # a long episode's scenes belong to acts 1-3: the recording's order, split in thirds
+            scenes[-1]["act"] = 1 + (i * 3) // len(runs)
     doc = {"title": str(plan.get("title") or title)[:100] or title[:100], "logline": str(plan.get("logline") or "")[:400],
            "hook": str(plan.get("hook") or "")[:90], "twist": "", "interactive": {"type": "none"},
            "characters": [{"key": k, "role": "silent" if k in silent else ""} for k in list(dict.fromkeys(cast + silent))],

@@ -151,7 +151,8 @@ def regenerate_act(ctx: Ctx, ep: Episode, script: dict, act: int, instruction: s
 # ------------------------------------------------------------------ voices and timings
 def clip_map(db, ep: Episode) -> dict[int, dict[int, dict]]:
     """Voice clips per scene and line index (latest successful voice job per scene), checked against the current text."""
-    jobs = {j.scene_id: j for j in db.query(Job).filter_by(episode_id=ep.id, kind="scene_voice", status="succeeded").order_by(Job.id)}
+    kind = "audio_slice" if ep.source == "audio" else "scene_voice"   # audio episodes: slices of the recording
+    jobs = {j.scene_id: j for j in db.query(Job).filter_by(episode_id=ep.id, kind=kind, status="succeeded").order_by(Job.id)}
     out = {}
     for sc in ep.scenes:
         j = jobs.get(sc.id)

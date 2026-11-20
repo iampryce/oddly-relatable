@@ -61,7 +61,7 @@ class PureTest(unittest.TestCase):
         self.assertEqual((l1["line_id"], l1["speaker"], l1["text"], l1["start"], l1["end"]), ("l1", "dan", "Who took my charger?", 0.1, 1.2))
         self.assertEqual((l1["expression"], l1["gesture"], l1["look_at"], l1["shot"]), ("annoyed", "point", "kim", "close"))
         self.assertNotIn("gesture", l2, "unknown gestures are dropped")
-        self.assertEqual(l2["shot"], "medium", "an unknown shot falls back to medium")
+        self.assertEqual(l2["shot"], "wide", "an unknown shot falls back to wide, like a script-first line")
         self.assertEqual(l2["reactions"], [{"character": "boss", "expression": "smug"}], "the silent character reacts")
         self.assertNotIn("look_at", s["scenes"][1]["lines"][0])
         self.assertEqual([c["key"] for c in s["characters"]], ["dan", "kim", "boss"])
