@@ -213,6 +213,66 @@ class FishVoiceTest(unittest.TestCase):
         self.assertIn("16-bit PCM", str(e.exception))
         self.assertEqual(list((self.env.tmp / "work" / "voice-cache" / "fish").glob("*")), [])   # nothing half-written cached
 
+    # ------------------------------------------------------------------ streamed WAV header (Rhubarb refused it)
+    @staticmethod
+    def streamed(seconds=0.5):
+        """Fish's real answer: a WAV whose RIFF and data sizes are streaming placeholders (0xFFFFFF24 / 0xFFFFFF00)."""
+        import struct
+        b = bytearray(wav_bytes(seconds))
+        b[4:8] = struct.pack("<I", 0xFFFFFF24)
+        b[40:44] = struct.pack("<I", 0xFFFFFF00)
+        return bytes(b)
+
+    @staticmethod
+    def sizes(path):
+        import struct
+        b = Path(path).read_bytes()
+        return struct.unpack("<I", b[4:8])[0], struct.unpack("<I", b[40:44])[0], len(b)
+
+    def test_streamed_wav_header_is_repaired(self):
+        self.save_key()
+        self.answers = [Resp(200, self.streamed())]
+        f = providers.speak({"provider": "fish"}, "Streamed.", "v1", self.out)
+        riff, data, n = self.sizes(f)
+        self.assertEqual((riff, data), (n - 8, n - 44))
+        with wave.open(str(f)) as w:
+            self.assertEqual(w.getnframes(), int(0.5 * 44100))
+
+    def test_bad_header_in_the_cache_is_repaired_on_use(self):
+        self.save_key()
+        cached = providers.fish_cache_file("s2-pro", "v1", 1.0, 44100, "Old clip.")
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(self.streamed())                  # cached before the fix
+        f = providers.speak({"provider": "fish"}, "Old clip.", "v1", self.out)
+        self.assertEqual(self.calls, [], "served from the cache")
+        riff, data, n = self.sizes(f)
+        self.assertEqual((riff, data), (n - 8, n - 44))
+        self.assertEqual(self.sizes(cached)[:2], (n - 8, n - 44))
+
+    def test_lipsync_repairs_a_copy_and_never_the_input(self):
+        """Episode 5's render failure: Rhubarb could not open a Fish clip. A stand-in Rhubarb that refuses bad headers."""
+        import stat
+        clip = self.env.tmp / "line-4.wav"
+        clip.write_bytes(self.streamed())
+        before = clip.read_bytes()
+        fake = self.env.tmp / "rhubarb"
+        fake.write_text("#!/usr/bin/env python3\n"
+                        "import json, os, struct, sys\n"
+                        "f = sys.argv[-1]; b = open(f, 'rb').read(8)\n"
+                        "if struct.unpack('<I', b[4:8])[0] != os.path.getsize(f) - 8:\n"
+                        "    print('Could not open sound file ' + f, file=sys.stderr); sys.exit(1)\n"
+                        "print(json.dumps({'mouthCues': [{'start': 0, 'end': 0.5, 'value': 'B'}]}))\n")
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        from oddstudio import analysis
+        with mock.patch.dict(os.environ, {"RHUBARB_BIN": str(fake)}):
+            out = analysis.lipsync(clip, "Hi.")
+        self.assertEqual(out["cues"][0]["value"], "B")
+        self.assertEqual(clip.read_bytes(), before, "the input clip is never modified")
+        self.assertTrue((self.env.tmp / "line-4.lipsync.wav").exists())
+        good = self.env.tmp / "good.wav"
+        good.write_bytes(wav_bytes(0.5))
+        self.assertFalse(providers.fix_streaming_wav(good, write=False))
+
     # ------------------------------------------------------------------ cache
     def test_clip_cache_hit_and_miss(self):
         self.save_key()
