@@ -360,8 +360,41 @@ def make_cutout(png: Path) -> bool:
     for c in corners:
         if img.getpixel(c)[3] > 16:
             ImageDraw.floodfill(img, c, (0, 0, 0, 0), thresh=40)
+    if sum(first[:3]) / 3 < 200:
+        img = defringe(img, first[:3])
     img.save(png)
     return True
+
+
+def defringe(img: Image.Image, bg: tuple, rounds: int = 3) -> Image.Image:
+    """Remove the background-coloured fringe a flood fill leaves around dark outlines on a non-white flat background
+    (house style v2 poses are drawn on mid-grey): edge pixels close to the background colour become transparent, and
+    the anti-aliased edge pixels between the ink and the background become ink with partial transparency, so the line
+    blends cleanly onto any set. White backgrounds (v1) never get here."""
+    import numpy as np
+    from PIL import ImageFilter
+    a = np.array(img.convert("RGBA")).astype(np.int32)
+    bgv = np.array(bg[:3], dtype=np.int32)
+    bg_l = int(bgv.mean())
+    for _ in range(rounds):
+        clear = a[:, :, 3] <= 16
+        near = np.array(Image.fromarray((clear * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3))) > 0
+        edge = near & ~clear
+        if not edge.any():
+            break
+        rgb = a[:, :, :3]
+        close = edge & (np.abs(rgb - bgv).max(2) <= 36)
+        a[close, 3] = 0
+    clear = a[:, :, 3] <= 16
+    near = np.array(Image.fromarray((clear * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(3))) > 0
+    edge = near & ~clear
+    rgb = a[:, :, :3]
+    grey = edge & ((rgb.max(2) - rgb.min(2)) < 24) & (rgb.mean(2) < bg_l)
+    if grey.any():
+        lum = rgb[grey].mean(1)
+        a[grey, 3] = np.clip((bg_l - lum) / max(1, bg_l - 18) * 255, 0, 255).astype(np.int32)
+        a[grey, :3] = 18
+    return Image.fromarray(a.astype(np.uint8), "RGBA")
 
 
 def compose_sheet(entries: list[tuple[str, Path]], out: Path, title: str) -> Path:
