@@ -7,13 +7,15 @@
 # Keeps:  the current release, every release whose images a running container uses, and the newest $KEEP_RELEASES
 #         release folders (with their oddstudio-api/web images, so rollback.sh keeps working); the newest
 #         $KEEP_NIGHTLY nightly and $KEEP_DEPLOY deploy-time backups (counted separately; the newest backup is never
-#         removed); deploy logs younger than $LOG_DAYS days.
+#         removed); database dumps in $ROOT/db-dumps younger than $DUMP_DAYS days (never the newest dump); deploy logs
+#         younger than $LOG_DAYS days.
 # Never touches: $ROOT/incoming, $ROOT/shared, $ROOT/repo, Docker volumes (database, media), running containers.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP_RELEASES=${KEEP_RELEASES:-5}
 KEEP_NIGHTLY=${KEEP_NIGHTLY:-7}
 KEEP_DEPLOY=${KEEP_DEPLOY:-5}
+DUMP_DAYS=${DUMP_DAYS:-30}
 LOG_DAYS=${LOG_DAYS:-30}
 BUILD_CACHE_HOURS=${BUILD_CACHE_HOURS:-168}
 JOURNAL_MAX=${JOURNAL_MAX:-100M}
@@ -25,6 +27,7 @@ case "${1:-}" in
 esac
 (( KEEP_RELEASES >= 2 )) || { echo "maintenance: KEEP_RELEASES must be at least 2 (current + one rollback)" >&2; exit 2; }
 (( KEEP_NIGHTLY >= 1 && KEEP_DEPLOY >= 1 )) || { echo "maintenance: keep at least 1 backup of each kind" >&2; exit 2; }
+(( DUMP_DAYS >= 1 )) || { echo "maintenance: DUMP_DAYS must be at least 1" >&2; exit 2; }
 
 mode=$([[ $APPLY == 1 ]] && echo "APPLY" || echo "DRY RUN")
 echo "maintenance ($mode) $(date -u +%Y-%m-%dT%H:%M:%SZ); disk: $(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 "), " $4 " free"}')"
@@ -83,6 +86,19 @@ mapfile -t nightly < <(ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort)
 mapfile -t deploys < <(ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort)
 prune_kind "$KEEP_NIGHTLY" "${nightly[@]}"
 prune_kind "$KEEP_DEPLOY" "${deploys[@]}"
+
+# ---------------------------------------------------------------- the 30-day database-dump folder
+dumps="$ROOT/db-dumps"
+if [[ -d "$dumps" ]]; then
+  newest_dump=$(ls -1 "$dumps"/*.dump 2>/dev/null | sort | tail -n 1)
+  echo "database dumps: $(ls -1 "$dumps"/*.dump 2>/dev/null | wc -l) in $dumps ($(du -sh "$dumps" | cut -f1)); keeping $DUMP_DAYS days and always the newest ($(basename "${newest_dump:-none}"))"
+  while read -r f; do
+    [[ -z "$f" || "$f" == "$newest_dump" ]] && continue
+    remove "dump $(basename "$f") ($(du -sh "$f" | cut -f1))" rm -f -- "$f" "$f.sha256"
+  done < <(find "$dumps" -maxdepth 1 -type f -name '*.dump' -mmin +$(( DUMP_DAYS * 1440 )) | sort)
+else
+  echo "database dumps: none yet ($dumps is created by the first nightly backup)"
+fi
 
 # ---------------------------------------------------------------- logs
 echo "logs: deploy logs older than $LOG_DAYS days, journal above $JOURNAL_MAX"

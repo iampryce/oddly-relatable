@@ -15,10 +15,18 @@ Nothing in this change is installed or run automatically. The owner installs it 
   - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
   - dangling images, and build cache older than 7 days.
   - backups beyond the newest 7 nightly and 5 deploy-time, counted separately. The newest backup is never removed.
+  - database dumps older than 30 days. The newest dump is never removed.
   - deploy logs older than 30 days, and the systemd journal above 100 MB.
 - **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media) and running containers.
-- **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `LOG_DAYS`, `BUILD_CACHE_HOURS` and `JOURNAL_MAX` are environment variables.
-- **Not included:** a separate long-lived folder of database dumps (for example 30 days of dumps only). Each backup folder holds both the dump and the media.
+- **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS` and `JOURNAL_MAX` are environment variables.
+- **The 30-day database-dump folder** (`/srv/stickman/db-dumps/`):
+  - Each nightly backup also writes `<stamp>-nightly.dump` with a `.sha256` file there.
+  - Dumps are kept for 30 days (`DUMP_DAYS`), pruned by age by the nightly job and by `maintenance.sh`. The newest dump is never removed, however old it is.
+  - Dumps are small (about 135 KB today), so a month of database history costs little, while full backup folders (with about 1.2 GB of media each) are kept for a week.
+- **Restore** (`deploy/restore.sh`) takes any backup folder, whichever of the three name forms it has: `…-nightly`, `…-deploy` or an old unsuffixed one. It also takes a dump from `db-dumps/`, restoring the database only after checking the dump's `.sha256`.
+  - **Fixed in this change:** the safety backup that `restore.sh` takes first could prune the folder being restored if that was the oldest kept backup. That folder is now protected.
+  - **Also fixed:** a relative path broke the media restore. Paths are now made absolute.
+- **Simulation:** `deploy/tests/simulate-backups.sh` runs `backup.sh`, `restore.sh` and `maintenance.sh` against a fake `/srv/stickman` with a stub `docker`. It checks retention per kind, the dump folder, and restoring from every kind of backup. CI runs it on every PR.
 
 ## Install (owner, on the server, after this PR is deployed)
 
@@ -38,5 +46,8 @@ sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.
 ```
 
 - **Logs:** `/var/log/oddstudio-backup.log` and `/var/log/oddstudio-maintenance.log`.
+- **Restore examples:**
+  - `restore.sh /srv/stickman/backups/20261121T023000Z-nightly --media`: database and media from a full backup.
+  - `restore.sh /srv/stickman/db-dumps/20261105T023000Z-nightly.dump`: database only, from up to 30 days back.
 - **Check the next morning:** `ls -l /srv/stickman/backups` should show a new folder.
 - **Undo:** `rm /etc/cron.d/oddstudio`. Releases, images and backups that were already removed cannot be restored, which is why the job stays a dry run until step 4.

@@ -32,6 +32,9 @@ jobs:
         run: pip install -r requirements.txt
       - name: Unit and workflow tests
         run: python -m unittest discover -s tests -v
+      - name: Backup, restore and housekeeping scripts (simulation)
+        working-directory: .
+        run: bash studio-app/deploy/tests/simulate-backups.sh
 
   web:
     name: Web typecheck and build
