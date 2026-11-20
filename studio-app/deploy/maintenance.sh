@@ -5,13 +5,15 @@
 #   maintenance.sh --apply    removes it
 #
 # Keeps:  the current release, every release whose images a running container uses, and the newest $KEEP_RELEASES
-#         release folders (with their oddstudio-api/web images, so rollback.sh keeps working); the newest $KEEP_BACKUPS
-#         backups (the newest one is never removed); deploy logs younger than $LOG_DAYS days.
+#         release folders (with their oddstudio-api/web images, so rollback.sh keeps working); the newest
+#         $KEEP_NIGHTLY nightly and $KEEP_DEPLOY deploy-time backups (counted separately; the newest backup is never
+#         removed); deploy logs younger than $LOG_DAYS days.
 # Never touches: $ROOT/incoming, $ROOT/shared, $ROOT/repo, Docker volumes (database, media), running containers.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP_RELEASES=${KEEP_RELEASES:-5}
-KEEP_BACKUPS=${KEEP_BACKUPS:-7}
+KEEP_NIGHTLY=${KEEP_NIGHTLY:-7}
+KEEP_DEPLOY=${KEEP_DEPLOY:-5}
 LOG_DAYS=${LOG_DAYS:-30}
 BUILD_CACHE_HOURS=${BUILD_CACHE_HOURS:-168}
 JOURNAL_MAX=${JOURNAL_MAX:-100M}
@@ -22,7 +24,7 @@ case "${1:-}" in
   *) echo "usage: maintenance.sh [--apply]" >&2; exit 2 ;;
 esac
 (( KEEP_RELEASES >= 2 )) || { echo "maintenance: KEEP_RELEASES must be at least 2 (current + one rollback)" >&2; exit 2; }
-(( KEEP_BACKUPS >= 1 )) || { echo "maintenance: KEEP_BACKUPS must be at least 1" >&2; exit 2; }
+(( KEEP_NIGHTLY >= 1 && KEEP_DEPLOY >= 1 )) || { echo "maintenance: keep at least 1 backup of each kind" >&2; exit 2; }
 
 mode=$([[ $APPLY == 1 ]] && echo "APPLY" || echo "DRY RUN")
 echo "maintenance ($mode) $(date -u +%Y-%m-%dT%H:%M:%SZ); disk: $(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 "), " $4 " free"}')"
@@ -66,14 +68,21 @@ if [[ $APPLY == 1 ]]; then
 fi
 
 # ---------------------------------------------------------------- backups
-echo "backups: keeping the newest $KEEP_BACKUPS"
-mapfile -t backups < <(ls -1d "$ROOT"/backups/*/ 2>/dev/null | sort)
-if (( ${#backups[@]} > KEEP_BACKUPS )); then
-  for b in "${backups[@]:0:${#backups[@]}-KEEP_BACKUPS}"; do
-    [[ "$b" == "${backups[-1]}" ]] && continue                              # never the newest
+echo "backups: keeping the newest $KEEP_NIGHTLY nightly and $KEEP_DEPLOY deploy-time (unsuffixed folders count as deploy-time)"
+newest=$(ls -1d "$ROOT"/backups/*/ 2>/dev/null | sort | tail -n 1)
+prune_kind() {   # prune_kind <keep> <folders, oldest first>
+  local keep=$1; shift
+  local list=("$@")
+  (( ${#list[@]} > keep )) || return 0
+  for b in "${list[@]:0:${#list[@]}-keep}"; do
+    [[ "$b" == "$newest" ]] && continue                                     # never the newest backup
     remove "backup $(basename "$b") ($(du -sh "$b" | cut -f1))" rm -rf -- "$b"
   done
-fi
+}
+mapfile -t nightly < <(ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort)
+mapfile -t deploys < <(ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort)
+prune_kind "$KEEP_NIGHTLY" "${nightly[@]}"
+prune_kind "$KEEP_DEPLOY" "${deploys[@]}"
 
 # ---------------------------------------------------------------- logs
 echo "logs: deploy logs older than $LOG_DAYS days, journal above $JOURNAL_MAX"

@@ -3,8 +3,8 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Nightly backup (database dump + media), keeping the newest 7.
-30 3 * * * root KEEP=7 /srv/stickman/current/studio-app/deploy/backup.sh >> /var/log/oddstudio-backup.log 2>&1
+# Nightly backup (database dump + media), keeping the newest 7 nightly backups (deploy-time backups are counted apart).
+30 3 * * * root BACKUP_KIND=nightly KEEP_NIGHTLY=7 /srv/stickman/current/studio-app/deploy/backup.sh >> /var/log/oddstudio-backup.log 2>&1
 
 # Weekly housekeeping, Sunday 04:30. A DRY RUN (report only) until the owner adds --apply to this line.
 30 4 * * 0 root /srv/stickman/current/studio-app/deploy/maintenance.sh >> /var/log/oddstudio-maintenance.log 2>&1
