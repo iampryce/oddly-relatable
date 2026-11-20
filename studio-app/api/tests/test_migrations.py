@@ -32,7 +32,7 @@ class MigrationsTest(unittest.TestCase):
         config.reset_settings()
         try:
             cfg = alembic_config()
-            command.upgrade(cfg, "0004")
+            command.upgrade(cfg, "0005")
             eng = create_engine(os.environ["DATABASE_URL"])
             with eng.begin() as conn:   # rows written by the previous release
                 conn.exec_driver_sql("insert into characters (key, name, description, visual_description, bubble_style, scope, expressions, "
@@ -44,7 +44,7 @@ class MigrationsTest(unittest.TestCase):
             with eng.connect() as conn:
                 self.assertEqual(conn.exec_driver_sql("select skin_tone from characters").scalar(), "")
                 self.assertEqual(conn.exec_driver_sql("select style_version from character_assets").scalar(), "v1")
-            command.downgrade(cfg, "0004")
+            command.downgrade(cfg, "0005")
             self.assertNotIn("skin_tone", {c["name"] for c in inspect(eng).get_columns("characters")})
             self.assertNotIn("style_version", {c["name"] for c in inspect(eng).get_columns("character_assets")})
             eng.dispose()

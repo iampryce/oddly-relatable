@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -51,6 +51,13 @@ class Episode(Timestamps, Base):
     continues_episode_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     outline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     approved_outline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Audio-first episodes (audio_first.py): the owner's uploaded audio is the voice track. The rights confirmation is
+    # required before any upload; the transcript holds the timed lines and their speakers.
+    source: Mapped[str] = mapped_column(String(10), default="script")             # script | audio
+    audio_rights_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    audio_rights_source: Mapped[str] = mapped_column(String(20), default="")     # own_recording | licensed | voice_actor | other
+    audio_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audio_transcript: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 

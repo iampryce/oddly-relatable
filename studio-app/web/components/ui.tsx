@@ -47,10 +47,12 @@ export const PIPELINE: [string, string[]][] = [
   ['publish', ['final_approved', 'publishing', 'publish_failed', 'published']],
 ];
 
-export function Pipeline({stage}: {stage: string}) {
-  const at = PIPELINE.findIndex(([, s]) => s.includes(stage));
+export function Pipeline({stage, source}: {stage: string; source?: string}) {
+  // audio-first episodes start with their own step: upload, transcription and speaker labelling
+  const steps: [string, string[]][] = source === 'audio' ? [['audio', ['audio_upload', 'audio_transcribing', 'audio_labelling']], ...PIPELINE] : PIPELINE;
+  const at = steps.findIndex(([, s]) => s.includes(stage));
   return (
-    <div className="steps">{PIPELINE.map(([name], i) => (
+    <div className="steps">{steps.map(([name], i) => (
       <span key={name} className={`step ${i < at || stage === 'published' ? 'done' : i === at ? 'now' : ''}`}>{i + 1}. {name}</span>
     ))}</div>
   );

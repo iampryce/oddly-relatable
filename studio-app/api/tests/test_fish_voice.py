@@ -91,6 +91,50 @@ class FishVoiceTest(unittest.TestCase):
         self.assertEqual(self.calls[-1]["headers"]["model"], "s2-pro")
         self.assertEqual(self.calls[-1]["json"]["reference_id"], "v2")
 
+    # ------------------------------------------------------------------ routing (owner decision 2026-11-20)
+    def test_bare_path_voices_use_piper_whatever_the_provider(self):
+        routed = []
+
+        def fake_one(cfg, text, voice, out_file, instructions="", speed=None):
+            routed.append((cfg["provider"], cfg.get("model", ""), voice))
+            return out_file.with_suffix(".wav")
+
+        with mock.patch.object(providers, "_speak_one", side_effect=fake_one):
+            for v in ("C:/Users/PC/Desktop/studio-work/voices/en_US-lessac-medium.onnx",   # the server's stored values
+                      "voices\\en_GB-alan-medium.onnx", "/app/voices/en_US-joe-medium.onnx", "en_US-ryan-medium.onnx"):
+                providers.speak({"provider": "fish", "model": "s2.1-pro-free", "fallback": "none"}, "Hi.", v, self.out)
+            providers.speak({"provider": "piper", "model": "m"}, "Hi.", "voices/x.onnx", self.out)          # piper keeps its model
+            providers.speak({"provider": "fish", "model": "s2.1-pro-free"}, "Hi.", "fish:abc_123-X", self.out)
+            providers.speak({"provider": "fish", "model": "s2.1-pro-free"}, "Hi.", "abc123", self.out)          # bare id: selected provider
+        self.assertEqual([r[0] for r in routed], ["piper"] * 5 + ["fish", "fish"])
+        self.assertEqual(routed[0], ("piper", "", "C:/Users/PC/Desktop/studio-work/voices/en_US-lessac-medium.onnx"))
+        self.assertEqual(routed[4][1], "m")
+        self.assertEqual(routed[5], ("fish", "s2.1-pro-free", "abc_123-X"))
+        self.assertEqual(self.calls, [])
+
+    def test_invalid_fish_id_is_a_clear_error_without_a_request(self):
+        self.save_key()
+        for bad in ("fish:not a voice!", "fish:" + "x" * 129, "fish:voice.id"):
+            with self.assertRaises(providers.ProviderNotConfigured) as e:
+                providers.speak({"provider": "kokoro"}, "Hi.", bad, self.out)
+            self.assertIn("is not a Fish voice id", str(e.exception))
+            self.assertIn("fish:<voice id>", str(e.exception))
+        with self.assertRaises(providers.ProviderNotConfigured):
+            providers.speak({"provider": "fish", "default_voice": "Ben's voice"}, "Hi.", "", self.out)
+        self.assertEqual(self.calls, [])
+
+    def test_scene_with_old_piper_voice_no_longer_reaches_fish(self):
+        """Episode 5's failure: Fish selected, a character still on a bare Piper path."""
+        self.save_key()
+        self.c.put("/api/settings/voice", json={"provider": "fish", "model": "s2.1-pro-free"})
+        ch = self.char01()
+        self.c.put(f"/api/characters/{ch['id']}", json={**self.char_body(ch), "voice": "C:/Users/PC/voices/en_US-lessac-medium.onnx"})
+        self.c.post(f"/api/characters/{ch['id']}/voice/preview", json={})
+        ran = self.env.run_jobs(["voice_preview"])
+        self.assertEqual(self.calls, [], "the path was not sent to Fish")
+        if ran[0][1] == "failed":   # no Piper on this machine: the error names Piper, not a Fish HTTP 400
+            self.assertIn("piper", ran[0][2].lower())
+
     # ------------------------------------------------------------------ keys
     def test_missing_key_is_not_configured(self):
         with self.assertRaises(providers.ProviderNotConfigured) as e:

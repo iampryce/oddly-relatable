@@ -24,7 +24,19 @@ export async function api<T = any>(path: string, opts: {method?: string; body?: 
   return data as T;
 }
 
+// Raw file upload (the audio-first episode's audio): the file is the request body, sent with its audio type.
+const AUDIO_EXT: Record<string, string> = {mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', webm: 'audio/webm', flac: 'audio/flac'};
+export async function uploadAudio<T = any>(path: string, file: File): Promise<T> {
+  const type = file.type || AUDIO_EXT[(file.name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
+  const res = await fetch(`/api${path}`, {method: 'PUT', body: file, headers: {'Content-Type': type}, credentials: 'same-origin', cache: 'no-store'});
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new ApiError(res.status, typeof data?.detail === 'string' ? data.detail : res.statusText);
+  return data as T;
+}
+
 export const STAGE_LABEL: Record<string, string> = {
+  audio_upload: 'Audio needed', audio_transcribing: 'Transcribing audio', audio_labelling: 'Label speakers',
   script_pending: 'Script needed', outline_generating: 'Writing outline', outline_review: 'Outline review',
   outline_approved: 'Outline approved', script_generating: 'Writing script', script_review: 'Script review',
   script_approved: 'Script approved', storyboard_generating: 'Building storyboard', storyboard_review: 'Storyboard review',

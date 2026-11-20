@@ -5,6 +5,7 @@ API directly: the dashboard only hides buttons, the server is what refuses. Stag
 
   long-form only (D-L1 to D-L5): script_pending -> outline_generating -> outline_review --approve--> outline_approved
     -> script_generating (acts written one by one from the approved outline) -> script_review
+  audio-first only (audio_first.py): audio_upload -> audio_transcribing -> audio_labelling (label speakers, build the cast)
   script_pending -> script_generating -> script_review --approve--> script_approved
   script_approved -> storyboard_generating -> storyboard_review --approve--> storyboard_approved
   storyboard_approved -> producing -> video_review          (or production_failed: retry failed jobs only)
@@ -16,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 STAGES = [
+    "audio_upload", "audio_transcribing", "audio_labelling",
     "script_pending", "outline_generating", "outline_review", "outline_approved", "script_generating", "script_review", "script_approved",
     "storyboard_generating", "storyboard_review", "storyboard_approved",
     "producing", "production_failed", "video_review",
@@ -24,6 +26,10 @@ STAGES = [
 
 # Which stages each action may start from. Anything else is refused with 409.
 ALLOWED: dict[str, set[str]] = {
+    "upload_audio": {"audio_upload", "audio_labelling"},
+    "transcribe_audio": {"audio_upload", "audio_labelling"},
+    "label_audio": {"audio_labelling"},
+    "audio_cast": {"audio_labelling"},
     "generate_outline": {"script_pending", "outline_review"},
     "edit_outline": {"script_pending", "outline_review"},
     "approve_outline": {"outline_review"},
@@ -52,6 +58,9 @@ ALLOWED: dict[str, set[str]] = {
 
 # Stage label for the dashboard and the "what can I do next" hint.
 NEXT_STEP = {
+    "audio_upload": "Upload the audio file",
+    "audio_transcribing": "The audio is being transcribed",
+    "audio_labelling": "Label each line with its speaker and set up the cast",
     "script_pending": "Generate or write the script (long episodes: the outline first)",
     "outline_generating": "The three-act outline is being written",
     "outline_review": "Review, edit and approve the three-act outline",

@@ -88,6 +88,17 @@ def update_character(cid: int, body: CharacterIn, db: Session = Depends(get_db))
     return out(db, c)
 
 
+class SuggestVoiceIn(BaseModel):
+    use_ai: bool = True
+
+
+@router.post("/characters/{cid}/suggest-voice")
+def suggest_voice(cid: int, body: SuggestVoiceIn, db: Session = Depends(get_db)):
+    """Suggest a voice from the library for this character. Nothing is saved: the page puts it in the form and the owner saves."""
+    from .voice_library import suggest
+    return suggest(db, get_char(db, cid), use_ai=body.use_ai)
+
+
 class ReferenceIn(BaseModel):
     png_base64: str = Field(max_length=12_000_000)
 
@@ -246,7 +257,6 @@ def restyle(cid: int, body: RestyleIn, db: Session = Depends(get_db)):
         raise HTTPException(409, "locked character")
     if not secret("openai_api_key", db):
         raise HTTPException(409, "the restyle uses the verified OpenAI image provider: save the OpenAI key first")
-    from .settings_store import get_section
     desc = body.visual_description or house_style.restyle_description(get_section(db, "creative").get("style_version", "v1"), c.key)
     if not desc:
         raise HTTPException(422, "give the simplified visual description for this character")

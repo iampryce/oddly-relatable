@@ -393,14 +393,26 @@ def resolve_piper_voice(voice: str) -> str:
     return voice
 
 
+def looks_like_piper_path(voice: str | None) -> bool:
+    v = (voice or "").strip()
+    return bool(v) and ("/" in v or "\\" in v or v.lower().endswith(".onnx"))
+
+
+FISH_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
 def speak(cfg: dict, text: str, voice: str, out_file: Path, instructions: str = "", speed: float | None = None) -> Path:
     """Speak with the selected provider; on failure use the fallback provider with its default voice.
     A character voice of the form "<engine>:<voice id>" (e.g. kokoro:bm_george, piper:en_GB-alan-medium.onnx,
     fish:<reference_id>) always uses that engine: each character keeps one fixed voice and engine in every episode
-    (owner decision 2026-11-17). `speed` is the character's optional voice speed (used by Fish Audio)."""
+    (owner decision 2026-11-17). `speed` is the character's optional voice speed (used by Fish Audio).
+    A bare voice that looks like a file path (contains / or \\, or ends in .onnx) is a Piper model chosen before engine
+    prefixes existed: it always uses Piper, whatever the selected provider (owner decision 2026-11-20)."""
     m = re.match(r"^(kokoro|piper|openai|elevenlabs|fish):(.+)$", voice or "")
     if m:
         cfg, voice = {**cfg, "provider": m.group(1), "model": "" if m.group(1) != cfg.get("provider") else cfg.get("model", "")}, m.group(2)
+    elif looks_like_piper_path(voice):
+        cfg = {**cfg, "provider": "piper", "model": "" if cfg.get("provider") != "piper" else cfg.get("model", "")}
     fb = cfg.get("fallback", "none")
     try:
         return _speak_one(cfg, text, voice, out_file, instructions, speed)
@@ -510,6 +522,11 @@ def fish_speak(text: str, voice: str, out_file: Path, model: str = "", speed: fl
         raise ProviderNotConfigured("fish: no Fish Audio API key (Settings > Credentials, or FISH_API_KEY on the server)")
     if not voice:
         raise ProviderNotConfigured("fish: assign a Fish voice to this character (Characters: fish:<voice id>) or set the Fish default voice")
+    if not FISH_ID.match(voice):
+        # checked before any request: the API would answer HTTP 400, and the voice is not something Fish can use
+        shown = voice if len(voice) <= 60 else voice[:57] + "..."
+        raise ProviderNotConfigured(f"fish: {shown!r} is not a Fish voice id (letters, digits, _ and -, up to 128 characters). "
+                                    "Set the character's voice to fish:<voice id> from the voice's page on fish.audio")
     model = model or FISH_DEFAULT_MODEL
     speed = float(speed) if speed else 1.0
     if not 0.5 <= speed <= 2.0:

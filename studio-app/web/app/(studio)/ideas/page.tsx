@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import {Suspense, useEffect, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
-import {api, when} from '@/lib/api';
+import {api, uploadAudio, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 
@@ -59,6 +59,48 @@ function IdeaForm({initial, characters, shorts, onDone}: {initial: any; characte
   );
 }
 
+// Audio-first: the owner's audio file is the voice track; the studio builds the characters, script and scenes around it.
+// Upload only (no link downloader). The rights confirmation and its source are required; the server refuses without them.
+function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
+  const [title, setTitle] = useState('');
+  const [format, setFormat] = useState('short');
+  const [file, setFile] = useState<File | null>(null);
+  const [rights, setRights] = useState(false);
+  const [source, setSource] = useState('');
+  const {busy, error, run} = useAction();
+  const create = () => run('create', async () => {
+    const ep = await api('/audio-episodes', {body: {title, format, rights_confirmed: rights, rights_source: source || null}});
+    await uploadAudio(`/episodes/${ep.id}/audio`, file!);
+    onDone(ep.id);
+  });
+  return (
+    <div className="card">
+      <h2>New episode from audio</h2>
+      <p className="muted small">Upload a recording of the dialogue. It is transcribed into timed lines; you label who says each line and set up the cast. The uploaded audio is the voice track (no generated voices).</p>
+      <ErrorBox error={error} />
+      <div className="grid cols-2">
+        <div className="field"><label htmlFor="at">Title</label><input id="at" value={title} onChange={e => setTitle(e.target.value)} /></div>
+        <div className="field"><label htmlFor="af">Format</label><select id="af" value={format} onChange={e => setFormat(e.target.value)}>
+          <option value="short">Short (audio up to 60 s)</option><option value="long">Long episode (audio up to 7½ minutes)</option></select></div>
+      </div>
+      <div className="field"><label htmlFor="afile">Audio file (MP3, WAV, M4A, AAC, OGG, FLAC; up to 60 MB)</label>
+        <input id="afile" type="file" accept="audio/*" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
+      <div className="field"><label htmlFor="asrc">Where the audio comes from</label>
+        <select id="asrc" value={source} onChange={e => setSource(e.target.value)}>
+          <option value="">Choose…</option><option value="own_recording">My own recording</option><option value="licensed">Licensed</option>
+          <option value="voice_actor">Voice actor (recorded for me)</option><option value="other">Other</option></select></div>
+      <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
+        <input type="checkbox" style={{width: 'auto'}} checked={rights} onChange={e => setRights(e.target.checked)} required />
+        I have the right to use this audio
+      </label>
+      <div className="row" style={{marginTop: 12}}>
+        <button className="btn primary" disabled={!!busy || !title || !file || !rights || !source} onClick={create}>{busy ? 'Uploading…' : 'Create and upload'}</button>
+        <button className="btn" onClick={() => onDone()}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 function Ideas() {
   const router = useRouter();
   const params = useSearchParams();
@@ -67,6 +109,7 @@ function Ideas() {
   const {data: episodes} = useApi<any[]>('/episodes');
   const shorts = (episodes || []).filter(e => e.format === 'short' && e.script_version);
   const [editing, setEditing] = useState<any>(null);
+  const [fromAudio, setFromAudio] = useState(false);
   const act = useAction(reload);
   useEffect(() => { if (params.get('new')) setEditing({}); }, [params]);
   const start = (idea: any) => act.run('start', async () => {
@@ -77,8 +120,10 @@ function Ideas() {
   return (
     <>
       <div className="spread"><div><h1>Ideas</h1><p className="sub">Every episode starts from your idea. Nothing is hard-coded.</p></div>
-        {!editing && <button className="btn primary" onClick={() => setEditing({})}>New idea</button>}</div>
+        {!editing && !fromAudio && <div className="row"><button className="btn" onClick={() => setFromAudio(true)}>New from audio</button>
+          <button className="btn primary" onClick={() => setEditing({})}>New idea</button></div>}</div>
       <ErrorBox error={error || act.error} />
+      {fromAudio && <div style={{marginBottom: 16}}><AudioEpisodeForm onDone={id => { setFromAudio(false); if (id) router.push(`/episodes/${id}`); }} /></div>}
       {editing && <div style={{marginBottom: 16}}><IdeaForm initial={editing} characters={characters || []} shorts={shorts} onDone={() => { setEditing(null); reload(); }} /></div>}
       {!ideas?.length ? <Empty>No ideas yet.</Empty> : (
         <div className="card table-wrap"><table>

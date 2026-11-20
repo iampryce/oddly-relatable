@@ -10,6 +10,17 @@ const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scar
 function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
   const [f, setF] = useState({...BLANK, ...initial});
   const {busy, error, run} = useAction(onDone);
+  const [pick, setPick] = useState<{text: string; bad?: boolean} | null>(null);
+  const [picking, setPicking] = useState(false);
+  const suggest = async () => {
+    setPicking(true); setPick(null);
+    try {
+      const r: any = await api(`/characters/${initial.id}/suggest-voice`, {body: {use_ai: true}});
+      if (r.voice) { set('voice', r.voice); setPick({text: `Picked ${r.label}${r.ai ? ' (AI)' : ''}: ${r.reason}. Review, then Save.`}); }
+      else setPick({text: r.reason, bad: true});
+    } catch (e: any) { setPick({text: String(e?.message || e), bad: true}); }
+    setPicking(false);
+  };
   const set = (k: string, v: string) => setF((x: any) => ({...x, [k]: v}));
   const body = () => ({key: f.key, name: f.name, description: f.description, visual_description: f.visual_description, bubble_style: f.bubble_style,
                        scope: f.scope, episode_id: f.episode_id ?? null, default_expression: f.default_expression, voice: f.voice || '', voice_style: f.voice_style || '',
@@ -35,6 +46,8 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
       <div className="grid cols-2">
         <div><label htmlFor="characters-voice">Voice (provider voice: e.g. OpenAI "onyx", an ElevenLabs voice id, a Piper model path, or fish:&lt;Fish voice id&gt;)</label>
           <input id="characters-voice" value={f.voice} onChange={e => set('voice', e.target.value)} placeholder="default voice if empty" />
+          {initial.id && <div className="row"><button type="button" className="btn sm" disabled={picking} onClick={suggest}>{picking ? 'Picking…' : 'Pick a voice for me'}</button>
+            {pick && <span className={pick.bad ? 'muted small' : 'small'}>{pick.text}</span>}</div>}
           <label htmlFor="characters-skin">Skin tone (art style v2; empty = white head like the rest of the cast)</label>
           <input id="characters-skin" value={f.skin_tone || ''} maxLength={40} onChange={e => set('skin_tone', e.target.value)} placeholder="e.g. warm medium brown" />
           <label htmlFor="characters-voice-speed">Voice speed (0.5–2, empty = normal; Fish Audio)</label>
