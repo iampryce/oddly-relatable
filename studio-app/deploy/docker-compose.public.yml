@@ -1,4 +1,5 @@
-# Public HTTPS access (owner-approved 2026-11-17): adds a Caddy reverse proxy in front of the dashboard only.
+# Public HTTPS access (owner-approved 2026-11-17): adds a Caddy reverse proxy in front of the dashboard; the one
+# exception is the media upload route, which Caddy passes straight to the API (see Caddyfile).
 # deploy.sh includes this file when /srv/stickman/shared/.env sets PUBLIC_HOST. Without it the stack stays
 # tunnel-only (dashboard on 127.0.0.1:3000).
 # Note: Docker-published ports bypass ufw, so publish nothing else here.
@@ -6,7 +7,7 @@ services:
   proxy:
     image: caddy:2.10-alpine
     restart: unless-stopped
-    depends_on: [web]
+    depends_on: [web, api]
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST in .env}
       PUBLIC_PORT: ${PUBLIC_PORT:-8443}

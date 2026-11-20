@@ -2,8 +2,10 @@
 #   PUBLIC_HOST  a DNS name that resolves to the server (e.g. 13-140-218-113.sslip.io or your own domain)
 #   PUBLIC_PORT  the dedicated HTTPS port (8443)
 # Port 80 is used only for Let's Encrypt HTTP-01 validation and renewals; any other request there is redirected.
-# Postgres, Redis, the API and the worker have no published ports; Caddy reaches only the dashboard container,
-# and the dashboard forwards /api/* to the API on the private Compose network.
+# Postgres, Redis, the API and the worker have no published ports. Caddy sends everything to the dashboard container,
+# which forwards /api/* to the API on the private Compose network, with ONE exception: the audio-first media upload
+# (PUT /api/episodes/<id>/audio, up to 250 MB of video) goes straight to the API, so it never passes through Next.js
+# (whose request-body handling stops at 10 MB when its middleware runs) and is the only route allowed above 50 MB.
 {
 	http_port 80
 	https_port {$PUBLIC_PORT}
@@ -24,9 +26,21 @@ http://{$PUBLIC_HOST} {
 		X-Robots-Tag "noindex, nofollow"
 		-Server
 	}
-	# uploads: audio up to 60 MB, video up to 250 MB (audio-first Stage 1b), plus headroom
-	request_body {
-		max_size 260MB
+	@media_upload {
+		method PUT
+		path_regexp ^/api/episodes/[0-9]+/audio$
 	}
-	reverse_proxy web:3000
+	handle @media_upload {
+		# audio up to 60 MB, video up to 250 MB (audio-first Stage 1b), plus headroom
+		request_body {
+			max_size 260MB
+		}
+		reverse_proxy api:8000
+	}
+	handle {
+		request_body {
+			max_size 50MB
+		}
+		reverse_proxy web:3000
+	}
 }
