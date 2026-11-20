@@ -219,6 +219,9 @@ class InstructionIn(BaseModel):
 def generate_script(eid: int, body: InstructionIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
     gate(ep, "generate_script")
+    if ep.source == "audio":
+        raise HTTPException(409, "the dialogue of an audio episode comes from the recording: build or rebuild its scenes "
+                                 "in the Audio tab instead")
     if ep.format == "long":
         if not ep.approved_outline_version:
             raise HTTPException(409, "a long episode is written from its approved outline: approve the outline first")
@@ -253,6 +256,9 @@ def edit_script(eid: int, body: ScriptIn, db: Session = Depends(get_db)):
     gate(ep, "edit_script")
     try:
         content = validate_script(body.content, set(by_key(db)), fmt=ep.format)
+        if ep.source == "audio":   # Stage 2: the recorded dialogue cannot be edited, only its staging
+            from .audio_scenes import guard_dialogue, transcript_dialogue
+            guard_dialogue(transcript_dialogue(ep), content)
     except ScriptError as e:
         raise HTTPException(422, str(e))
     if ep.format == "long" and not ep.approved_outline_version:
@@ -274,6 +280,9 @@ class SectionIn(BaseModel):
 def regenerate_section(eid: int, body: SectionIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
     gate(ep, "regenerate_section")
+    if ep.source == "audio":
+        raise HTTPException(409, "the dialogue of an audio episode comes from the recording: build or rebuild its scenes "
+                                 "in the Audio tab instead")
     return S.job(enqueue(db, "regenerate_section", episode_id=ep.id, revision=ep.revision, payload=body.model_dump()))
 
 
@@ -346,6 +355,9 @@ def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db))
     trial = {"title": "t", "characters": [{"key": k} for k in known], "scenes": [{"id": sc.scene_key, **body.model_dump()}]}
     try:
         checked = validate_script(trial, known)["scenes"][0]
+        if ep.source == "audio":
+            from .audio_scenes import guard_dialogue
+            guard_dialogue(list(sc.lines), checked["lines"], f"scene {sc.position}")
     except ScriptError as e:
         raise HTTPException(422, str(e).replace("script.scenes[0]", f"scene {sc.position}"))
     for k in ("heading", "location", "description", "action", "camera", "lines"):
@@ -361,6 +373,9 @@ def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db))
 def regenerate_scene(eid: int, sid: int, body: InstructionIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
     gate(ep, "regenerate_scene")
+    if ep.source == "audio":
+        raise HTTPException(409, "the dialogue of an audio episode comes from the recording: build or rebuild its scenes "
+                                 "in the Audio tab instead")
     sc = get_scene(db, ep, sid)
     return S.job(enqueue(db, "regenerate_scene", episode_id=ep.id, scene_id=sc.id, revision=ep.revision, payload=body.model_dump()))
 

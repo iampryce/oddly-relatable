@@ -26,6 +26,7 @@ import re
 SHOTS = ("wide", "medium", "close")
 INTERACTIVE = ("none", "viewer-choice", "poll")
 MAX_LINE_CHARS = 140
+MAX_RECORDED_CHARS = 400      # an audio-first line is what was recorded (the transcript), not written to fit
 ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 KEY = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
 
@@ -191,7 +192,8 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
             spk = _str(ln, "speaker", lw, max_len=60)
             if spk not in keys:
                 raise ScriptError(f"{lw}.speaker {spk!r} is not in script.characters")
-            text = _str(ln, "text", lw, max_len=MAX_LINE_CHARS)
+            recorded = isinstance(ln.get("line_id"), str) and bool(ln.get("line_id"))
+            text = _str(ln, "text", lw, max_len=MAX_RECORDED_CHARS if recorded else MAX_LINE_CHARS)
             shot = (ln.get("shot") or "wide").strip().lower()
             if shot not in SHOTS:
                 raise ScriptError(f"{lw}.shot must be one of {', '.join(SHOTS)}")
@@ -201,6 +203,16 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
             if delivery:
                 line["delivery"] = delivery
             line.update(acting(ln, keys, lw))
+            if recorded:   # audio-first: the recorded line's id and its time in the audio (fixed; see audio_scenes.py)
+                if not ID.match(ln["line_id"]):
+                    raise ScriptError(f"{lw}.line_id must be a line id like l12")
+                try:
+                    start, end = float(ln["start"]), float(ln["end"])
+                except (KeyError, TypeError, ValueError):
+                    raise ScriptError(f"{lw}: a recorded line needs its start and end time") from None
+                if not 0 <= start < end:
+                    raise ScriptError(f"{lw}: a recorded line must end after it starts")
+                line.update(line_id=ln["line_id"], start=round(start, 3), end=round(end, 3))
             if ln.get("duration") is not None:
                 d = ln["duration"]
                 if not isinstance(d, (int, float)) or not 0.8 <= d <= 8:

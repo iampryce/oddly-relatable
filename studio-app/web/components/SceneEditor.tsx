@@ -1,7 +1,10 @@
 'use client';
 import {useId} from 'react';
 // Structured editor for one scene: heading, location, direction and its dialogue lines.
-export type Line = {speaker: string; text: string; expression?: string; shot?: string; duration?: number};
+export type Line = {speaker: string; text: string; expression?: string; shot?: string; duration?: number;
+                    line_id?: string; start?: number; end?: number};   // line_id: a recorded line (audio-first, fixed)
+const recorded = (l: Line) => !!l.line_id;
+const span = (l: Line) => `${l.line_id} · ${(l.start ?? 0).toFixed(1)}-${(l.end ?? 0).toFixed(1)} s`;
 export type Scene = {id?: string; heading: string; location: string; description: string; action: string; camera: string; lines: Line[]};
 
 export function SceneEditor({scene, onChange, characters, environments}: {
@@ -14,6 +17,7 @@ export function SceneEditor({scene, onChange, characters, environments}: {
     const lines = [...scene.lines]; const [x] = lines.splice(i, 1); lines.splice(i + d, 0, x); set('lines', lines);
   };
   const exprs = (key: string) => Object.keys(characters.find(c => c.key === key)?.expressions || {});
+  const locked = scene.lines.some(recorded);   // audio-first: the recorded dialogue cannot change, only its staging
   return (
     <div className="stack">
       <div className="grid cols-2">
@@ -30,7 +34,17 @@ export function SceneEditor({scene, onChange, characters, environments}: {
       </div>
       <div>
         <label>Dialogue and beats</label>
-        {scene.lines.map((l, i) => (
+        {locked && <p className="muted small">The dialogue comes from the recording: speaker, words and timing are fixed. You can change the expression and the shot.</p>}
+        {scene.lines.map((l, i) => recorded(l) ? (
+          <div key={i} className="row" style={{marginBottom: 6, alignItems: 'flex-start'}}>
+            <span style={{width: 150}} className="small"><strong>{characters.find(c => c.key === l.speaker)?.name || l.speaker}</strong><br /><span className="muted">{span(l)}</span></span>
+            <span style={{flex: 1, minWidth: 200}}>{l.text}</span>
+            <input style={{width: 120}} list={`exp-${l.speaker}`} value={l.expression || ''} placeholder="expression" onChange={e => setLine(i, {expression: e.target.value})} aria-label="Expression" />
+            <datalist id={`exp-${l.speaker}`}>{exprs(l.speaker).map(x => <option key={x} value={x} />)}</datalist>
+            <select style={{width: 96}} value={l.shot || 'medium'} onChange={e => setLine(i, {shot: e.target.value})} aria-label="Shot">
+              <option value="wide">wide</option><option value="medium">medium</option><option value="close">close</option>
+            </select>
+          </div>) : (
           <div key={i} className="row" style={{marginBottom: 6, alignItems: 'flex-start'}}>
             <select style={{width: 150}} value={l.speaker} onChange={e => setLine(i, {speaker: e.target.value})} aria-label="Speaker">
               {characters.map(c => <option key={c.key} value={c.key}>{c.name}</option>)}
@@ -47,7 +61,7 @@ export function SceneEditor({scene, onChange, characters, environments}: {
             <button className="btn sm" disabled={i === scene.lines.length - 1} onClick={() => move(i, 1)} aria-label="Move down">↓</button>
             <button className="btn sm danger" onClick={() => set('lines', scene.lines.filter((_, j) => j !== i))} aria-label="Remove line">✕</button>
           </div>))}
-        <button className="btn sm" onClick={() => set('lines', [...scene.lines, {speaker: scene.lines.at(-1)?.speaker || characters[0]?.key || '', text: '', expression: 'neutral', shot: 'wide'}])}>Add line</button>
+        {!locked && <button className="btn sm" onClick={() => set('lines', [...scene.lines, {speaker: scene.lines.at(-1)?.speaker || characters[0]?.key || '', text: '', expression: 'neutral', shot: 'wide'}])}>Add line</button>}
       </div>
     </div>
   );
@@ -66,6 +80,7 @@ export function SceneView({scene, characters}: {scene: Scene; characters: any[]}
       <div>{scene.lines.map((l, i) => (
         <div key={i} className="line">
           <span className="speaker">{name(l.speaker)}</span><span>{l.text}</span>
+          {recorded(l) && <span className="muted small">{span(l)}</span>}
           <span className="muted small">{l.expression}</span><span className="muted small">{l.shot}{l.duration ? ` · ${l.duration}s` : ''}</span>
         </div>))}</div>
     </div>

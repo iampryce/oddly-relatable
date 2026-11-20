@@ -1,0 +1,240 @@
+"""Audio-first Stage 2 (owner decision 2026-11-20): scenes built AROUND the recorded dialogue.
+
+The transcript's timed lines (speaker = a character key, text, start/end in the audio) are fixed: they are what was
+recorded. The writer only decides
+  * where the scenes are: each scene is a run of CONSECUTIVE line ids (a cut can only fall between two lines, and
+    every line belongs to exactly one scene, in order), with a heading, location, what we see, action and camera;
+  * the acting per line: expression, gesture, look_at, shot, and silent reactions of the other characters on screen
+    (including the silent cast: characters named in the audio who never speak).
+The server builds the script from the writer's plan, copying speaker, text and timing from the transcript itself, and
+validates it. If the writer is not configured, fails, or returns a plan that breaks the rules, a deterministic split
+is used instead (new scene at a long pause, at most MAX_RUN lines per scene), so the episode can always move on.
+
+The resulting script goes through the normal review: the owner approves it (and then the storyboard) in the
+dashboard. Dialogue edits are refused on audio episodes everywhere (script edit, scene edit, regeneration).
+"""
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from . import serialize as S
+from .auth import current_user
+from .db import get_db
+from .models import Character, Episode, Event
+from .queue import enqueue
+from .script_schema import GESTURES, SHOTS, ScriptError, validate_script
+from .workflow import set_stage
+
+router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
+
+SCENE_GAP = 1.5          # a pause this long between two lines starts a new scene in the simple split
+MAX_RUN = 6              # lines per scene in the simple split
+DIALOGUE = ("line_id", "speaker", "text", "start", "end")
+EXPRESSIONS = ("neutral", "happy", "laughing", "shocked", "worried", "annoyed", "deadpan", "sad", "angry", "confused",
+               "embarrassed", "smug", "pleading")
+
+
+# ------------------------------------------------------------------ pure functions
+def simple_runs(lines: list[dict], gap: float = SCENE_GAP, max_run: int = MAX_RUN, max_scenes: int = 12) -> list[list[str]]:
+    """The deterministic split: a new scene after a pause of `gap` seconds or after `max_run` lines; if that makes
+    too many scenes, the shortest neighbouring scenes are joined until it fits."""
+    runs: list[list[str]] = []
+    for i, ln in enumerate(lines):
+        if not runs or (ln["start"] - lines[i - 1]["end"] >= gap) or len(runs[-1]) >= max_run:
+            runs.append([])
+        runs[-1].append(ln["id"])
+    while len(runs) > max_scenes:
+        k = min(range(len(runs) - 1), key=lambda j: len(runs[j]) + len(runs[j + 1]))
+        runs[k:k + 2] = [runs[k] + runs[k + 1]]
+    return runs
+
+
+def check_runs(runs: list[list[str]], line_ids: list[str]) -> None:
+    """Every line exactly once, in order, each scene a non-empty run: cuts only between lines."""
+    if any(not r for r in runs):
+        raise ScriptError("a scene has no lines")
+    flat = [x for r in runs for x in r]
+    if flat != line_ids:
+        missing = [x for x in line_ids if x not in flat]
+        extra = [x for x in flat if x not in line_ids]
+        dup = sorted({x for x in flat if flat.count(x) > 1})
+        why = (f"missing {missing}" if missing else f"unknown {extra}" if extra else f"repeated {dup}" if dup
+               else "out of order")
+        raise ScriptError(f"the scenes must cover every line once, in order, cutting only between lines ({why})")
+
+
+def _acting(raw: dict, keys: set[str]) -> dict:
+    out = {}
+    e = str((raw or {}).get("expression") or "neutral").strip().lower()[:40]
+    out["expression"] = e or "neutral"
+    shot = str((raw or {}).get("shot") or "").strip().lower()
+    out["shot"] = shot if shot in SHOTS else "medium"
+    g = str((raw or {}).get("gesture") or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if g in GESTURES and g != "none":
+        out["gesture"] = g
+    if (raw or {}).get("look_at") in keys:
+        out["look_at"] = raw["look_at"]
+    reacts = [r for r in (raw or {}).get("reactions") or [] if isinstance(r, dict) and r.get("character") in keys]
+    if reacts:
+        out["reactions"] = reacts[:3]
+    return out
+
+
+def build_script(title: str, lines: list[dict], cast: list[str], silent: list[str], plan: dict | None, fmt: str = "short",
+                 known: set[str] | None = None) -> dict:
+    """The audio episode's script: the writer's plan (or the simple split when `plan` is None) around the transcript.
+    Raises ScriptError when the plan breaks the rules."""
+    ids = [ln["id"] for ln in lines]
+    by_id = {ln["id"]: ln for ln in lines}
+    keys = set(cast) | set(silent)
+    if plan is None:
+        scenes_in = [{"heading": f"Scene {i + 1}", "line_ids": r} for i, r in enumerate(simple_runs(lines))]
+        plan = {"scenes": scenes_in}
+    scenes_in = plan.get("scenes")
+    if not isinstance(scenes_in, list) or not scenes_in:
+        raise ScriptError("the plan has no scenes")
+    runs = [[str(x) for x in (s.get("line_ids") or [])] if isinstance(s, dict) else [] for s in scenes_in]
+    check_runs(runs, ids)
+    acting = plan.get("lines") if isinstance(plan.get("lines"), dict) else {}
+    scenes = []
+    for i, (s, run) in enumerate(zip(scenes_in, runs)):
+        sl = []
+        for lid in run:
+            ln = by_id[lid]
+            sl.append({"line_id": lid, "speaker": ln["speaker"], "text": ln["text"], "start": ln["start"], "end": ln["end"],
+                       **_acting(acting.get(lid) or {}, keys - {ln["speaker"]})})
+        scenes.append({"id": f"s{i + 1}", "heading": str(s.get("heading") or f"Scene {i + 1}")[:200],
+                       "location": str(s.get("location") or "")[:80], "description": str(s.get("description") or ""),
+                       "action": str(s.get("action") or ""), "camera": str(s.get("camera") or "")[:400], "lines": sl})
+    doc = {"title": str(plan.get("title") or title)[:100] or title[:100], "logline": str(plan.get("logline") or "")[:400],
+           "hook": str(plan.get("hook") or "")[:90], "twist": "", "interactive": {"type": "none"},
+           "characters": [{"key": k, "role": "silent" if k in silent else ""} for k in list(dict.fromkeys(cast + silent))],
+           "scenes": scenes}
+    return validate_script(doc, known, fmt=fmt)
+
+
+def dialogue_of(script_or_lines) -> list[tuple]:
+    lines = script_or_lines if isinstance(script_or_lines, list) else [ln for s in script_or_lines["scenes"] for ln in s["lines"]]
+    return [tuple(ln.get(k) for k in DIALOGUE) for ln in lines]
+
+
+def guard_dialogue(before, after, where: str = "the script") -> None:
+    """Refuse any change to the recorded dialogue (line ids, speakers, text, timing, order, lines added or removed)."""
+    if dialogue_of(before) != dialogue_of(after):
+        raise ScriptError(f"{where}: the dialogue comes from the audio and cannot be changed here (speaker, text, timing "
+                          "and order are fixed; you can change expressions, gestures, looks, shots and the scene details)")
+
+
+def transcript_dialogue(ep: Episode) -> list[dict]:
+    return [{"line_id": ln["id"], **{k: ln.get(k) for k in ("speaker", "text", "start", "end")}}
+            for ln in (ep.audio_transcript or {}).get("lines", [])]
+
+
+# ------------------------------------------------------------------ the writer
+SYSTEM = ("You direct an adult 2D animated comedy. The dialogue was RECORDED: you never change, add, remove or reorder a "
+          "line. You only decide where the scenes are and how the characters act each line. Reply with one JSON object only.")
+
+
+def prompt(lines: list[dict], cast: list[Character], silent: list[Character], hints: dict, environments: list[str]) -> str:
+    listing = "\n".join(f"[{ln['id']} | {ln['speaker']} | {ln['start']:.1f}-{ln['end']:.1f} s] {ln['text']}" for ln in lines)
+    who = "\n".join(f"- {c.key}: {c.name}. {c.description[:160]}" for c in cast)
+    quiet = "\n".join(f"- {c.key}: {c.name} (on screen, never speaks; can react)" for c in silent) or "(none)"
+    hint = (f"The owner's video suggests: about {hints.get('people_count')} people, setting {hints.get('setting') or '?'}, "
+            f"mood {hints.get('mood') or '?'}.\n" if hints else "")
+    return (f"Recorded lines (id | speaker | time | text):\n{listing}\n\nSpeaking characters:\n{who}\n"
+            f"Silent characters:\n{quiet}\n{hint}Locations you may use: {', '.join(environments) or 'free text'}\n\n"
+            "Group the lines into scenes (at most 12). A scene is a run of CONSECUTIVE line ids; cut only between lines; "
+            "every line id appears exactly once, in order. For each line give the acting: expression (one of "
+            f"{', '.join(EXPRESSIONS)}), gesture (one of {', '.join(g for g in GESTURES if g != 'none')} or none), look_at "
+            "(a character key), shot (wide, medium or close), and optional silent reactions of other characters on "
+            "screen. Also a title, a one-sentence logline and an on-screen hook starting with 'POV: ' (at most one emoji).\n"
+            'JSON: {"title": "", "logline": "", "hook": "POV: ...", "scenes": [{"heading": "", "location": "", '
+            '"description": "", "action": "", "camera": "", "line_ids": ["l1", "l2"]}], '
+            '"lines": {"l1": {"expression": "neutral", "gesture": "none", "look_at": "", "shot": "medium", '
+            '"reactions": [{"character": "", "expression": "", "gesture": ""}]}}}')
+
+
+# ------------------------------------------------------------------ routes
+def _gate(ep: Episode, action: str) -> None:
+    from .workflow import GateError, require
+    try:
+        require(ep, action)
+    except GateError as e:
+        raise HTTPException(409, str(e))
+
+
+class ScenesIn(BaseModel):
+    mode: str = "writer"      # writer | simple
+
+
+@router.post("/episodes/{eid}/audio/scenes")
+def build_scenes(eid: int, body: ScenesIn, db: Session = Depends(get_db)):
+    """Build the scenes around the recorded lines (job `audio_scenes`): with the AI writer (falls back to the simple
+    split if it fails) or directly with the simple split. Every line needs a speaker that is a character."""
+    from .audio_first import audio_episode
+    ep = audio_episode(db, eid)
+    _gate(ep, "build_audio_scenes")
+    if body.mode not in ("writer", "simple"):
+        raise HTTPException(422, "mode must be writer or simple")
+    lines = (ep.audio_transcript or {}).get("lines", [])
+    keys = {c.key for c in db.query(Character).all()}
+    if not lines:
+        raise HTTPException(409, "transcribe the audio first")
+    if any(ln.get("speaker") not in keys for ln in lines):
+        raise HTTPException(409, "give every line a speaker and apply the cast first (each speaker must be a character)")
+    set_stage(ep, "script_generating")
+    ep.last_error = ""
+    db.commit()
+    return S.job(enqueue(db, "audio_scenes", episode_id=ep.id, revision=ep.revision, payload={"mode": body.mode}))
+
+
+@router.post("/episodes/{eid}/audio/reopen-labels")
+def reopen_labels(eid: int, db: Session = Depends(get_db)):
+    """Back from script review to the labels and cast (the scenes are then built again)."""
+    from .audio_first import audio_episode, state
+    ep = audio_episode(db, eid)
+    _gate(ep, "reopen_audio_labels")
+    set_stage(ep, "audio_labelling")
+    db.add(Event(episode_id=ep.id, kind="episode", message="Back to the labels and cast (build the scenes again afterwards)"))
+    db.commit()
+    return state(db, ep)
+
+
+# ------------------------------------------------------------------ the job
+from .tasks import Ctx, save_script, task  # noqa: E402
+
+
+@task
+def audio_scenes(ctx: Ctx) -> dict:
+    from .providers import ProviderError, ProviderNotConfigured, text_provider
+    from .sets import writer_environments
+    from .settings_store import get_section
+    db, job = ctx.db, ctx.job
+    ep = db.get(Episode, job.episode_id)
+    tr = ep.audio_transcript or {}
+    lines = tr.get("lines", [])
+    chars = {c.key: c for c in db.query(Character).all()}
+    cast = list(dict.fromkeys(ln["speaker"] for ln in lines))
+    silent = [m["character_key"] for m in tr.get("silent_cast", []) if m["character_key"] in chars and m["character_key"] not in cast]
+    plan, how = None, "simple split"
+    if (job.payload or {}).get("mode") == "writer":
+        try:
+            ans = text_provider(get_section(db, "text")).complete_json(
+                SYSTEM, prompt(lines, [chars[k] for k in cast], [chars[k] for k in silent], tr.get("media_hints") or {},
+                               writer_environments(db)))
+            build_script(ep.title, lines, cast, silent, ans, ep.format, set(chars))   # validate the plan first
+            plan, how = ans, "AI writer"
+        except (ProviderError, ProviderNotConfigured, ScriptError, ValueError, TypeError, KeyError) as e:
+            ctx.log(f"The writer's scenes could not be used ({str(e)[:300]}); using the simple split")
+            db.add(Event(episode_id=ep.id, kind="script", message=f"Writer not used ({str(e)[:200]}): simple split instead"))
+    script = build_script(ep.title, lines, cast, silent, plan, ep.format, set(chars))
+    sv = save_script(db, ep, script, "audio-scenes" if plan else "audio-simple-split", how)
+    set_stage(ep, "script_review")
+    db.add(Event(episode_id=ep.id, kind="script", message=f"Script v{sv.version}: {len(script['scenes'])} scenes around "
+                                                           f"{len(lines)} recorded lines ({how})"))
+    db.commit()
+    return {"script_version": sv.version, "scenes": len(script["scenes"]), "how": how}
