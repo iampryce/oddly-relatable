@@ -4,8 +4,13 @@ The uploaded audio is the voice track: no voice provider is used for these lines
 
   1. create   POST /api/audio-episodes             the rights confirmation and its source label are REQUIRED
                                                      (append-only Review record "audio_rights")
-  2. upload   PUT  /api/episodes/{id}/audio         raw request body (audio/*), owner upload only: nothing here
-                                                     downloads audio from other sites
+  2. upload   PUT  /api/episodes/{id}/audio         raw request body (audio/* or video/*), owner upload only: nothing
+                                                     here downloads media from other sites. Stage 1b: a video is only a
+                                                     carrier: job `audio_media_prepare` extracts its audio track and
+                                                     deletes the original (the picture is never reused); with ?hints=1 a
+                                                     few frames give casting/setting hints (job `audio_media_hints`:
+                                                     people count, setting, mood only) and are deleted right after.
+     trim     POST /api/episodes/{id}/audio/trim    Shorts only: the 60 s window of a longer recording
   3. transcribe (worker job `audio_transcribe`)    the selected transcription provider (word timestamps), split into
                                                      timed lines (pauses, sentence ends, maximum length)
   4. label    PUT  /api/episodes/{id}/audio/lines   a speaker per line; edit, split or merge lines (validated here)
@@ -14,12 +19,13 @@ The uploaded audio is the voice track: no voice provider is used for these lines
               POST /api/episodes/{id}/audio/cast    map each speaker to an existing character or create a new
                                                      episode character; the lines then carry character keys
 
-Stages: audio_upload -> audio_transcribing -> audio_labelling. Building scenes around the timed lines and playing the
+Stages: audio_upload -> (audio_preparing: video only) -> audio_transcribing -> audio_labelling. Building scenes around the timed lines and playing the
 uploaded clips in production are later stages (separate changes, owner-approved).
 """
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -37,13 +43,21 @@ from .models import Asset, Character, Episode, Event, Review
 from .queue import enqueue
 from .workflow import GateError, require, set_stage
 from . import line_normaliser as LN
+from . import media
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 RIGHTS_SOURCES = ("own_recording", "licensed", "voice_actor", "other")
 RIGHTS_LABEL = {"own_recording": "own recording", "licensed": "licensed", "voice_actor": "voice actor", "other": "other"}
-MAX_BYTES = 60 * 1024 * 1024
+MAX_BYTES = 60 * 1024 * 1024                        # an audio file
+MAX_VIDEO_BYTES = 250 * 1024 * 1024                 # a video file (owner decision 2026-11-20)
 MAX_SECONDS = {"short": 60, "long": 450}            # the formats' caps (a Short runs at most 60 s; long at most 7½ min)
+MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be longer (the owner picks a 60 s window)
+VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "video/x-matroska": ".mkv",
+               "video/x-m4v": ".m4v"}
+# Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
+KEEP_KEYS = ("source_media", "media_hints", "trim")
+RIGHTS_TEXT = "I have the right to use this recording: its audio and any video it came with."
 AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
                "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",
                "audio/ogg": ".ogg", "audio/webm": ".webm", "audio/flac": ".flac", "audio/x-flac": ".flac"}
@@ -136,7 +150,15 @@ def state(db: Session, ep: Episode) -> dict:
             "audio": S.asset(db.get(Asset, ep.audio_asset_id)) if ep.audio_asset_id else None,
             "rights": {"confirmed": bool(ep.audio_rights_confirmed), "source": ep.audio_rights_source,
                        "label": RIGHTS_LABEL.get(ep.audio_rights_source, "")},
-            "transcript": {k: v for k, v in tr.items() if k not in ("lines", "cast_suggestion")} if tr else None,
+            "transcript": ({k: v for k, v in tr.items() if k not in ("lines", "cast_suggestion", *KEEP_KEYS)}
+                           if tr.get("lines") is not None else None),
+            # Stage 1b: the uploaded media (an extracted video's audio), the Short's 60 s window, the video hints
+            "source_media": tr.get("source_media"), "trim": tr.get("trim"), "media_hints": tr.get("media_hints"),
+            "needs_trim": bool((tr.get("source_media") or {}).get("needs_trim")),
+            "window_seconds": MAX_SECONDS["short"] if ep.format == "short" else None,
+            "full_audio": _full_audio(db, ep),
+            "limits": {"audio_mb": MAX_BYTES // 1048576, "video_mb": MAX_VIDEO_BYTES // 1048576,
+                       "max_seconds": MAX_SECONDS[ep.format], "max_source_seconds": MAX_SOURCE_SECONDS if ep.format == "short" else MAX_SECONDS["long"]},
             "lines": lines, "speakers": sp,
             "unlabelled_lines": sum(1 for ln in lines if not ln.get("speaker")),
             "speakers_without_character": [s for s in sp if s not in keys],
@@ -149,6 +171,13 @@ def state(db: Session, ep: Episode) -> dict:
             "characters": [{"key": c.key, "name": c.name, "scope": c.scope, "voice_style": c.voice_style}
                            for c in sorted(keys.values(), key=lambda c: c.id)
                            if c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id]}
+
+
+def _full_audio(db: Session, ep: Episode) -> dict | None:
+    """The whole recording (a Short's source before its 60 s window is chosen), for the trim player."""
+    fid = ((ep.audio_transcript or {}).get("source_media") or {}).get("full_asset_id")
+    a = db.get(Asset, fid) if fid else None
+    return S.asset(a) if a else None
 
 
 def fragment_of(tr: dict) -> dict | None:
@@ -190,49 +219,180 @@ def create_audio_episode(body: AudioEpisodeIn, db: Session = Depends(get_db), us
     db.flush()
     # append-only record of who confirmed the rights, and the stated source
     db.add(Review(episode_id=ep.id, gate="audio_rights", decision="confirmed", revision=ep.revision, target={},
-                  comment=f"I have the right to use this audio. Source: {RIGHTS_LABEL[body.rights_source]}", actor=user))
+                  comment=f"{RIGHTS_TEXT} Source: {RIGHTS_LABEL[body.rights_source]}", actor=user))
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Audio-first episode created (audio source: {RIGHTS_LABEL[body.rights_source]})"))
     db.commit()
     return state(db, ep)
 
 
+def uploads_dir() -> Path:
+    d = get_settings().work_dir / "uploads"     # temporary files only: never backed up, swept by maintenance after 24 h
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _in_uploads(name: str) -> Path:
+    p = (uploads_dir() / Path(str(name)).name).resolve()
+    if p.parent != uploads_dir().resolve():
+        raise ValueError("not an upload file")
+    return p
+
+
+def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, seconds: float | None, source: dict) -> str:
+    """Store a usable audio file for the episode (an upload, or the track extracted from a video) and move on:
+    transcription, or (a Short longer than 60 s) waiting for the owner's 60 s window. Returns the event text.
+    Raises HTTPException(422) when the recording is too long for the format."""
+    from .storage import sha256_file
+    from .tasks import store_asset
+    window = MAX_SECONDS[ep.format]
+    limit = MAX_SOURCE_SECONDS if ep.format == "short" else window
+    if seconds is not None and seconds > limit + 0.5:
+        raise HTTPException(422, f"the recording runs {seconds:.0f} s; a {ep.format} episode allows at most {limit} s"
+                                 + (" (you then choose its 60 s window)" if ep.format == "short" else ""))
+    needs_trim = ep.format == "short" and seconds is not None and seconds > window + 0.5
+    key = f"episodes/{ep.id}/source-{'full-' if needs_trim else ''}audio-{sha256_file(path)[:12]}{ext}"
+    a = store_asset(db, ep_id=ep.id, src=path, key=key, kind="source-audio-full" if needs_trim else "source-audio",
+                    content_type=ctype, revision=ep.revision,
+                    label=("Uploaded recording, before its 60 s window" if needs_trim else "Uploaded audio")
+                          + (" (extracted from a video)" if source.get("type") == "video" else "")
+                          + f" ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
+    sm = {**source, "full_asset_id": a.id, "duration": round(seconds, 3) if seconds else None, "needs_trim": needs_trim}
+    ep.audio_transcript = {"source_media": sm}
+    ep.last_error = ""
+    what = "the audio of a video (the video file was deleted)" if source.get("type") == "video" else "audio"
+    if needs_trim:
+        ep.audio_asset_id = None
+        set_stage(ep, "audio_upload")
+        return f"Recording received: {what}, {seconds:.1f} s; choose its 60 s window for the Short"
+    ep.audio_asset_id = a.id
+    set_stage(ep, "audio_transcribing")
+    return f"Recording received: {what}" + (f", {seconds:.1f} s" if seconds else "")
+
+
 @router.put("/episodes/{eid}/audio")
-async def upload_audio(eid: int, request: Request, db: Session = Depends(get_db)):
-    """The audio file is the raw request body (Content-Type audio/*), streamed to disk with a size cap."""
+async def upload_audio(eid: int, request: Request, hints: bool = False, db: Session = Depends(get_db)):
+    """The audio or video file is the raw request body (Content-Type audio/* or video/*), streamed to disk with a size
+    cap after a free-space check. Audio is stored right away. A video is checked here (it must have an audio track) and
+    handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the video; `hints` (video only)
+    also samples a few frames for the casting and setting hints, deleted as soon as the hints are made."""
     ep = audio_episode(db, eid)
     gate(ep, "upload_audio")
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
-    if ctype not in AUDIO_TYPES:
-        raise HTTPException(415, f"upload an audio file ({', '.join(sorted(set(AUDIO_TYPES.values())))})")
-    folder = get_settings().work_dir / "uploads"
-    folder.mkdir(parents=True, exist_ok=True)
-    tmp = folder / f"audio-{ep.id}-{uuid.uuid4().hex[:8]}{AUDIO_TYPES[ctype]}"
-    size = 0
+    is_video = ctype in VIDEO_TYPES
+    if ctype not in AUDIO_TYPES and not is_video:
+        exts = sorted(set(AUDIO_TYPES.values()) | set(VIDEO_TYPES.values()))
+        raise HTTPException(415, f"upload an audio or video file ({', '.join(exts)})")
+    cap = MAX_VIDEO_BYTES if is_video else MAX_BYTES
+    kind = "video" if is_video else "audio"
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    if declared > cap:
+        raise HTTPException(413, f"the {kind} file is larger than {cap // 1048576} MB")
+    try:
+        media.check_free_space(uploads_dir(), declared or cap)
+    except OSError as e:
+        raise HTTPException(507, str(e))
+    ext = (VIDEO_TYPES if is_video else AUDIO_TYPES)[ctype]
+    tmp = uploads_dir() / f"{kind}-{ep.id}-{uuid.uuid4().hex[:8]}{ext}"
+    size, keep_for_worker = 0, False
     try:
         with open(tmp, "wb") as f:
             async for chunk in request.stream():
                 size += len(chunk)
-                if size > MAX_BYTES:
-                    raise HTTPException(413, f"the audio file is larger than {MAX_BYTES // (1024 * 1024)} MB")
+                if size > cap:
+                    raise HTTPException(413, f"the {kind} file is larger than {cap // 1048576} MB")
                 f.write(chunk)
         if size == 0:
             raise HTTPException(422, "the uploaded file is empty")
         try:
-            seconds = audio_seconds_of(tmp)
-        except ValueError as e:
+            info = media.probe(tmp)
+        except media.MediaError as e:
             raise HTTPException(422, str(e))
-        if seconds is not None and seconds > MAX_SECONDS[ep.format] + 0.5:
-            raise HTTPException(422, f"the audio runs {seconds:.0f} s; a {ep.format} episode allows at most {MAX_SECONDS[ep.format]} s")
-        from .storage import sha256_file
-        from .tasks import store_asset
-        key = f"episodes/{ep.id}/source-audio-{sha256_file(tmp)[:12]}{AUDIO_TYPES[ctype]}"
-        a = store_asset(db, ep_id=ep.id, src=tmp, key=key, kind="source-audio", content_type=ctype, revision=ep.revision,
-                        label=f"Uploaded audio ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
+        if not info["audio"]:
+            raise HTTPException(422, f"this {kind} file has no audio track")
+        if is_video:
+            if not get_settings().ffmpeg:
+                raise HTTPException(503, "FFmpeg is not configured on this server (FFMPEG), so video files cannot be read")
+            seconds = info["duration"]
+            limit = MAX_SOURCE_SECONDS if ep.format == "short" else MAX_SECONDS[ep.format]
+            if seconds is not None and seconds > limit + 0.5:
+                raise HTTPException(422, f"the video runs {seconds:.0f} s; a {ep.format} episode allows at most {limit} s")
+            ep.audio_asset_id, ep.last_error = None, ""
+            ep.audio_transcript = {"source_media": {"type": "video", "preparing": True, "hints_requested": bool(hints)}}
+            set_stage(ep, "audio_preparing")
+            db.add(Event(episode_id=ep.id, kind="episode", message=f"Video uploaded ({size / 1048576:.1f} MB): extracting its audio"
+                                                                  + (" and sampling frames for hints" if hints else "")))
+            db.commit()
+            keep_for_worker = True
+            enqueue(db, "audio_media_prepare", episode_id=ep.id, revision=ep.revision,
+                    payload={"upload": tmp.name, "hints": bool(hints), "seconds": seconds})
+            return state(db, ep)
+        msg = accept_audio(db, ep, tmp, ctype, ext, info["duration"], {"type": "audio"})
     finally:
-        tmp.unlink(missing_ok=True)
-    ep.audio_asset_id, ep.audio_transcript, ep.last_error = a.id, None, ""
+        if not keep_for_worker:
+            tmp.unlink(missing_ok=True)
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"{msg} ({size / 1048576:.1f} MB)"))
+    db.commit()
+    if ep.audio_asset_id:
+        enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": ep.audio_asset_id})
+    return state(db, ep)
+
+
+class TrimIn(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+
+@router.post("/episodes/{eid}/audio/trim")
+def trim_audio(eid: int, body: TrimIn, db: Session = Depends(get_db)):
+    """Shorts only: the episode uses the window [start, end) of the uploaded recording (at most 60 s). The whole
+    recording is kept, so the window can be moved later; a new window is transcribed again (labels start over)."""
+    ep = audio_episode(db, eid)
+    gate(ep, "trim_audio")
+    if ep.format != "short":
+        raise HTTPException(422, "trimming is for Shorts only (a long episode uses the whole recording)")
+    tr = dict(ep.audio_transcript or {})
+    sm = dict(tr.get("source_media") or {})
+    full = db.get(Asset, sm.get("full_asset_id")) if sm.get("full_asset_id") else None
+    if full is None:
+        raise HTTPException(409, "upload the recording first")
+    window, duration = MAX_SECONDS["short"], sm.get("duration")
+    if body.end <= body.start:
+        raise HTTPException(422, "the window must end after it starts")
+    if body.end - body.start > window + 0.05:
+        raise HTTPException(422, f"a Short's window is at most {window} s (this one is {body.end - body.start:.1f} s)")
+    if duration and body.end > float(duration) + 0.05:
+        raise HTTPException(422, f"the window ends after the recording ({float(duration):.1f} s)")
+    try:
+        media.check_free_space(uploads_dir(), int(full.size or 0))
+    except OSError as e:
+        raise HTTPException(507, str(e))
+    from .storage import sha256_file, storage
+    from .tasks import store_asset
+    src = uploads_dir() / f"trim-src-{ep.id}-{uuid.uuid4().hex[:8]}{Path(full.storage_key).suffix}"
+    out = uploads_dir() / f"trim-{ep.id}-{uuid.uuid4().hex[:8]}.wav"
+    try:
+        storage().get_to_file(full.storage_key, src)
+        try:
+            out = media.cut_audio(src, out, body.start, min(body.end, float(duration) if duration else body.end))
+        except media.MediaToolMissing as e:
+            raise HTTPException(503, str(e))
+        except media.MediaError as e:
+            raise HTTPException(422, str(e))
+        a = store_asset(db, ep_id=ep.id, src=out, key=f"episodes/{ep.id}/source-audio-{sha256_file(out)[:12]}.wav",
+                        kind="source-audio", content_type="audio/wav", revision=ep.revision,
+                        label=f"Short window {body.start:.1f}-{body.end:.1f} s ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
+    finally:
+        src.unlink(missing_ok=True)
+        out.unlink(missing_ok=True)
+    sm["needs_trim"] = False
+    ep.audio_transcript = {k: v for k, v in {**tr, "source_media": sm, "trim": {"start": round(body.start, 3), "end": round(body.end, 3)}}.items()
+                           if k in KEEP_KEYS}
+    ep.audio_asset_id, ep.last_error = a.id, ""
     set_stage(ep, "audio_transcribing")
-    db.add(Event(episode_id=ep.id, kind="episode", message=f"Audio uploaded ({size / 1048576:.1f} MB" + (f", {seconds:.1f} s)" if seconds else ")")))
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Short window chosen: {body.start:.1f}-{body.end:.1f} s; transcribing it"))
     db.commit()
     enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": a.id})
     return state(db, ep)
@@ -243,7 +403,8 @@ def transcribe_again(eid: int, db: Session = Depends(get_db)):
     ep = audio_episode(db, eid)
     gate(ep, "transcribe_audio")
     if not ep.audio_asset_id:
-        raise HTTPException(409, "upload the audio first")
+        needs = ((ep.audio_transcript or {}).get("source_media") or {}).get("needs_trim")
+        raise HTTPException(409, "choose the Short's 60 s window first" if needs else "upload the audio first")
     set_stage(ep, "audio_transcribing")
     ep.last_error = ""
     db.commit()
@@ -487,7 +648,8 @@ def audio_transcribe(ctx: Ctx) -> dict:
     if not lines:
         raise ValueError("the transcription found no speech in this audio")
     duration = tr.get("duration") or audio_seconds_of(local) or lines[-1]["end"]
-    ep.audio_transcript = {"provider": tr.get("provider", cfg.get("provider")), "model": tr.get("model", ""),
+    kept = {k: v for k, v in (ep.audio_transcript or {}).items() if k in KEEP_KEYS}   # upload facts, video hints, window
+    ep.audio_transcript = {**kept, "provider": tr.get("provider", cfg.get("provider")), "model": tr.get("model", ""),
                            "language": tr.get("language", ""), "duration": round(float(duration), 3), "text": tr.get("text", ""),
                            "words_available": bool(tr.get("words")), "asset_id": a.id, "lines": lines, "edited": False}
     ep.last_error = ""
@@ -495,6 +657,116 @@ def audio_transcribe(ctx: Ctx) -> dict:
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Audio transcribed: {len(lines)} timed lines; label the speakers"))
     db.commit()
     return {"lines": len(lines), "duration": round(float(duration), 3), "words": len(tr.get("words") or [])}
+
+
+@task
+def audio_media_prepare(ctx: Ctx) -> dict:
+    """A video upload: extract its audio track, delete the original video (always, even on failure), optionally sample
+    frames for the hints (job `audio_media_hints`), then store the audio like an audio upload."""
+    db, job = ctx.db, ctx.job
+    ep = db.get(Episode, job.episode_id)
+    p = job.payload or {}
+    src = _in_uploads(p.get("upload", ""))
+    frames_dir: Path | None = None
+    out = uploads_dir() / f"extracted-{ep.id}-{uuid.uuid4().hex[:8]}.m4a"
+    try:
+        sm = (ep.audio_transcript or {}).get("source_media") or {}
+        if ep.stage != "audio_preparing" or not sm.get("preparing") or not src.exists():
+            ctx.log("A newer upload replaced this video; nothing to do.")
+            return {"skipped": "replaced by a newer upload"}
+        try:
+            out = media.extract_audio(src, out)
+            ctx.log("Audio track extracted from the video")
+            frames = []
+            if p.get("hints"):
+                frames_dir = uploads_dir() / f"hints-{ep.id}-{uuid.uuid4().hex[:8]}"
+                frames = media.sample_frames(src, frames_dir, p.get("seconds"))
+                ctx.log(f"{len(frames)} frame(s) sampled for the hints (deleted after use)")
+        finally:
+            src.unlink(missing_ok=True)       # the original video is never kept: only its audio is used
+        ctx.log("Original video deleted")
+        try:
+            msg = accept_audio(db, ep, out, "audio/mp4", ".m4a", media.probe(out)["duration"],
+                               {"type": "video", "original_deleted": True, "hints_requested": bool(p.get("hints"))})
+        except HTTPException as e:
+            raise media.MediaError(str(e.detail)) from None
+        db.add(Event(episode_id=ep.id, kind="episode", message=msg))
+        db.commit()
+        if ep.audio_asset_id:
+            enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": ep.audio_asset_id})
+        if frames:
+            full_id = ep.audio_transcript["source_media"]["full_asset_id"]
+            enqueue(db, "audio_media_hints", episode_id=ep.id, revision=ep.revision,
+                    payload={"frames": frames_dir.name, "full_asset_id": full_id})
+            frames_dir = None                 # handed to the hints job, which deletes it
+        elif p.get("hints"):
+            db.add(Event(episode_id=ep.id, kind="episode", message="No frames could be read from the video: no hints"))
+            db.commit()
+        return {"audio_asset_id": ep.audio_asset_id, "needs_trim": ep.audio_asset_id is None, "frames": len(frames)}
+    except (media.MediaError, media.MediaToolMissing) as e:
+        ep.audio_transcript, ep.audio_asset_id, ep.last_error = None, None, str(e)[:2000]
+        set_stage(ep, "audio_upload")
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"The video could not be used: {e}"))
+        db.commit()
+        return {"refused": str(e)}
+    finally:
+        src.unlink(missing_ok=True)
+        out.unlink(missing_ok=True)
+        if frames_dir is not None:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+
+
+HINTS_SYSTEM = ("You help set up a scene for an adult 2D animated comedy. You are shown a few frames of the owner's video "
+                "ONLY to suggest how many characters the scene needs, what kind of place it is and its mood. Never describe, "
+                "identify or name anyone; never mention faces, bodies, clothing, age, gender, ethnicity or any other trait of "
+                "a person; never read out text, logos or brands. Reply with one JSON object only.")
+HINTS_PROMPT = ('From these frames give: the largest number of people visible in any one frame; the kind of place in at '
+                'most 6 generic words (e.g. "small office, daytime", "kitchen at night"); the mood in at most 4 words. '
+                'JSON: {"people_count": 0, "setting": "", "mood": ""}')
+
+
+def clean_hints(ans: dict) -> dict:
+    """Only the three allowed facts, short and plain: anything else in the model's answer is dropped."""
+    def short(v, words: int, chars: int) -> str:
+        text = re.sub(r"\s+", " ", re.sub(r"[^\w\s,'&/-]", " ", str(v or ""))).strip()
+        return " ".join(text.split()[:words])[:chars]
+    try:
+        n = int(ans.get("people_count"))
+        n = n if 0 <= n <= 20 else None
+    except (TypeError, ValueError):
+        n = None
+    return {"people_count": n, "setting": short(ans.get("setting"), 6, 60), "mood": short(ans.get("mood"), 4, 40)}
+
+
+@task
+def audio_media_hints(ctx: Ctx) -> dict:
+    """Casting and setting hints from the sampled frames (people count, setting, mood only); the frames are deleted
+    when this job ends, whatever happens."""
+    from .providers import text_provider
+    from .settings_store import get_section
+    db, job = ctx.db, ctx.job
+    ep = db.get(Episode, job.episode_id)
+    p = job.payload or {}
+    folder = _in_uploads(p.get("frames", ""))
+    try:
+        sm = (ep.audio_transcript or {}).get("source_media") or {}
+        frames = sorted(folder.glob("frame-*.jpg")) if folder.is_dir() else []
+        if sm.get("full_asset_id") != p.get("full_asset_id") or not frames:
+            ctx.log("No frames for the current upload; nothing to do.")
+            return {"skipped": True}
+        ans = text_provider(get_section(db, "text")).complete_json(HINTS_SYSTEM, HINTS_PROMPT, images=frames)
+        hints = clean_hints(ans if isinstance(ans, dict) else {})
+        db.refresh(ep)
+        tr = dict(ep.audio_transcript or {})
+        tr["media_hints"] = {**hints, "frames": len(frames), "job_id": job.id}
+        ep.audio_transcript = tr
+        people = "?" if hints["people_count"] is None else hints["people_count"]
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"Hints from the video: {people} people, "
+                                                              f"{hints['setting'] or '?'}, {hints['mood'] or '?'} (frames deleted)"))
+        db.commit()
+        return {**hints, "frames": len(frames)}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 CAST_SYSTEM = ("You are the casting director of an adult 2D animated comedy (grown-up characters and situations). You read "

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import {Suspense, useEffect, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
-import {api, uploadAudio, when} from '@/lib/api';
+import {api, isVideoFile, uploadAudio, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 
@@ -67,31 +67,37 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
   const [file, setFile] = useState<File | null>(null);
   const [rights, setRights] = useState(false);
   const [source, setSource] = useState('');
+  const [hints, setHints] = useState(false);
   const {busy, error, run} = useAction();
+  const video = isVideoFile(file);
   const create = () => run('create', async () => {
     const ep = await api('/audio-episodes', {body: {title, format, rights_confirmed: rights, rights_source: source || null}});
-    await uploadAudio(`/episodes/${ep.id}/audio`, file!);
+    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: video && hints});
     onDone(ep.id);
   });
   return (
     <div className="card">
       <h2>New episode from audio</h2>
-      <p className="muted small">Upload a recording of the dialogue. It is transcribed into timed lines; you label who says each line and set up the cast. The uploaded audio is the voice track (no generated voices).</p>
+      <p className="muted small">Upload a recording of the dialogue, as an audio or a video file. It is transcribed into timed lines; you label who says each line and set up the cast. The recording's audio is the voice track (no generated voices). A video is only used for its sound: its audio track is extracted and the video file is deleted; the picture is never used in the episode.</p>
       <ErrorBox error={error} />
       <div className="grid cols-2">
         <div className="field"><label htmlFor="at">Title</label><input id="at" value={title} onChange={e => setTitle(e.target.value)} /></div>
         <div className="field"><label htmlFor="af">Format</label><select id="af" value={format} onChange={e => setFormat(e.target.value)}>
-          <option value="short">Short (audio up to 60 s)</option><option value="long">Long episode (audio up to 7½ minutes)</option></select></div>
+          <option value="short">Short (60 s; a longer recording: you choose the 60 s window)</option><option value="long">Long episode (audio up to 7½ minutes)</option></select></div>
       </div>
-      <div className="field"><label htmlFor="afile">Audio file (MP3, WAV, M4A, AAC, OGG, FLAC; up to 60 MB)</label>
-        <input id="afile" type="file" accept="audio/*" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
+      <div className="field"><label htmlFor="afile">Audio or video file (audio: MP3, WAV, M4A, AAC, OGG, FLAC up to 60 MB; video: MP4, MOV, WEBM, MKV up to 250 MB)</label>
+        <input id="afile" type="file" accept="audio/*,video/*" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
+      {video && <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
+        <input type="checkbox" style={{width: 'auto'}} checked={hints} onChange={e => setHints(e.target.checked)} />
+        Use the video for casting and setting hints (how many people, the kind of place, the mood; nobody is described). A few frames are read once and deleted.
+      </label>}
       <div className="field"><label htmlFor="asrc">Where the audio comes from</label>
         <select id="asrc" value={source} onChange={e => setSource(e.target.value)}>
           <option value="">Choose…</option><option value="own_recording">My own recording</option><option value="licensed">Licensed</option>
           <option value="voice_actor">Voice actor (recorded for me)</option><option value="other">Other</option></select></div>
       <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
         <input type="checkbox" style={{width: 'auto'}} checked={rights} onChange={e => setRights(e.target.checked)} required />
-        I have the right to use this audio
+        I have the right to use this recording: its audio and any video it came with
       </label>
       <div className="row" style={{marginTop: 12}}>
         <button className="btn primary" disabled={!!busy || !title || !file || !rights || !source} onClick={create}>{busy ? 'Uploading…' : 'Create and upload'}</button>

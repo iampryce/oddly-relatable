@@ -17,7 +17,8 @@ Nothing in this change is installed or run automatically. The owner installs it 
   - backups beyond the newest 7 nightly and 5 deploy-time, counted separately. The newest backup is never removed.
   - database dumps older than 30 days. The newest dump is never removed.
   - deploy logs older than 30 days, and the systemd journal above 100 MB.
-- **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media) and running containers.
+- **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; the weekly sweep catches anything a crash left behind. Backups also leave `work/uploads` out.
+- **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media, apart from `work/uploads`) and running containers.
 - **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS` and `JOURNAL_MAX` are environment variables.
 - **The 30-day database-dump folder** (`/srv/stickman/db-dumps/`):
   - Each nightly backup also writes `<stamp>-nightly.dump` with a `.sha256` file there.

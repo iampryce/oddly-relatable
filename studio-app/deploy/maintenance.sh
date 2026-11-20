@@ -9,7 +9,10 @@
 #         $KEEP_NIGHTLY nightly and $KEEP_DEPLOY deploy-time backups (counted separately; the newest backup is never
 #         removed); database dumps in $ROOT/db-dumps younger than $DUMP_DAYS days (never the newest dump); deploy logs
 #         younger than $LOG_DAYS days.
-# Never touches: $ROOT/incoming, $ROOT/shared, $ROOT/repo, Docker volumes (database, media), running containers.
+#         Upload leftovers (work/uploads in the media volume: a video whose audio was never extracted, hint frames)
+#         are removed after $UPLOAD_HOURS hours (default 24); nothing else in the media volume is touched.
+# Never touches: $ROOT/incoming, $ROOT/shared, $ROOT/repo, Docker volumes (database, media) except work/uploads, running
+#         containers.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP_RELEASES=${KEEP_RELEASES:-5}
@@ -19,6 +22,8 @@ DUMP_DAYS=${DUMP_DAYS:-30}
 LOG_DAYS=${LOG_DAYS:-30}
 BUILD_CACHE_HOURS=${BUILD_CACHE_HOURS:-168}
 JOURNAL_MAX=${JOURNAL_MAX:-100M}
+UPLOAD_HOURS=${UPLOAD_HOURS:-24}
+MEDIA_VOLUME=${MEDIA_VOLUME:-oddstudio_work_data}
 APPLY=0
 case "${1:-}" in
   --apply) APPLY=1 ;;
@@ -28,6 +33,7 @@ esac
 (( KEEP_RELEASES >= 2 )) || { echo "maintenance: KEEP_RELEASES must be at least 2 (current + one rollback)" >&2; exit 2; }
 (( KEEP_NIGHTLY >= 1 && KEEP_DEPLOY >= 1 )) || { echo "maintenance: keep at least 1 backup of each kind" >&2; exit 2; }
 (( DUMP_DAYS >= 1 )) || { echo "maintenance: DUMP_DAYS must be at least 1" >&2; exit 2; }
+(( UPLOAD_HOURS >= 1 )) || { echo "maintenance: UPLOAD_HOURS must be at least 1" >&2; exit 2; }
 
 mode=$([[ $APPLY == 1 ]] && echo "APPLY" || echo "DRY RUN")
 echo "maintenance ($mode) $(date -u +%Y-%m-%dT%H:%M:%SZ); disk: $(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 "), " $4 " free"}')"
@@ -98,6 +104,18 @@ if [[ -d "$dumps" ]]; then
   done < <(find "$dumps" -maxdepth 1 -type f -name '*.dump' -mmin +$(( DUMP_DAYS * 1440 )) | sort)
 else
   echo "database dumps: none yet ($dumps is created by the first nightly backup)"
+fi
+
+# ---------------------------------------------------------------- upload leftovers (work/uploads in the media volume)
+echo "uploads: leftovers older than $UPLOAD_HOURS h in work/uploads"
+if docker volume inspect "$MEDIA_VOLUME" >/dev/null 2>&1; then
+  while read -r f; do
+    [[ -z "$f" ]] && continue
+    remove "upload leftover $f" docker run --rm -v "$MEDIA_VOLUME:/data" alpine:3.20 rm -rf -- "/data/work/uploads/$f"
+  done < <(docker run --rm -v "$MEDIA_VOLUME:/data:ro" alpine:3.20 \
+             find /data/work/uploads -mindepth 1 -maxdepth 1 -mmin +$(( UPLOAD_HOURS * 60 )) -exec basename {} \; 2>/dev/null | sort)
+else
+  echo "  media volume $MEDIA_VOLUME not found; skipped"
 fi
 
 # ---------------------------------------------------------------- logs

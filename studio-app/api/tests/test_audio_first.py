@@ -123,7 +123,9 @@ class AudioFirstTest(unittest.TestCase):
 
     def test_upload_checks_type_and_size(self):
         eid = self.create().json()["id"]
-        self.assertEqual(self.upload(eid, ctype="video/mp4").status_code, 415)
+        r = self.upload(eid, ctype="video/mp4")      # Stage 1b: video is accepted, but only with FFmpeg configured
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertIn("FFmpeg", r.text)
         self.assertEqual(self.upload(eid, ctype="text/html").status_code, 415)
         self.assertEqual(self.upload(eid, data=b"").status_code, 422)
         from oddstudio import audio_first

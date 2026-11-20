@@ -24,8 +24,9 @@ http://{$PUBLIC_HOST} {
 		X-Robots-Tag "noindex, nofollow"
 		-Server
 	}
+	# uploads: audio up to 60 MB, video up to 250 MB (audio-first Stage 1b), plus headroom
 	request_body {
-		max_size 50MB
+		max_size 260MB
 	}
 	reverse_proxy web:3000
 }

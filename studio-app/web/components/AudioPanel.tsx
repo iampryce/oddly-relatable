@@ -1,9 +1,10 @@
 'use client';
 import {useEffect, useRef, useState} from 'react';
-import {api, uploadAudio} from '@/lib/api';
+import {api, isVideoFile, uploadAudio} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
+import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 
 // Audio-first episode, stage 1: the uploaded audio (the voice track), its timed lines, a speaker per line, and the cast.
 // The server validates every change (timing inside the audio, in order, no overlaps); this page only prepares it.
@@ -25,12 +26,13 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [bulkSpeaker, setBulkSpeaker] = useState('');
+  const [hints, setHints] = useState(false);
   const player = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number | null>(null);
 
   useEffect(() => {
     if (!st) return;
-    setPoll(st.stage === 'audio_transcribing' ? 2500 : 15000);
+    setPoll(st.stage === 'audio_transcribing' || st.stage === 'audio_preparing' ? 2500 : 15000);
     if (!dirty) setLines(st.lines || []);
   }, [st, dirty]);
 
@@ -84,11 +86,22 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
                            onTimeUpdate={e => { if (stopAt.current !== null && e.currentTarget.currentTime >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} />
           : <p className="muted">No audio uploaded yet.</p>}
         {st.allowed_actions.includes('upload_audio') && <div className="field">
-          <label htmlFor="audio-file">{st.audio ? 'Replace the audio (the lines are transcribed again)' : 'Upload the audio file'}</label>
-          <input id="audio-file" type="file" accept="audio/*" disabled={!!act.busy}
-                 onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f); setDirty(false); setSelected(new Set()); }); }} />
+          <label htmlFor="audio-file">{st.audio || st.full_audio ? 'Replace the recording (the lines are transcribed again)' : 'Upload the recording'} (audio up to {st.limits?.audio_mb} MB, or a video up to {st.limits?.video_mb} MB: only its sound is used, the video file is deleted)</label>
+          <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
+            <input type="checkbox" style={{width: 'auto'}} checked={hints} onChange={e => setHints(e.target.checked)} />
+            For a video: use it for casting and setting hints (how many people, the kind of place, the mood; nobody is described; the frames are deleted after)
+          </label>
+          <input id="audio-file" type="file" accept="audio/*,video/*" disabled={!!act.busy}
+                 onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f, {hints: hints && isVideoFile(f)}); setDirty(false); setSelected(new Set()); }); }} />
         </div>}
+        {st.stage === 'audio_preparing' && <div className="alert">Extracting the audio from the video (the video file is deleted afterwards)…</div>}
         {st.stage === 'audio_transcribing' && <div className="alert">Transcribing the audio into timed lines…</div>}
+        {st.source_media && !st.source_media.preparing && <p className="muted small">
+          Source: {st.source_media.type === 'video' ? 'the audio track of a video (the video file was deleted; its picture is never used)' : 'an audio file'}
+          {st.source_media.duration ? ` · ${round1(st.source_media.duration)} s recorded` : ''}
+          {st.trim ? ` · Short window ${round1(st.trim.start)}-${round1(st.trim.end)} s` : ''}</p>}
+        {st.media_hints && <p className="small"><b>Hints from the video</b> (frames deleted): {st.media_hints.people_count ?? '?'} people · {st.media_hints.setting || 'place unknown'} · {st.media_hints.mood || 'mood unknown'}</p>}
+        {st.source_media?.hints_requested && !st.media_hints && !st.source_media?.preparing && <p className="muted small">Hints from the video: being made…</p>}
         {st.transcript && <p className="muted small">Transcribed by {st.transcript.provider}{st.transcript.model ? ` (${st.transcript.model})` : ''} · {st.transcript.duration?.toFixed(1)} s ·
           {st.transcript.words_available ? ' word timings' : ' segment timings only (no word-level split)'}
           {st.allowed_actions.includes('transcribe_audio') && st.audio && <> · <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe again</button></>}</p>}
@@ -131,9 +144,41 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
         {!dirty && st.unlabelled_lines > 0 && <p className="muted small">{st.unlabelled_lines} line(s) have no speaker yet.</p>}
       </div>}
 
+      {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
+        <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
       {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
 
       {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
+    </div>
+  );
+}
+
+// A Short uses at most 60 s of the recording: the owner picks the window on the whole recording (kept for this).
+function TrimCard({st, episodeId, act, hasLines, onApplied}: {st: any; episodeId: number; act: ReturnType<typeof useAction>; hasLines: boolean; onApplied: () => void}) {
+  const max = st.window_seconds || 60, duration: number | null = st.source_media?.duration ?? null;
+  const [start, setStart] = useState<number>(st.trim?.start ?? 0);
+  const [end, setEnd] = useState<number>(st.trim?.end ?? windowFrom(0, duration, max).end);
+  const player = useRef<HTMLAudioElement>(null);
+  const err = windowError(start, end, duration, max);
+  const here = () => round1(player.current?.currentTime ?? 0);
+  const apply = () => {
+    if (hasLines && !window.confirm('A new window is transcribed again: the current lines and speaker labels start over. Continue?')) return;
+    act.run('trim', async () => { await api(`/episodes/${episodeId}/audio/trim`, {body: {start, end}}); onApplied(); });
+  };
+  return (
+    <div className="card stack">
+      <h2 style={{margin: 0}}>The Short's {max} s window</h2>
+      {st.needs_trim && <div className="alert">The recording runs {round1(duration ?? 0)} s. A Short uses at most {max} s: choose the window, then it is transcribed.</div>}
+      <audio ref={player} controls src={st.full_audio.url} style={{width: '100%'}} />
+      <div className="row" style={{flexWrap: 'wrap'}}>
+        <label className="row small">Start (s) <input type="number" min={0} step={0.1} style={{width: 90}} value={start} onChange={e => setStart(Number(e.target.value))} /></label>
+        <button className="btn sm" onClick={() => { const w = windowFrom(here(), duration, max); setStart(w.start); setEnd(w.end); }}>Start here</button>
+        <label className="row small">End (s) <input type="number" min={0} step={0.1} style={{width: 90}} value={end} onChange={e => setEnd(Number(e.target.value))} /></label>
+        <button className="btn sm" onClick={() => setEnd(here())}>End here</button>
+        <span className="muted small">{Number.isFinite(end - start) ? `${round1(end - start)} s` : ''}</span>
+        <button className="btn primary" disabled={!!err || !!act.busy} onClick={apply}>Use this window</button>
+      </div>
+      {err && <p className="small" style={{color: 'var(--bad, #b00)'}}>{err}</p>}
     </div>
   );
 }

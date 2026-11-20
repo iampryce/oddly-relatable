@@ -644,7 +644,13 @@ def after_job(db: Session, job: Job) -> None:
         db.commit()
     elif job.kind == "audio_transcribe" and job.status == "failed":
         # back to the upload step: the owner can fix the cause (provider, file) and transcribe again
-        set_stage(ep, "audio_labelling" if ep.audio_transcript else "audio_upload")
+        set_stage(ep, "audio_labelling" if (ep.audio_transcript or {}).get("lines") else "audio_upload")
+        ep.last_error = job.error[:2000]
+        db.commit()
+    elif job.kind == "audio_media_prepare" and job.status == "failed":
+        # the video could not be prepared (its file is already deleted): upload again
+        set_stage(ep, "audio_upload")
+        ep.audio_transcript, ep.audio_asset_id = None, None
         ep.last_error = job.error[:2000]
         db.commit()
     elif job.kind == "generate_storyboard" and job.status == "failed":

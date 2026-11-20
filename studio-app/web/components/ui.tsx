@@ -49,7 +49,7 @@ export const PIPELINE: [string, string[]][] = [
 
 export function Pipeline({stage, source}: {stage: string; source?: string}) {
   // audio-first episodes start with their own step: upload, transcription and speaker labelling
-  const steps: [string, string[]][] = source === 'audio' ? [['audio', ['audio_upload', 'audio_transcribing', 'audio_labelling']], ...PIPELINE] : PIPELINE;
+  const steps: [string, string[]][] = source === 'audio' ? [['audio', ['audio_upload', 'audio_preparing', 'audio_transcribing', 'audio_labelling']], ...PIPELINE] : PIPELINE;
   const at = steps.findIndex(([, s]) => s.includes(stage));
   return (
     <div className="steps">{steps.map(([name], i) => (
