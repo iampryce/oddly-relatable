@@ -7,13 +7,15 @@ import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import CastPanel from '@/components/CastPanel';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
+import AudioPanel from '@/components/AudioPanel';
 
-const TABS = ['Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
+const TABS = ['Audio', 'Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
 type Tab = typeof TABS[number];
-const tabsFor = (ep: any) => TABS.filter(t => t !== 'Outline' || ep.format === 'long');
-const BUSY = ['outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
+const tabsFor = (ep: any) => TABS.filter(t => (t !== 'Outline' || ep.format === 'long') && (t !== 'Audio' || ep.source === 'audio'));
+const BUSY = ['audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 
 function defaultTab(stage: string): Tab {
+  if (stage.startsWith('audio')) return 'Audio';
   if (stage.startsWith('outline')) return 'Outline';
   if (stage.startsWith('script')) return stage === 'script_approved' ? 'Storyboard' : 'Script';
   if (stage.startsWith('storyboard')) return stage === 'storyboard_approved' ? 'Production' : 'Storyboard';
@@ -45,12 +47,13 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
       <div className="spread">
         <div><h1>{ep.title}</h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
       </div>
-      <Pipeline stage={ep.stage} />
+      <Pipeline stage={ep.stage} source={ep.source} />
       <div className="tabs" role="tablist">
         {tabsFor(ep).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       <ErrorBox error={act.error} />
       {ep.last_error && <div className="alert bad">{ep.last_error}</div>}
+      {tab === 'Audio' && <AudioPanel episodeId={ep.id} onChange={reload} />}
       {tab === 'Outline' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}
       {tab === 'Script' && <ScriptTab {...ctx} />}
       {tab === 'Storyboard' && <StoryboardTab {...ctx} />}
