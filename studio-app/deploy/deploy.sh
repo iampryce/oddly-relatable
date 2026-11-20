@@ -10,7 +10,8 @@
 # start (the API applies database migrations on start) -> health check. On a failed health check it rolls back to
 # the previous release's images automatically (see rollback.sh). With public HTTPS (PUBLIC_HOST), the new Caddyfile is
 # validated before anything changes, and the health check also goes THROUGH Caddy: the dashboard's /api/health and the
-# direct media-upload route (an unauthenticated upload must reach the API and get 401). A proxy that does not serve
+# direct media-upload route (an upload to episode 0 without credentials must be answered BY THE API: its JSON error,
+# 401 with sign-in on, 404 with AUTH_DISABLED=true; a proxy error such as 502 is not). A proxy that does not serve
 # both counts as unhealthy, so a bad proxy config is rolled back like any other failed deploy.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
@@ -47,7 +48,10 @@ healthy() {
   (( public )) || return 0
   local via=(-k -s --max-time 10 --resolve "$host:$port:127.0.0.1")
   curl -f "${via[@]}" -o /dev/null "https://$host:$port/api/health" || return 1
-  [[ "$(curl "${via[@]}" -o /dev/null -w '%{http_code}' -X PUT "https://$host:$port/api/episodes/0/audio")" == 401 ]]
+  local out code
+  out=$(curl "${via[@]}" -w '\n%{http_code}' -X PUT "https://$host:$port/api/episodes/0/audio") || return 1
+  code=${out##*$'\n'}
+  [[ "$code" == 401 || "$code" == 404 ]] && [[ "${out%$'\n'*}" == *'"detail"'* ]]
 }
 for i in $(seq 1 30); do
   if healthy; then echo "deploy: $rel is healthy"$( (( public )) && echo " (also through the HTTPS proxy)"); exit 0; fi

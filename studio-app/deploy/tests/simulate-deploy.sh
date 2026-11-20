@@ -18,7 +18,7 @@ for rel in old new; do
 done
 ln -s releases/old "$R/current"
 
-# stubs: CADDY_VALID (0/1), UPLOAD_CODE (what the proxy answers for the unauthenticated upload)
+# stubs: CADDY_VALID (0/1), UPLOAD_CODE and UPLOAD_BODY (the proxy's answer to the upload without credentials)
 cat > "$SIM/bin/docker" <<EOF
 #!/usr/bin/env bash
 echo "docker \$*" >> "$SIM/docker.log"
@@ -29,7 +29,7 @@ EOF
 cat > "$SIM/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 args="$*"
-if [[ "$args" == *"-X PUT"* ]]; then printf '%s' "${UPLOAD_CODE:-401}"; exit 0; fi
+if [[ "$args" == *"-X PUT"* ]]; then printf '%s\n%s' "${UPLOAD_BODY-{\"detail\":\"Sign in required\"}}" "${UPLOAD_CODE:-401}"; exit 0; fi
 exit 0
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' > "$SIM/bin/sleep"
@@ -49,12 +49,21 @@ check 'grep -q "Caddyfile is not valid" "$SIM/out"' "the reason is printed"
 
 echo "2. a proxy that does not route the upload to the API is rolled back"
 : > "$SIM/docker.log"
-rc=$(run UPLOAD_CODE=502)
+rc=$(run UPLOAD_CODE=502 UPLOAD_BODY="bad gateway")
 check '[[ $rc == 1 ]]' "deploy fails"
 check '[[ "$(readlink "$R/current")" == releases/old ]]' "current points back to the old release"
 check 'grep -q "rolling back to old" "$SIM/out"' "the rollback ran"
 
-echo "3. a good deploy passes through the proxy"
+echo "3. a page from the dashboard instead of the API is not good enough"
+rc=$(run UPLOAD_CODE=404 UPLOAD_BODY="<html>not found</html>")
+check '[[ $rc == 1 && "$(readlink "$R/current")" == releases/old ]]' "an HTML 404 (not the API) is rolled back"
+
+echo "4. sign-in turned off (AUTH_DISABLED=true): the API answers 404 for episode 0"
+rc=$(run UPLOAD_CODE=404 UPLOAD_BODY='{"detail":"episode not found"}')
+check '[[ $rc == 0 && "$(readlink "$R/current")" == releases/new ]]' "deploy succeeds"
+ln -sfn releases/old "$R/current"
+
+echo "5. a good deploy passes through the proxy"
 rc=$(run UPLOAD_CODE=401)
 check '[[ $rc == 0 ]]' "deploy succeeds"
 check '[[ "$(readlink "$R/current")" == releases/new ]]' "current points to the new release"
