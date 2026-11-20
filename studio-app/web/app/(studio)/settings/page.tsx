@@ -73,7 +73,7 @@ function ProviderRows({cap, reload}: {cap: any; reload: () => unknown}) {
               {p.implemented && p.missing.length > 0 && <div className="muted">needs: {p.missing.map(NEED_LABEL).join(', ')}</div>}
             </td>
             <td className="small">
-              {(p.implemented || p.note?.includes('connection')) && !p.note?.includes('paid') &&
+              {(p.implemented || p.note?.includes('connection')) && !p.note?.includes('paid per clip') &&
                 <button className="btn sm" disabled={!!busy || ['queued', 'running'].includes(p.last_test?.status)}
                   onClick={() => run(pid, () => api('/settings/test', {method: 'POST', body: {target: p.test_target}}))}>Test</button>}{' '}
               <TestResult t={p.last_test} />
