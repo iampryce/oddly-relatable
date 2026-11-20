@@ -32,6 +32,12 @@ if [[ "\$1" == run ]]; then
   done
   exit 0
 fi
+if [[ "\$1 \$2" == "system df" ]]; then
+  if [[ "\$args" == *"|"* ]]; then printf 'Images|5.379GB|3.5GB (65%%)\nContainers|811kB|0B (0%%)\nLocal Volumes|1.778GB|0B (0%%)\nBuild Cache|44.91GB|40.17GB\n'
+  else printf 'Images 3.5GB (65%%)\nBuild Cache 40.17GB\n'; fi
+  exit 0
+fi
+[[ "\$1 \$2" == "builder prune" ]] && { echo "\$args" >> "$SIM/prune.log"; exit 0; }
 case "\$1 \$2" in "ps --format") echo "oddstudio-api:r1" ;; "images oddstudio-api"|"images oddstudio-web") echo r1 ;; esac
 exit 0
 EOF
@@ -113,6 +119,32 @@ check '[[ ! -f "$SIM/uploads-removed" ]]' "the dry run removes nothing"
 bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
 check '[[ "$(cat "$SIM/uploads-removed" 2>/dev/null | tr "\n" " ")" == "/data/work/uploads/hints-7-ef56ab78 /data/work/uploads/video-7-ab12cd34.mp4 " ]]' "--apply removes exactly the listed leftovers"
 check 'grep -q "UPLOAD_HOURS:-24" "$HERE/maintenance.sh"' "the default age is 24 h"
+
+echo "5. the build cache cap and the deploy lock"
+rm -f "$SIM/prune.log"
+out=$(bash "$HERE/maintenance.sh" 2>&1)
+check 'grep -q "build cache: 44.9 GB now, kept at most 10GB; would trim about 34.9 GB" <<< "$out"' "dry run: the cache size and what the cap would trim"
+check 'grep -qE "^projected free after --apply: about [0-9]+G \(now [0-9]+G, as df -h counts" <<< "$out"' "dry run: the projected free space"
+check '[[ ! -f "$SIM/prune.log" ]]' "the dry run prunes nothing"
+bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
+check 'grep -q -- "--filter until=168h" "$SIM/prune.log" && grep -q -- "--max-used-space 10GB" "$SIM/prune.log"' "--apply: the age rule, then the cache capped at 10GB"
+rm -f "$SIM/prune.log"
+BUILD_CACHE_MAX=5GB bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
+check 'grep -q -- "--max-used-space 5GB" "$SIM/prune.log"' "BUILD_CACHE_MAX sets the cap"
+check '! BUILD_CACHE_MAX=lots bash "$HERE/maintenance.sh" >/dev/null 2>&1' "a cap that is not a size is refused"
+# a deploy holds the lock: nothing Docker-related is touched, the rest still runs
+for i in 1 2 3 4 5 6 7; do mkdir -p "$STICKMAN_ROOT/releases/old$i"; touch -d "$i days ago" "$STICKMAN_ROOT/releases/old$i"; done
+rm -f "$SIM/prune.log"
+flock "$STICKMAN_ROOT/.ci-deploy.lock" sleep 3 & holder=$!      # a stand-in deploy holding the lock for 3 s
+sleep 0.5
+out=$(bash "$HERE/maintenance.sh" --apply 2>&1)
+check 'grep -q "a deploy is running" <<< "$out"' "--apply sees the running deploy"
+check '[[ ! -f "$SIM/prune.log" ]]' "no build-cache prune during a deploy"
+check '[[ -d "$STICKMAN_ROOT/releases/old7" ]] && ! grep -q "removed  release" <<< "$out"' "no release removed during a deploy"
+check 'grep -q "^backups:" <<< "$out" && grep -q "^done (APPLY)" <<< "$out"' "the other steps still run"
+wait $holder                                                       # the deploy ends: the lock is free again
+out=$(bash "$HERE/maintenance.sh" --apply 2>&1)
+check '[[ ! -d "$STICKMAN_ROOT/releases/old7" ]] && grep -q -- "--max-used-space 10GB" "$SIM/prune.log"' "after the deploy: old releases go and the cache is capped"
 
 echo
 if (( fails )); then echo "simulate-backups: $fails check(s) FAILED"; exit 1; fi

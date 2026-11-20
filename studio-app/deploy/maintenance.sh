@@ -11,8 +11,15 @@
 #         younger than $LOG_DAYS days.
 #         Upload leftovers (work/uploads in the media volume: a video whose audio was never extracted, hint frames)
 #         are removed after $UPLOAD_HOURS hours (default 24); nothing else in the media volume is touched.
+#         The Docker build cache is kept at most $BUILD_CACHE_MAX (default 10GB, least recently used goes first), on
+#         top of the age rule ($BUILD_CACHE_HOURS h): frequent deploys keep the cache "recent", so age alone frees nothing.
 # Never touches: $ROOT/incoming, $ROOT/shared, $ROOT/repo, Docker volumes (database, media) except work/uploads, running
 #         containers.
+# --apply holds the deploy lock ($ROOT/.ci-deploy.lock, the one ci-deploy.sh takes). If a deploy is running, the
+#         releases, images and build-cache steps are skipped (a deploy builds images and switches releases); the
+#         rest (backups, dumps, uploads, logs) still runs. A deploy that starts meanwhile waits for nothing: it fails
+#         with "another deploy is running" and can be re-run.
+# The dry run ends with the projected free space after --apply (releases + unused images + build cache above the cap).
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP_RELEASES=${KEEP_RELEASES:-5}
@@ -21,6 +28,8 @@ KEEP_DEPLOY=${KEEP_DEPLOY:-5}
 DUMP_DAYS=${DUMP_DAYS:-30}
 LOG_DAYS=${LOG_DAYS:-30}
 BUILD_CACHE_HOURS=${BUILD_CACHE_HOURS:-168}
+BUILD_CACHE_MAX=${BUILD_CACHE_MAX:-10GB}
+DEPLOY_LOCK=${DEPLOY_LOCK:-$ROOT/.ci-deploy.lock}
 JOURNAL_MAX=${JOURNAL_MAX:-100M}
 UPLOAD_HOURS=${UPLOAD_HOURS:-24}
 MEDIA_VOLUME=${MEDIA_VOLUME:-oddstudio_work_data}
@@ -35,8 +44,30 @@ esac
 (( DUMP_DAYS >= 1 )) || { echo "maintenance: DUMP_DAYS must be at least 1" >&2; exit 2; }
 (( UPLOAD_HOURS >= 1 )) || { echo "maintenance: UPLOAD_HOURS must be at least 1" >&2; exit 2; }
 
+to_bytes() {   # "10.76GB" / "111.5MB (2%)" / "10GB" -> bytes (Docker's decimal units)
+  awk -v s="${1%% *}" 'BEGIN { if (!match(s, /[A-Za-z]+$/)) { printf "%.0f", s + 0; exit }
+    n = substr(s, 1, RSTART - 1); u = substr(s, RSTART)
+    f = (u == "kB" || u == "KB") ? 1e3 : (u == "MB") ? 1e6 : (u == "GB") ? 1e9 : (u == "TB") ? 1e12 : 1
+    printf "%.0f", n * f }'; }
+gb() { awk -v b="$1" 'BEGIN { printf "%.1f GB", b / 1e9 }'; }          # Docker's units (decimal)
+gib() { awk -v b="$1" 'BEGIN { printf "%.0fG", b / 1073741824 }'; }     # df -h's units, for the disk lines
+cache_max=$(to_bytes "$BUILD_CACHE_MAX")
+(( cache_max > 0 )) || { echo "maintenance: BUILD_CACHE_MAX must be a size such as 10GB" >&2; exit 2; }
+
+# A deploy builds images and switches releases: never remove those under it. --apply holds the deploy lock for the run.
+deploying=0
+if [[ $APPLY == 1 ]]; then
+  exec 9>>"$DEPLOY_LOCK"
+  flock -n 9 || deploying=1
+elif ! flock -n "$DEPLOY_LOCK" true 2>/dev/null; then
+  deploying=1
+fi
+docker_steps() { (( ! deploying )); }
+freed=0      # bytes the dry run expects --apply to free (releases, unused images, build cache above the cap)
+
 mode=$([[ $APPLY == 1 ]] && echo "APPLY" || echo "DRY RUN")
 echo "maintenance ($mode) $(date -u +%Y-%m-%dT%H:%M:%SZ); disk: $(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 "), " $4 " free"}')"
+(( deploying )) && echo "a deploy is running (deploy lock held): releases, images and the build cache are skipped this time"
 remove() {   # remove <label> <command...>: only with --apply
   local label=$1; shift
   if [[ $APPLY == 1 ]]; then "$@" && echo "  removed  $label" || echo "  FAILED   $label" >&2
@@ -53,27 +84,46 @@ while read -r rel; do keep[$rel]=1; done < <(ls -1t "$ROOT/releases" | head -n "
 echo "releases: keeping ${#keep[@]} (current $current)"
 for rel in $(ls -1t "$ROOT/releases"); do
   [[ -n "${keep[$rel]:-}" ]] && continue
+  docker_steps || { echo "  skipped  release $rel (deploy running)"; continue; }
+  freed=$(( freed + $(du -sb "$ROOT/releases/$rel" | cut -f1) ))
   remove "release $rel ($(du -sh "$ROOT/releases/$rel" | cut -f1))" rm -rf -- "$ROOT/releases/$rel"
 done
 
 # ---------------------------------------------------------------- images and build cache
 echo "images:"
-for repo in oddstudio-api oddstudio-web; do
-  while read -r tag; do
-    [[ -z "$tag" || -n "${keep[$tag]:-}" ]] && continue
-    remove "image $repo:$tag" docker image rm "$repo:$tag"
-  done < <(docker images "$repo" --format '{{.Tag}}')
-done
-for img in hello-world:latest nginx:1.27-alpine; do
-  docker image inspect "$img" >/dev/null 2>&1 || continue
-  [[ -n "$(docker ps -a -q --filter "ancestor=$img")" ]] && continue      # used by a container (even stopped): keep
-  remove "unused image $img" docker image rm "$img"
-done
+sysdf=$(docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}')
+if docker_steps; then
+  for repo in oddstudio-api oddstudio-web; do
+    while read -r tag; do
+      [[ -z "$tag" || -n "${keep[$tag]:-}" ]] && continue
+      remove "image $repo:$tag" docker image rm "$repo:$tag"
+    done < <(docker images "$repo" --format '{{.Tag}}')
+  done
+  for img in hello-world:latest nginx:1.27-alpine; do
+    docker image inspect "$img" >/dev/null 2>&1 || continue
+    [[ -n "$(docker ps -a -q --filter "ancestor=$img")" ]] && continue      # used by a container (even stopped): keep
+    remove "unused image $img" docker image rm "$img"
+  done
+  # images no running container uses (the removed releases' images among them): Docker's own estimate, shared layers
+  # counted once
+  freed=$(( freed + $(to_bytes "$(sed -n 's/^Images|[^|]*|//p' <<< "$sysdf")") ))
+else
+  echo "  skipped (deploy running)"
+fi
 echo "  dangling images and build cache older than ${BUILD_CACHE_HOURS} h: $(docker system df --format '{{.Type}} {{.Reclaimable}}' | tr '\n' ';')"
-if [[ $APPLY == 1 ]]; then
-  docker image prune -f >/dev/null
-  docker builder prune -f --filter "until=${BUILD_CACHE_HOURS}h" >/dev/null
-  echo "  pruned dangling images and old build cache"
+cache=$(to_bytes "$(sed -n 's/^Build Cache|\([^|]*\)|.*/\1/p' <<< "$sysdf")")
+over=$(( cache > cache_max ? cache - cache_max : 0 ))
+echo "build cache: $(gb "$cache") now, kept at most $BUILD_CACHE_MAX$( (( over )) && echo "; would trim about $(gb "$over")")"
+if docker_steps; then
+  freed=$(( freed + over ))
+  if [[ $APPLY == 1 ]]; then
+    docker image prune -f >/dev/null
+    docker builder prune -f --filter "until=${BUILD_CACHE_HOURS}h" >/dev/null
+    docker builder prune -f --max-used-space "$BUILD_CACHE_MAX" >/dev/null
+    echo "  pruned dangling images, build cache older than ${BUILD_CACHE_HOURS} h, and the cache above $BUILD_CACHE_MAX"
+  fi
+else
+  echo "  skipped (deploy running)"
 fi
 
 # ---------------------------------------------------------------- backups
@@ -125,4 +175,8 @@ while read -r f; do remove "log $(basename "$f")" rm -f -- "$f"; done < <(
 if [[ $APPLY == 1 ]]; then journalctl --vacuum-size="$JOURNAL_MAX" >/dev/null 2>&1 || true
 else echo "  journal now: $(journalctl --disk-usage 2>/dev/null | grep -o '[0-9.]*[KMG]' | head -1 || echo unknown)"; fi
 
+if [[ $APPLY == 0 ]]; then
+  free_now=$(( $(df -B1 --output=avail / | tail -n 1) ))
+  echo "projected free after --apply: about $(gib $(( free_now + freed ))) (now $(gib "$free_now"), as df -h counts; from releases, unused images and the build cache above $BUILD_CACHE_MAX)"
+fi
 echo "done ($mode); disk: $(df -h / | awk 'NR==2 {print $3 " used of " $2 " (" $5 "), " $4 " free"}')"
