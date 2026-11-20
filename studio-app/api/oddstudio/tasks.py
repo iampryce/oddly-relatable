@@ -590,6 +590,11 @@ def after_job(db: Session, job: Job) -> None:
     elif job.kind in ("generate_script",) and job.status == "failed":
         set_stage(ep, "script_review" if ep.script_version else "script_pending")
         db.commit()
+    elif job.kind == "audio_transcribe" and job.status == "failed":
+        # back to the upload step: the owner can fix the cause (provider, file) and transcribe again
+        set_stage(ep, "audio_labelling" if ep.audio_transcript else "audio_upload")
+        ep.last_error = job.error[:2000]
+        db.commit()
     elif job.kind == "generate_storyboard" and job.status == "failed":
         set_stage(ep, "script_approved")
         db.commit()
@@ -695,3 +700,4 @@ from . import tasks_providers  # noqa: E402,F401
 from . import comparison  # noqa: E402,F401
 from . import voice_compare  # noqa: E402,F401
 from . import sets  # noqa: E402,F401
+from . import audio_first  # noqa: E402,F401

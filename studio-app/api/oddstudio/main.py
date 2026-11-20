@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from . import engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -71,6 +71,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Oddly Relatable Studio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(routes_episodes.router)
 app.include_router(routes_characters.router)
+app.include_router(audio_first.router)
 
 
 @app.middleware("http")

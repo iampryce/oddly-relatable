@@ -27,7 +27,8 @@ def idea(i: Idea) -> dict:
 def episode_summary(e: Episode) -> dict:
     return {"id": e.id, "title": e.title, "stage": e.stage, "next_step": NEXT_STEP.get(e.stage, ""), "revision": e.revision,
             "format": e.format, "continues_episode_id": e.continues_episode_id, "outline_version": e.outline_version,
-            "approved_outline_version": e.approved_outline_version,
+            "approved_outline_version": e.approved_outline_version, "source": e.source or "script",
+            "audio_rights_confirmed": bool(e.audio_rights_confirmed), "audio_rights_source": e.audio_rights_source or "",
             "idea_id": e.idea_id, "script_version": e.script_version, "approved_script_version": e.approved_script_version,
             "storyboard_version": e.storyboard_version, "approved_storyboard_version": e.approved_storyboard_version,
             "video_asset_id": e.video_asset_id, "created_at": ts(e.created_at), "updated_at": ts(e.updated_at),
