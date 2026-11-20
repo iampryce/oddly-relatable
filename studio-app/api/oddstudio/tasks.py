@@ -30,7 +30,12 @@ from .storage import sha256_file, storage
 from .workflow import set_stage
 
 TASKS = {}
-SCENE_JOBS = ("scene_prepare", "scene_voice")
+SCENE_JOBS = ("scene_prepare", "scene_voice", "audio_slice")
+
+
+def scene_jobs(ep) -> tuple[str, str]:
+    """The per-scene jobs of an episode: audio episodes slice their recording instead of generating voices."""
+    return ("scene_prepare", "audio_slice") if getattr(ep, "source", "") == "audio" else ("scene_prepare", "scene_voice")
 
 
 def task(fn):
@@ -555,6 +560,8 @@ def render_episode(ctx: Ctx) -> dict:
 
     from . import acting
     base = f"episodes/{ep.id}/r{ep.revision}"
+    if ep.source == "audio" and not acting.enabled(db):
+        raise engine.EngineInputError("an audio episode is performed by the studio rig animator: set Settings > Motion to it")
     if acting.enabled(db):
         # Settings > Motion = studio rig animator: every line performed by the procedural acting renderer
         from .tasks_long import clip_map
@@ -625,17 +632,18 @@ def after_job(db: Session, job: Job) -> None:
         for j in db.query(Job).filter(Job.episode_id == ep.id, Job.revision == ep.revision, Job.kind.in_(SCENE_JOBS)).order_by(Job.id):
             latest[(j.kind, j.scene_id)] = j
         # Scenes already produced for this episode ("done") are reused as they are; only the others must finish.
-        expected = {(k, s.id) for k in SCENE_JOBS for s in ep.scenes if s.production_status != "done"}
+        expected = {(k, s.id) for k in scene_jobs(ep) for s in ep.scenes if s.production_status != "done"}
         done = all(latest.get(x) is not None and latest[x].status == "succeeded" for x in expected)
         rendering = db.query(Job).filter(Job.episode_id == ep.id, Job.revision == ep.revision, Job.kind == "render_episode",
                                          Job.status.in_(["queued", "running", "succeeded"])).count()
-        if ep.format == "long":   # long-form: plan segments (the Shorts single render is never used)
+        segmented = ep.format == "long" and ep.source != "audio"   # audio episodes render in one pass on their own timeline
+        if segmented:   # long-form: plan segments (the Shorts single render is never used)
             rendering = db.query(Job).filter(Job.episode_id == ep.id, Job.revision == ep.revision, Job.kind == "plan_segments",
                                              Job.status.in_(["queued", "running"])).count()
         if done and not rendering and ep.stage in ("producing", "production_failed"):
             set_stage(ep, "producing")
             db.commit()
-            enqueue(db, "plan_segments" if ep.format == "long" else "render_episode", episode_id=ep.id, revision=ep.revision)
+            enqueue(db, "plan_segments" if segmented else "render_episode", episode_id=ep.id, revision=ep.revision)
     elif job.kind == "render_episode" and job.status == "failed":
         set_stage(ep, "production_failed")
         db.commit()
@@ -764,3 +772,4 @@ from . import voice_compare  # noqa: E402,F401
 from . import sets  # noqa: E402,F401
 from . import audio_first  # noqa: E402,F401
 from . import audio_scenes  # noqa: E402,F401
+from . import audio_production  # noqa: E402,F401

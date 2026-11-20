@@ -137,10 +137,17 @@ def cues_for(clip: Path, text: str) -> list[dict]:
 def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key: dict, folder: Path,
            end_card: str | None = None) -> tuple[Path, Path, dict]:
     """refs: per scene, the (scene_id, line_index) pairs to perform (a segment, or the whole episode).
-    Returns (mp4 with audio, mix wav, report)."""
+    Returns (mp4 with audio, mix wav, report).
+    Audio-first episodes use the ABSOLUTE timeline (audio_production.py): each line at its recorded start and end, the
+    video exactly as long as the recording, which is muxed in unchanged; the render must pass the audio QA."""
     from .models import StoryboardScene
     db = ctx.db
     folder.mkdir(parents=True, exist_ok=True)
+    absolute = getattr(ep, "source", "") == "audio"
+    if absolute:
+        from . import audio_production as AP
+        src_audio, total = AP.source_audio(db, ep, folder / "source")
+        end_card = None                      # the video must end with the recording
     scenes = {sid: db.get(StoryboardScene, sid) for rs in refs for sid, _ in rs}
     present = [k for rs in refs for sid, li in rs for k in [scenes[sid].lines[li]["speaker"]] + list(scenes[sid].characters)]
     keys = list(dict.fromkeys(k for k in present if k in chars_by_key))
@@ -166,6 +173,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         cast[k] = {"rig": str(rd), "height": 530, "lips": lips, "start": "on" if (k in first_scene_cast or not first_scene_cast) else "off"}
 
     lines, t, entered = [], 0.5, {k for k in keys if cast[k]["start"] == "on"}
+    line_ids = []
     gain = float(get_section(db, "voice").get("gain", 1.0))
     audio = []
     prev_scene = None
@@ -178,12 +186,16 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             k = ln["speaker"]
             clip = clips.get(sid, {}).get(li)
             cues, seconds = [], float(ln.get("duration") or 1.6)
+            if absolute and not clip:
+                raise engine.EngineInputError(f"{ln.get('line_id') or 'a line'}: no slice of the recording (run the scene again)")
             if clip:
                 local = storage().get_to_file(clip["key"], folder / "voice" / Path(clip["key"]).name)
                 seconds = clip["seconds"]
                 cues = cues_for(local, line_texts(ln["text"])[1])
-                audio.append((local, t))
-            entry = {"speaker": k, "text": line_texts(ln["text"])[0], "start": round(t, 3), "end": round(t + seconds + BEAT, 3), "shot": ln.get("shot", "wide"),
+                if not absolute:
+                    audio.append((local, t))
+            start, end = AP.line_window(ln) if absolute else (round(t, 3), round(t + seconds + BEAT, 3))
+            entry = {"speaker": k, "text": line_texts(ln["text"])[0], "start": start, "end": end, "shot": ln.get("shot", "wide"),
                      "expression": face_for(faces.get(k, {"neutral"}), chars_by_key[k], ln.get("expression", "")), "cues": cues}
             for f in ("gesture", "look_at", "reactions"):
                 if ln.get(f):
@@ -201,8 +213,9 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
                 entry["move"] = {"type": "enter"}       # a character not on stage walks in for their first line
             entered.add(k)
             lines.append(entry)
+            line_ids.append(ln.get("line_id"))
             t = entry["end"] + GAP
-    duration = round(t + TAIL + (END_CARD if end_card else 0), 3)
+    duration = total if absolute else round(t + TAIL + (END_CARD if end_card else 0), 3)
 
     s = get_settings()
     from .tasks import current_script
@@ -211,7 +224,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration,
             **presentation(ep, hook),
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
-            "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None}
+            "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
+            "timeline": "absolute" if absolute else "sequential"}
     spec_file = folder / "acting.json"
     spec_file.write_text(json.dumps(spec, indent=1))
     silent = folder / "acting-video.mp4"
@@ -223,6 +237,22 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     if r.returncode != 0 or not silent.exists():
         raise engine.EngineRunError("the acting renderer failed: " + (r.stderr or r.stdout)[-800:])
     report = json.loads(r.stdout.strip().splitlines()[-1])
+
+    if absolute:
+        mp4 = AP.mux_original(silent, src_audio, total, folder / "acting.mp4")
+        wav = AP.as_wav(src_audio, total, folder / "acting-mix.wav")
+        words = {x["id"]: x.get("words") or [] for x in (ep.audio_transcript or {}).get("lines", [])}
+        first = min(range(len(lines)), key=lambda i: lines[i]["start"]) if lines else None
+        first_word = None
+        if first is not None:
+            w = words.get(line_ids[first]) or []
+            first_word = round(float(w[0]["start"]) if w else lines[first]["start"], 3)
+        check = AP.qa(AP.probe(mp4, "v")["duration"] or 0.0, total, spec["fps"], AP.first_mouth_cue(lines), first_word)
+        (folder / "qa-audio.json").write_text(json.dumps(check, indent=1))
+        ctx.log("audio QA: " + ("pass" if check["pass"] else "FAIL: " + AP.qa_message(check)))
+        if not check["pass"]:
+            raise engine.EngineRunError("audio QA failed: " + AP.qa_message(check))
+        return mp4, wav, {**report, "lines": len(lines), "cast": keys, "timeline": "absolute", "audio_qa": check}
 
     # voice mix: every clip at its line start, padded to the video's length
     ff = s.ffmpeg or "ffmpeg"

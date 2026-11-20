@@ -430,9 +430,10 @@ def enqueue_scene_jobs(db: Session, ep: Episode, scenes: list[StoryboardScene]) 
     for sc in scenes:
         sc.production_status = "pending"
     db.commit()
+    from .tasks import scene_jobs
     for sc in scenes:
-        jobs.append(enqueue(db, "scene_prepare", episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
-        jobs.append(enqueue(db, "scene_voice", episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
+        for kind in scene_jobs(ep):
+            jobs.append(enqueue(db, kind, episode_id=ep.id, scene_id=sc.id, revision=ep.revision))
     return jobs
 
 
@@ -444,6 +445,14 @@ def preflight(db: Session, ep: Episode) -> None:
         engine.check_cast_ready([chars[k] for k in keys if k in chars])
     except engine.EngineInputError as e:
         raise HTTPException(409, str(e))
+    if ep.source == "audio":
+        # the recording sets the length (its format cap was checked at upload); it is performed by the rig animator
+        from . import acting
+        if not acting.enabled(db):
+            raise HTTPException(409, "an audio episode is performed by the studio rig animator: set Settings > Motion to it first")
+        if not ep.audio_asset_id:
+            raise HTTPException(409, "the episode has no audio")
+        return
     sv = db.query(ScriptVersion).filter_by(episode_id=ep.id, version=ep.approved_script_version).one()
     est = estimated_seconds(sv.content)
     limit = longform.HARD_CAP if ep.format == "long" else get_section(db, "production")["max_seconds"]
@@ -461,7 +470,7 @@ def start_production(eid: int, db: Session = Depends(get_db), user: str = Depend
     set_stage(ep, "producing")
     log_event(db, ep.id, "production", f"Production started (revision {ep.revision}) by {user}")
     db.commit()
-    if ep.format == "long":
+    if ep.format == "long" and ep.source != "audio":
         # Selective regeneration: unchanged scenes keep their preparation and voices (their segments are then reused).
         from .tasks_long import start_long_scene_jobs
         need = start_long_scene_jobs(db, ep, list(ep.scenes))
@@ -482,7 +491,7 @@ def retry_job(jid: int, db: Session = Depends(get_db)):
         ep = get_episode(db, job.episode_id)
         if job.revision != ep.revision:
             raise HTTPException(409, "this job belongs to an earlier revision")
-        if job.kind in ("scene_prepare", "scene_voice", "render_episode", "plan_segments", "render_segment", "join_segments"):
+        if job.kind in ("scene_prepare", "scene_voice", "audio_slice", "render_episode", "plan_segments", "render_segment", "join_segments"):
             gate(ep, "retry_job")
             set_stage(ep, "producing")
             if job.kind == "render_segment":
