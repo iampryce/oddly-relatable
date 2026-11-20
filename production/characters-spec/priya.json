@@ -1,0 +1,11 @@
+{
+  "id": "priya", "name": "Priya",
+  "about": "Early 30s, fast-talking office manager; always three steps ahead and slightly exasperated.",
+  "proportions": {"head": 0.30, "head_aspect": 1.02, "torso": 0.30, "shoulder": 0.135, "hip": 0.10},
+  "line": {"weight": 0.012},
+  "skin": "#ffffff",
+  "hair": {"shape": "high_bun", "color": "#26181a"},
+  "torso": {"garment": {"type": "blazer", "color": "#8e3b2f"}},
+  "face": {"eye_h": 0.19, "spacing": 0.38, "brow_weight": 1.9},
+  "expressions": {"annoyed": {"brow": {"angle": 18, "tilt": true}, "mouth": {"offset": 0.05}}}
+}

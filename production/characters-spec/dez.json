@@ -1,0 +1,11 @@
+{
+  "id": "dez", "name": "Dez",
+  "about": "Late 20s, dry and literal; the straight man who notices everything.",
+  "proportions": {"head": 0.29, "head_aspect": 1.08, "torso": 0.30, "shoulder": 0.15, "hip": 0.10},
+  "line": {"weight": 0.0125},
+  "skin": "#ffffff",
+  "hair": {"shape": "short_crop", "color": "#1f1f22"},
+  "torso": {"garment": {"type": "polo", "color": "#5f6b3c"}},
+  "face": {"brow_weight": 2.2},
+  "expressions": {"neutral": {"brow": {"angle": 6}}}
+}

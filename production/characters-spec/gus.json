@@ -1,0 +1,11 @@
+{
+  "id": "gus", "name": "Gus",
+  "about": "Late 50s, the building's caretaker; slow, stubborn and sure he is right.",
+  "proportions": {"head": 0.31, "head_aspect": 0.94, "torso": 0.31, "shoulder": 0.165, "hip": 0.125},
+  "line": {"weight": 0.0135},
+  "skin": "#ffffff",
+  "hair": {"shape": "bald_tufts", "color": "#9a9a96"},
+  "torso": {"garment": {"type": "cardigan", "color": "#3f5872"}},
+  "face": {"eye_w": 0.09, "eye_h": 0.17, "spacing": 0.4, "eye_y": 0.55, "brow_w": 0.24, "brow_weight": 2.6, "mouth_w": 0.22},
+  "expressions": {"neutral": {"brow": {"angle": 10}}, "deadpan": {"eyes": {"open": 0.5, "squint": 0.4}}}
+}
