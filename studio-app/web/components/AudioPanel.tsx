@@ -3,12 +3,11 @@ import {useEffect, useRef, useState} from 'react';
 import {api, uploadAudio} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
+import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
 
 // Audio-first episode, stage 1: the uploaded audio (the voice track), its timed lines, a speaker per line, and the cast.
 // The server validates every change (timing inside the audio, in order, no overlaps); this page only prepares it.
 
-type Word = {start: number; end: number; word: string};
-type Line = {id: string; start: number; end: number; text: string; speaker: string; words: Word[]};
 type NewChar = {key: string; name: string; description: string; visual_description: string; voice_style: string; bubble_style: string};
 type CastChoice = {mode: 'existing' | 'new'; character_key: string; new: NewChar};
 
@@ -44,20 +43,14 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
     if (!a) return;
     a.currentTime = l.start; stopAt.current = l.end; a.play();
   };
-  const merge = (i: number) => {
-    const a = lines![i], b = lines![i + 1];
-    const speaker = a.speaker || b.speaker;
-    update([...lines!.slice(0, i), {...a, end: b.end, text: `${a.text} ${b.text}`.trim(), speaker, words: [...a.words, ...b.words]}, ...lines!.slice(i + 2)]);
+  // split, merge and bulk speaker: a split or merge shifts the rows, so it also clears the selection (lib/audioLines.ts)
+  const edit = (e: LineEdit) => {
+    const next = applyEdit({lines: lines!, selected}, e);
+    if (next.lines !== lines) update(next.lines);
+    setSelected(next.selected); setAnchor(null);
   };
-  const split = (i: number, w: number) => {   // split before word w
-    const l = lines![i];
-    const first = l.words.slice(0, w), second = l.words.slice(w);
-    if (!first.length || !second.length) return;
-    const text = (ws: Word[]) => ws.map(x => x.word).join(' ');
-    update([...lines!.slice(0, i), {...l, end: first[first.length - 1].end, text: text(first), words: first},
-            {...l, id: `${l.id}b`, start: second[0].start, text: text(second), words: second}, ...lines!.slice(i + 1)]);
-    setSplitting(null);
-  };
+  const merge = (i: number) => edit({kind: 'merge', index: i});
+  const split = (i: number, w: number) => { edit({kind: 'split', index: i, word: w}); setSplitting(null); };
   // bulk speaker (Stage 1c): click a checkbox, shift-click another to select the range between them
   const toggle = (i: number, shift: boolean) => {
     setSelected(prev => {
@@ -70,11 +63,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
     });
     setAnchor(i);
   };
-  const applyBulk = () => {
-    const sp = bulkSpeaker.trim().slice(0, 40);
-    update(lines!.map((l, k) => (selected.has(k) ? {...l, speaker: sp} : l)));
-    setSelected(new Set());
-  };
+  const applyBulk = () => edit({kind: 'speaker', speaker: bulkSpeaker});
   const save = () => act.run('save', async () => {
     await api(`/episodes/${episodeId}/audio/lines`, {method: 'PUT', body: {lines: lines!.map(({start, end, text, speaker, words}) => ({start, end, text, speaker, words}))}});
     setDirty(false); setSelected(new Set());
@@ -97,12 +86,12 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
         {st.allowed_actions.includes('upload_audio') && <div className="field">
           <label htmlFor="audio-file">{st.audio ? 'Replace the audio (the lines are transcribed again)' : 'Upload the audio file'}</label>
           <input id="audio-file" type="file" accept="audio/*" disabled={!!act.busy}
-                 onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f); setDirty(false); }); }} />
+                 onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f); setDirty(false); setSelected(new Set()); }); }} />
         </div>}
         {st.stage === 'audio_transcribing' && <div className="alert">Transcribing the audio into timed lines…</div>}
         {st.transcript && <p className="muted small">Transcribed by {st.transcript.provider}{st.transcript.model ? ` (${st.transcript.model})` : ''} · {st.transcript.duration?.toFixed(1)} s ·
           {st.transcript.words_available ? ' word timings' : ' segment timings only (no word-level split)'}
-          {st.allowed_actions.includes('transcribe_audio') && st.audio && <> · <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); })}>Transcribe again</button></>}</p>}
+          {st.allowed_actions.includes('transcribe_audio') && st.audio && <> · <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe again</button></>}</p>}
       </div>
 
       {lines && lines.length > 0 && <div className="card stack">
