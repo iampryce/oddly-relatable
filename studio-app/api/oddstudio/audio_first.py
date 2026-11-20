@@ -163,6 +163,9 @@ def state(db: Session, ep: Episode) -> dict:
             "unlabelled_lines": sum(1 for ln in lines if not ln.get("speaker")),
             "speakers_without_character": [s for s in sp if s not in keys],
             "cast_suggestion": tr.get("cast_suggestion"),
+            # Casting hints (A): pitch/pace/energy measured from the audio per speaker (owner-editable suggestions; gender
+            # and age are never inferred), and silent characters (named in the transcript, never speaking)
+            "voice_traits": tr.get("voice_traits"), "silent_cast": tr.get("silent_cast", []),
             # Stage 1c: line quality (cue phrases, one-level Undo, a cut-off last line)
             "cues": tr.get("cues", LN.DEFAULT_CUES),
             "can_undo": bool(tr.get("lines_previous")),
@@ -563,6 +566,31 @@ class NewCharacterIn(BaseModel):
     visual_description: str = Field(default="", max_length=4000)
     voice_style: str = Field(default="", max_length=600)
     bubble_style: Literal["him", "her", "neutral"] = "neutral"
+    # Casting hints (A): the measured traits as the owner left them, and an age range the OWNER sets (never inferred)
+    voice_traits: "VoiceTraitsIn | None" = None
+    age_range: str = Field(default="", max_length=30)
+
+
+class VoiceTraitsIn(BaseModel):
+    pitch: Literal["low", "medium", "high"] = "medium"
+    pace: Literal["slow", "medium", "fast"] = "medium"
+    energy: Literal["soft", "medium", "loud"] = "medium"
+
+
+NewCharacterIn.model_rebuild()
+
+
+def voice_style_of(n: "NewCharacterIn") -> str:
+    """The new character's voice style: the owner's traits and age range, then their own words."""
+    from .voice_traits import describe
+    parts = []
+    if n.voice_traits:
+        parts.append(describe(n.voice_traits.model_dump()))
+    if n.age_range.strip():
+        parts.append(f"age range {n.age_range.strip()} (set by the owner)")
+    if n.voice_style.strip():
+        parts.append(n.voice_style.strip())
+    return "; ".join(parts)[:600]
 
 
 class SpeakerCastIn(BaseModel):
@@ -602,7 +630,7 @@ def set_cast(eid: int, body: CastIn, db: Session = Depends(get_db)):
         if db.query(Character).filter_by(key=n.key).first() or n.key in created:
             raise HTTPException(409, f"{sp.label}: a character with key {n.key!r} already exists")
         db.add(Character(key=n.key, name=n.name, description=n.description, visual_description=n.visual_description,
-                         voice_style=n.voice_style, bubble_style=n.bubble_style, scope="episode", episode_id=ep.id,
+                         voice_style=voice_style_of(n), bubble_style=n.bubble_style, scope="episode", episode_id=ep.id,
                          engine_character=f"studio-{n.key}", art_status="none", default_expression="neutral", voice=""))
         created.append(n.key)
         mapping[sp.label] = n.key
@@ -614,6 +642,69 @@ def set_cast(eid: int, body: CastIn, db: Session = Depends(get_db)):
     for key in created:
         db.add(Event(episode_id=ep.id, kind="character", message=f"New character for the audio: {key}"))
     db.add(Event(episode_id=ep.id, kind="episode", message="Audio cast set: " + ", ".join(f"{k} → {v}" for k, v in mapping.items())))
+    db.commit()
+    return state(db, ep)
+
+
+@router.post("/episodes/{eid}/audio/voice-traits")
+def measure_voice_traits(eid: int, db: Session = Depends(get_db)):
+    """Pitch, pace and energy per labelled speaker, measured from the audio (job `audio_voice_traits`, no AI model,
+    no cost). Suggestions only: the owner edits them in the cast; gender and age are never inferred."""
+    ep = audio_episode(db, eid)
+    gate(ep, "audio_cast")
+    if not speakers_of((ep.audio_transcript or {}).get("lines", [])) or not ep.audio_asset_id:
+        raise HTTPException(409, "label the lines with speakers first")
+    from .models import Job
+    if db.query(Job).filter(Job.episode_id == ep.id, Job.kind == "audio_voice_traits", Job.status.in_(["queued", "running"])).count():
+        raise HTTPException(409, "the voices are already being measured")
+    return S.job(enqueue(db, "audio_voice_traits", episode_id=ep.id, revision=ep.revision, payload={"asset_id": ep.audio_asset_id}))
+
+
+class SilentMemberIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    character_key: str | None = None
+    new: NewCharacterIn | None = None
+
+
+class SilentCastIn(BaseModel):
+    members: list[SilentMemberIn] = Field(default_factory=list, max_length=8)
+
+
+@router.put("/episodes/{eid}/audio/silent-cast")
+def set_silent_cast(eid: int, body: SilentCastIn, db: Session = Depends(get_db)):
+    """Characters who are named or present but never speak (reactions only): each is an existing character or a new
+    character for this episode. The list replaces the previous one (an empty list removes them all)."""
+    ep = audio_episode(db, eid)
+    gate(ep, "audio_cast")
+    tr = dict(ep.audio_transcript or {})
+    speaking = set(speakers_of(tr.get("lines", [])))
+    members, created = [], []
+    for m in body.members:
+        if (m.character_key is None) == (m.new is None):
+            raise HTTPException(422, f"{m.name}: choose an existing character or describe a new one (not both)")
+        if m.character_key is not None:
+            if not db.query(Character).filter_by(key=m.character_key).first():
+                raise HTTPException(422, f"{m.name}: there is no character {m.character_key!r}")
+            key = m.character_key
+        else:
+            n = m.new
+            if not KEY.match(n.key):
+                raise HTTPException(422, f"{m.name}: key must be lowercase letters, digits and dashes, starting with a letter")
+            if db.query(Character).filter_by(key=n.key).first() or n.key in created:
+                raise HTTPException(409, f"{m.name}: a character with key {n.key!r} already exists")
+            db.add(Character(key=n.key, name=n.name, description=n.description, visual_description=n.visual_description,
+                             voice_style="", bubble_style=n.bubble_style, scope="episode", episode_id=ep.id,
+                             engine_character=f"studio-{n.key}", art_status="none", default_expression="neutral", voice=""))
+            created.append(n.key)
+            key = n.key
+        if key in speaking or key in [x["character_key"] for x in members]:
+            raise HTTPException(422, f"{m.name}: {key} already speaks in this episode or is listed twice")
+        members.append({"name": m.name.strip(), "character_key": key})
+    tr["silent_cast"] = members
+    ep.audio_transcript = tr
+    for key in created:
+        db.add(Event(episode_id=ep.id, kind="character", message=f"New silent character for the audio: {key}"))
+    db.add(Event(episode_id=ep.id, kind="episode", message="Silent characters: " + (", ".join(f"{m['name']} → {m['character_key']}" for m in members) or "none")))
     db.commit()
     return state(db, ep)
 
@@ -804,12 +895,55 @@ def audio_media_hints(ctx: Ctx) -> dict:
 
 
 CAST_SYSTEM = ("You are the casting director of an adult 2D animated comedy (grown-up characters and situations). You read "
-               "a transcript of real recorded dialogue and propose the cast that will perform it on screen. You never name or "
-               "imitate real people; characters are original. Reply with one JSON object only.")
+               "the TEXT of a transcript of real recorded dialogue (you cannot hear the audio) and propose the cast that will "
+               "perform it on screen. You never name or imitate real people; characters are original. You never guess "
+               "anyone's gender or age, and never describe how anyone sounds: the owner sets those. Reply with one JSON "
+               "object only.")
+CAST_SOURCE = "text"   # the suggestion works from the transcript text only (shown to the owner)
 
 
 def _clip(v, n: int) -> str:
     return str(v or "").strip()[:n]
+
+
+def mentioned_names(raw, lines: list[dict], speaking: set[str]) -> list[dict]:
+    """Silent-character suggestions: only names that really appear in the transcript (word match, any case), that are
+    not already speakers, each with the lines that mention it."""
+    out, seen = [], set()
+    for m in (raw if isinstance(raw, list) else [])[:8]:
+        name = _clip((m or {}).get("name") if isinstance(m, dict) else m, 60)
+        if not name or name.lower() in seen or name.lower() in {s.lower() for s in speaking if s}:
+            continue
+        pat = re.compile(rf"(?<![\w]){re.escape(name)}(?![\w])", re.IGNORECASE)
+        where = [ln["id"] for ln in lines if pat.search(ln.get("text", ""))]
+        if where:
+            out.append({"name": name, "line_ids": where})
+            seen.add(name.lower())
+    return out
+
+
+@task
+def audio_voice_traits(ctx: Ctx) -> dict:
+    """Measure pitch, pace and energy per labelled speaker from the episode's audio (no AI model)."""
+    from . import voice_traits as VT
+    from .storage import storage
+    db, job = ctx.db, ctx.job
+    ep = db.get(Episode, job.episode_id)
+    if (job.payload or {}).get("asset_id") != ep.audio_asset_id:
+        return {"skipped": "the audio changed"}
+    a = db.get(Asset, ep.audio_asset_id)
+    local = storage().get_to_file(a.storage_key, ctx.folder("episodes", ep.id, "audio") / Path(a.storage_key).name)
+    samples = VT.decode(local)
+    if samples is None:
+        raise media.MediaToolMissing("FFmpeg is not configured (FFMPEG): the voices cannot be measured")
+    tr = dict(ep.audio_transcript or {})
+    traits = VT.measure(samples, tr.get("lines", []))
+    tr["voice_traits"] = {"speakers": traits, "source": "measured from the audio", "job_id": job.id}
+    ep.audio_transcript = tr
+    db.add(Event(episode_id=ep.id, kind="episode", message="Voices measured: " + ", ".join(
+        f"{sp}: pitch {t['pitch']}, pace {t['pace']}, energy {t['energy']}" for sp, t in traits.items())))
+    db.commit()
+    return {"speakers": len(traits)}
 
 
 @task
@@ -823,16 +957,22 @@ def audio_cast_suggest(ctx: Ctx) -> dict:
     existing = [c for c in db.query(Character).order_by(Character.id) if c.scope == "recurring" or c.art_status == "approved"]
     listing = "\n".join(f"[{ln['id']} | speaker: {ln.get('speaker') or '?'} | {ln['start']:.1f}-{ln['end']:.1f} s] {ln['text']}" for ln in lines)
     cast = "\n".join(f"- {c.key}: {c.name}. {c.description[:200]} Voice: {c.voice_style[:120]}" for c in existing) or "(none)"
-    prompt = (f"Transcript (one timed line each; '?' = speaker not labelled yet):\n{listing}\n\n"
+    hints = tr.get("media_hints") or {}
+    hint_text = (f"\nThe owner's video suggests about {hints.get('people_count')} people, setting: {hints.get('setting') or '?'}, "
+                 f"mood: {hints.get('mood') or '?'}.\n" if hints else "")
+    prompt = (f"Transcript (one timed line each; '?' = speaker not labelled yet):\n{listing}\n{hint_text}\n"
               f"Existing characters that may be reused when they clearly fit:\n{cast}\n\n"
               "Propose who speaks each line and the cast. Group lines into distinct speakers by content and turn-taking. "
               "Use the owner's labels where given. For each speaker give a short label (reuse the owner's label if any), "
               "an existing character key to reuse OR a new original adult character: name, a lowercase key (letters, digits, "
-              "dashes), one-sentence personality/comic role, a short visual description (hair or cap shape and colour, one "
-              "garment colour), a voice style describing how they sound in the recording (age range, pace, tone), and "
-              "bubble_style him|her|neutral.\n"
+              "dashes), one-sentence personality/comic role, and a short visual description (hair or cap shape and colour, "
+              "one garment colour). Do not state or imply gender or age anywhere, and do not describe voices.\n"
+              "Also list people who are NAMED in the dialogue but never speak (e.g. someone addressed or talked about who "
+              "could react silently on screen): their name exactly as written in the transcript, and the ids of the lines "
+              "that mention them.\n"
               'JSON: {"speakers": [{"label": "", "reuse_key": null, "name": "", "key": "", "description": "", '
-              '"visual_description": "", "voice_style": "", "bubble_style": "neutral"}], "line_speakers": {"l1": "label"}}')
+              '"visual_description": ""}], "line_speakers": {"l1": "label"}, '
+              '"mentioned": [{"name": "", "line_ids": ["l1"]}]}')
     ans = text_provider(get_section(db, "text")).complete_json(CAST_SYSTEM, prompt)
     keys = {c.key for c in db.query(Character).all()}
     ids = {ln["id"] for ln in lines}
@@ -842,15 +982,17 @@ def audio_cast_suggest(ctx: Ctx) -> dict:
             continue
         reuse = s.get("reuse_key") if s.get("reuse_key") in keys else None
         key = re.sub(r"[^a-z0-9-]+", "-", _clip(s.get("key"), 41).lower()).strip("-")
+        # no voice style and no him/her from the model: it reads text only, and the owner sets gender and age
         speakers.append({"label": _clip(s.get("label"), 40), "reuse_key": reuse,
                          "name": _clip(s.get("name"), 120), "key": key if KEY.match(key or "") else "",
                          "description": _clip(s.get("description"), 600), "visual_description": _clip(s.get("visual_description"), 600),
-                         "voice_style": _clip(s.get("voice_style"), 300),
-                         "bubble_style": s.get("bubble_style") if s.get("bubble_style") in ("him", "her", "neutral") else "neutral"})
+                         "bubble_style": "neutral"})
     labels = {s["label"] for s in speakers}
     raw_ls = ans.get("line_speakers") if isinstance(ans.get("line_speakers"), dict) else {}
     line_speakers = {k: v for k, v in raw_ls.items() if k in ids and v in labels}
-    tr["cast_suggestion"] = {"speakers": speakers, "line_speakers": line_speakers, "job_id": job.id}
+    mentioned = mentioned_names(ans.get("mentioned"), lines, labels | {s["name"] for s in speakers})
+    tr["cast_suggestion"] = {"speakers": speakers, "line_speakers": line_speakers, "mentioned": mentioned,
+                             "source": CAST_SOURCE, "job_id": job.id}
     ep.audio_transcript = tr
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Cast suggestion ready: {len(speakers)} speaker(s)"))
     db.commit()

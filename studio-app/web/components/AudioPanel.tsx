@@ -9,7 +9,11 @@ import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 // Audio-first episode, stage 1: the uploaded audio (the voice track), its timed lines, a speaker per line, and the cast.
 // The server validates every change (timing inside the audio, in order, no overlaps); this page only prepares it.
 
-type NewChar = {key: string; name: string; description: string; visual_description: string; voice_style: string; bubble_style: string};
+type Traits = {pitch: string; pace: string; energy: string};
+type NewChar = {key: string; name: string; description: string; visual_description: string; voice_style: string; bubble_style: string;
+                voice_traits?: Traits; age_range?: string};
+const MEDIUM: Traits = {pitch: 'medium', pace: 'medium', energy: 'medium'};
+const TRAIT_CHOICES: [keyof Traits, string[]][] = [['pitch', ['low', 'medium', 'high']], ['pace', ['slow', 'medium', 'fast']], ['energy', ['soft', 'medium', 'loud']]];
 type CastChoice = {mode: 'existing' | 'new'; character_key: string; new: NewChar};
 
 const RIGHTS: Record<string, string> = {own_recording: 'Own recording', licensed: 'Licensed', voice_actor: 'Voice actor', other: 'Other'};
@@ -152,6 +156,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
       {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
 
       {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
+      {st.stage === 'audio_labelling' && <SilentCastCard st={st} episodeId={episodeId} act={act} />}
     </div>
   );
 }
@@ -186,10 +191,59 @@ function TrimCard({st, episodeId, act, hasLines, onApplied}: {st: any; episodeId
   );
 }
 
+// Characters named in the dialogue who never speak: they can react silently on screen (Stage 2 places them).
+type SilentChoice = {mode: 'skip' | 'existing' | 'new'; character_key: string; key: string; name: string};
+function SilentCastCard({st, episodeId, act}: {st: any; episodeId: number; act: ReturnType<typeof useAction>}) {
+  const current: {name: string; character_key: string}[] = st.silent_cast || [];
+  const mentioned: {name: string; line_ids: string[]}[] = st.cast_suggestion?.mentioned || [];
+  const names = [...new Set([...current.map(m => m.name), ...mentioned.map(m => m.name)])];
+  const initial = (name: string): SilentChoice => {
+    const m = current.find(x => x.name === name);
+    return m ? {mode: 'existing', character_key: m.character_key, key: slug(name), name} : {mode: 'skip', character_key: '', key: slug(name), name};
+  };
+  const [choices, setChoices] = useState<Record<string, SilentChoice>>({});
+  const [extra, setExtra] = useState('');
+  const all = [...names, ...Object.keys(choices).filter(n => !names.includes(n))];
+  const get = (n: string) => choices[n] || initial(n);
+  const set = (n: string, c: SilentChoice) => setChoices(x => ({...x, [n]: c}));
+  const save = () => act.run('silent', async () => {
+    const members = all.map(get).filter(c => c.mode !== 'skip').map(c => c.mode === 'existing'
+      ? {name: c.name, character_key: c.character_key}
+      : {name: c.name, new: {key: c.key, name: c.name, description: 'Silent reaction character (named in the audio)', visual_description: '', voice_style: '', bubble_style: 'neutral'}});
+    await api(`/episodes/${episodeId}/audio/silent-cast`, {method: 'PUT', body: {members}});
+    setChoices({});
+  });
+  const invalid = all.map(get).some(c => (c.mode === 'existing' && !c.character_key) || (c.mode === 'new' && !c.key));
+  return (
+    <div className="card stack">
+      <h2 style={{margin: 0}}>Silent characters</h2>
+      <p className="muted small">People named in the dialogue who never speak can be on screen and react. {mentioned.length ? 'The AI suggestion found these names in the transcript.' : 'Ask for the cast suggestion to find names, or add one.'}</p>
+      {all.map(n => { const c = get(n); const where = mentioned.find(m => m.name === n)?.line_ids || []; return (
+        <div key={n} className="row" style={{flexWrap: 'wrap'}}>
+          <strong>{n}</strong>{where.length > 0 && <span className="muted small">named in {where.join(', ')}</span>}
+          <select value={c.mode} style={{width: 'auto'}} onChange={e => set(n, {...c, mode: e.target.value as SilentChoice['mode']})}>
+            <option value="skip">Not on screen</option><option value="existing">Existing character</option><option value="new">New character</option></select>
+          {c.mode === 'existing' && <select aria-label={`Character for ${n}`} style={{width: 'auto'}} value={c.character_key} onChange={e => set(n, {...c, character_key: e.target.value})}>
+            <option value="">Choose…</option>{st.characters.map((x: any) => <option key={x.key} value={x.key}>{x.name} ({x.key})</option>)}</select>}
+          {c.mode === 'new' && <input aria-label={`Key for ${n}`} style={{width: 160}} value={c.key} onChange={e => set(n, {...c, key: slug(e.target.value)})} />}
+        </div>); })}
+      <div className="row">
+        <input placeholder="Add a name" style={{width: 180}} value={extra} onChange={e => setExtra(e.target.value)} />
+        <button className="btn sm" disabled={!extra.trim()} onClick={() => { set(extra.trim(), {mode: 'existing', character_key: '', key: slug(extra), name: extra.trim()}); setExtra(''); }}>Add</button>
+        <button className="btn primary" disabled={!!act.busy || invalid || !all.length} onClick={save}>Save silent characters</button>
+      </div>
+    </div>
+  );
+}
+
 function CastCard({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: number; act: ReturnType<typeof useAction>; dirty: boolean; onApplied: () => void}) {
   const pending: string[] = st.speakers_without_character;
   const [choices, setChoices] = useState<Record<string, CastChoice>>({});
-  const blank = (label: string): CastChoice => ({mode: 'new', character_key: '', new: {key: slug(label), name: label, description: '', visual_description: '', voice_style: '', bubble_style: 'neutral'}});
+  const measured = (label: string): Traits => {
+    const t = st.voice_traits?.speakers?.[label];
+    return t ? {pitch: t.pitch, pace: t.pace, energy: t.energy} : MEDIUM;
+  };
+  const blank = (label: string): CastChoice => ({mode: 'new', character_key: '', new: {key: slug(label), name: label, description: '', visual_description: '', voice_style: '', bubble_style: 'neutral', voice_traits: measured(label), age_range: ''}});
   const get = (label: string) => choices[label] || blank(label);
   const set = (label: string, c: CastChoice) => setChoices(x => ({...x, [label]: c}));
   const useSuggestion = () => {
@@ -197,7 +251,7 @@ function CastCard({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: n
     for (const s of st.cast_suggestion?.speakers || []) {
       if (!pending.includes(s.label)) continue;
       next[s.label] = s.reuse_key ? {mode: 'existing', character_key: s.reuse_key, new: blank(s.label).new}
-        : {mode: 'new', character_key: '', new: {key: s.key || slug(s.name || s.label), name: s.name || s.label, description: s.description, visual_description: s.visual_description, voice_style: s.voice_style, bubble_style: s.bubble_style}};
+        : {mode: 'new', character_key: '', new: {...blank(s.label).new, key: s.key || slug(s.name || s.label), name: s.name || s.label, description: s.description, visual_description: s.visual_description}};
     }
     setChoices(x => ({...x, ...next}));
   };
@@ -210,10 +264,14 @@ function CastCard({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: n
   return (
     <div className="card stack">
       <div className="spread"><h2 style={{margin: 0}}>Cast</h2>
-        <button className="btn" disabled={!!act.busy || suggestionBusy} onClick={() => act.run('suggest', () => api(`/episodes/${episodeId}/audio/suggest-cast`, {method: 'POST'}))}>Suggest the cast (AI writer)</button></div>
+        <div className="row">
+          <button className="btn" disabled={!!act.busy || !st.speakers.length} onClick={() => act.run('traits', () => api(`/episodes/${episodeId}/audio/voice-traits`, {method: 'POST'}))}>Measure the voices</button>
+          <button className="btn" disabled={!!act.busy || suggestionBusy} onClick={() => act.run('suggest', () => api(`/episodes/${episodeId}/audio/suggest-cast`, {method: 'POST'}))}>Suggest the cast (AI writer)</button></div></div>
+      {st.voice_traits && <p className="small"><strong>Measured from the audio</strong> (pitch, pace, energy; suggestions you can change below, nothing about gender or age):{' '}
+        {Object.entries(st.voice_traits.speakers || {}).map(([sp, t]: [string, any]) => `${sp}: ${t.pitch} pitch${t.pitch_hz ? ` (${t.pitch_hz} Hz)` : ''}, ${t.pace} pace${t.wps ? ` (${t.wps} words/s)` : ''}, ${t.energy}`).join(' · ')}</p>}
       {st.cast_suggestion && <div className="small">
-        <strong>AI suggestion</strong> (nothing changes until you apply it):
-        <ul>{st.cast_suggestion.speakers.map((s: any) => <li key={s.label}><strong>{s.label}</strong> → {s.reuse_key ? `reuse ${s.reuse_key}` : `${s.name} (${s.key || 'no key'})`}{s.voice_style && <span className="muted"> · voice: {s.voice_style}</span>}{s.description && <span className="muted"> · {s.description}</span>}</li>)}</ul>
+        <strong>AI suggestion</strong> (works from the transcript text only: it does not hear the audio and never guesses gender or age; nothing changes until you apply it):
+        <ul>{st.cast_suggestion.speakers.map((s: any) => <li key={s.label}><strong>{s.label}</strong> → {s.reuse_key ? `reuse ${s.reuse_key}` : `${s.name} (${s.key || 'no key'})`}{s.description && <span className="muted"> · {s.description}</span>}</li>)}</ul>
         {pending.length > 0 && <button className="btn sm" onClick={useSuggestion}>Use the suggestion below</button>}
       </div>}
       {dirty && <div className="alert">Save the lines first: the cast is built from the saved speaker labels.</div>}
@@ -230,8 +288,12 @@ function CastCard({st, episodeId, act, dirty, onApplied}: {st: any; episodeId: n
               : <div className="grid cols-3">
                   <div><label>Name</label><input value={c.new.name} onChange={e => set(label, {...c, new: {...c.new, name: e.target.value}})} /></div>
                   <div><label>Key</label><input value={c.new.key} onChange={e => set(label, {...c, new: {...c.new, key: slug(e.target.value)}})} /></div>
-                  <div><label>Bubble</label><select value={c.new.bubble_style} onChange={e => set(label, {...c, new: {...c.new, bubble_style: e.target.value}})}>
+                  <div><label>Bubble (you choose)</label><select value={c.new.bubble_style} onChange={e => set(label, {...c, new: {...c.new, bubble_style: e.target.value}})}>
                     <option value="neutral">Neutral</option><option value="him">Rust</option><option value="her">Cream</option></select></div>
+                  {TRAIT_CHOICES.map(([k, opts]) => <div key={k}><label>{k[0].toUpperCase() + k.slice(1)}{st.voice_traits?.speakers?.[label] ? ' (measured)' : ''}</label>
+                    <select value={(c.new.voice_traits || MEDIUM)[k]} onChange={e => set(label, {...c, new: {...c.new, voice_traits: {...(c.new.voice_traits || MEDIUM), [k]: e.target.value}}})}>
+                      {opts.map(o => <option key={o} value={o}>{o}</option>)}</select></div>)}
+                  <div><label>Age range (you set it)</label><input value={c.new.age_range || ''} placeholder="e.g. 30s" maxLength={30} onChange={e => set(label, {...c, new: {...c.new, age_range: e.target.value}})} /></div>
                   <div><label>Who they are</label><textarea value={c.new.description} onChange={e => set(label, {...c, new: {...c.new, description: e.target.value}})} /></div>
                   <div><label>How they look</label><textarea value={c.new.visual_description} onChange={e => set(label, {...c, new: {...c.new, visual_description: e.target.value}})} /></div>
                   <div><label>How they sound</label><textarea value={c.new.voice_style} onChange={e => set(label, {...c, new: {...c.new, voice_style: e.target.value}})} /></div>
