@@ -75,7 +75,9 @@ The first build downloads base images and packages: Debian, Node and Python pack
 **Test a restore** at least once after the first deploy, on a copy if possible:
 
 ```bash
-/srv/stickman/current/studio-app/deploy/restore.sh /srv/stickman/backups/<stamp> --media
+/srv/stickman/current/studio-app/deploy/restore.sh /srv/stickman/backups/<stamp>[-nightly|-deploy] --media
+# database only, from the 30-day dump folder:
+/srv/stickman/current/studio-app/deploy/restore.sh /srv/stickman/db-dumps/<stamp>-nightly.dump
 ```
 
 `restore.sh` verifies the checksums and first backs up the current state. It then stops the app, restores the database (and the media with `--media`) and starts the app again.

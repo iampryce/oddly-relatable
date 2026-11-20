@@ -10,6 +10,10 @@
 #   BACKUP_KIND=deploy  (default; deploy.sh, restore.sh): keeps the newest $KEEP_DEPLOY deploy-time backups (default 5)
 #   Folders without a kind suffix (made before this split) count as deploy-time. KEEP, if set, still works: it sets the
 #   count for the kind being written (the installed ci-deploy.sh passes it).
+# Nightly runs also put a copy of the database dump in /srv/stickman/db-dumps/<stamp>-nightly.dump (+ .sha256), kept
+#   for $DUMP_DAYS days (default 30) by age; the newest dump is never removed. Dumps are small, so a month of database
+#   history costs little while full backup folders (with media) are kept for a week.
+# BACKUP_PROTECT=<folder>: never prune this folder (restore.sh protects the backup it is restoring from).
 # Optional off-box copy: set OFFSITE_S3=s3://bucket/prefix and have the AWS CLI configured for this user.
 set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
@@ -20,6 +24,9 @@ case "$KIND" in
   *) echo "backup: BACKUP_KIND must be nightly or deploy" >&2; exit 2 ;;
 esac
 (( KEEP_THIS >= 1 )) || { echo "backup: keep at least 1 backup" >&2; exit 2; }
+DUMP_DAYS=${DUMP_DAYS:-30}
+(( DUMP_DAYS >= 1 )) || { echo "backup: DUMP_DAYS must be at least 1" >&2; exit 2; }
+PROTECT=$( [[ -n "${BACKUP_PROTECT:-}" && -d "$BACKUP_PROTECT" ]] && cd "$BACKUP_PROTECT" && pwd -P || true)
 COMPOSE=(docker compose -p oddstudio --env-file "$ROOT/shared/.env" -f "$ROOT/current/studio-app/deploy/docker-compose.yml")
 if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env"; then COMPOSE+=(-f "$ROOT/current/studio-app/deploy/docker-compose.public.yml"); fi
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
@@ -40,9 +47,29 @@ if [[ -n "${OFFSITE_S3:-}" ]]; then
   echo "backup: copied to $OFFSITE_S3/$stamp-$KIND/"
 fi
 
-# Retention: the newest $KEEP_THIS local backups of this kind (the one just written is the newest and always stays).
+# The 30-day database-dump folder (nightly only): a copy of this dump, then pruning by age (never the newest dump).
 if [[ "$KIND" == nightly ]]; then
-  ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort | head -n -"$KEEP_THIS" | xargs -r rm -rf --
-else
-  ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort | head -n -"$KEEP_THIS" | xargs -r rm -rf --
+  dumps="$ROOT/db-dumps"
+  mkdir -p "$dumps"
+  cp "$out/db.dump" "$dumps/$stamp-nightly.dump"
+  ( cd "$dumps" && sha256sum "$stamp-nightly.dump" > "$stamp-nightly.dump.sha256" )
+  newest_dump=$(ls -1 "$dumps"/*.dump 2>/dev/null | sort | tail -n 1)
+  while read -r f; do
+    [[ -z "$f" || "$f" == "$newest_dump" ]] && continue
+    rm -f -- "$f" "$f.sha256"
+  done < <(find "$dumps" -maxdepth 1 -type f -name '*.dump' -mmin +$(( DUMP_DAYS * 1440 )))
+  echo "backup: database dump kept in $dumps/$stamp-nightly.dump (dumps older than $DUMP_DAYS days are pruned)"
 fi
+
+# Retention: the newest $KEEP_THIS local backups of this kind (the one just written is the newest and always stays;
+# BACKUP_PROTECT is never removed).
+if [[ "$KIND" == nightly ]]; then
+  pick=$(ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort | head -n -"$KEEP_THIS" || true)
+else
+  pick=$(ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort | head -n -"$KEEP_THIS" || true)
+fi
+while read -r b; do
+  [[ -z "$b" ]] && continue
+  [[ -n "$PROTECT" && "$(cd "$b" && pwd -P)" == "$PROTECT" ]] && { echo "backup: keeping $b (being restored from)"; continue; }
+  rm -rf -- "$b"
+done <<< "$pick"
