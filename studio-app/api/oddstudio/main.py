@@ -92,7 +92,7 @@ async def unhandled(_request: Request, exc: Exception):
 
 # ------------------------------------------------------------------ auth
 class LoginIn(BaseModel):
-    email: str = Field(max_length=200)
+    email: str = Field(max_length=200)     # the owner's username (OWNER_EMAIL may be any name, e.g. "admin")
     password: str = Field(max_length=500)
 
 
@@ -105,7 +105,7 @@ def login(body: LoginIn, request: Request, response: Response):
         raise HTTPException(503, "The owner account is not configured on the server")
     if body.email.strip().lower() != s.owner_email or not verify_password(body.password, s.owner_password_hash):
         record_failure(client)
-        raise HTTPException(401, "Wrong email or password")
+        raise HTTPException(401, "Wrong username or password")
     response.set_cookie(COOKIE, make_token(s.owner_email), httponly=True, secure=s.cookie_secure, samesite="strict",
                         max_age=int(timedelta(hours=s.session_hours).total_seconds()), path="/")
     return {"email": s.owner_email}
