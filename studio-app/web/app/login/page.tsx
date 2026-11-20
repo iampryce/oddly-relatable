@@ -24,7 +24,7 @@ function LoginForm() {
       <h1>Sign in</h1>
       <p className="sub">Production control centre</p>
       {error && <div className="alert bad" role="alert">{error}</div>}
-      <div className="field"><label htmlFor="email">Email</label><input id="email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+      <div className="field"><label htmlFor="username">Username</label><input id="username" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} required /></div>
       <div className="field"><label htmlFor="pw">Password</label><input id="pw" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></div>
       <button className="btn primary" style={{width: '100%'}} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
     </form>
