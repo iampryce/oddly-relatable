@@ -43,32 +43,37 @@ STYLE_VERSIONS = ("v1", "v2")
 
 _CHARACTER_RULES_V2 = (
     "HOUSE STYLE v2 (strict): an ADULT stick-figure comedy character drawn in a minimal, confident 2D line style for a "
-    "grown-up audience. Proportions: tall and lanky; the head is about 28% of the total height (never more than 30%), the "
-    "torso about 30%, long legs about 40%; narrow shoulders; long arms that reach mid-thigh. Head: a plain slightly tall "
-    "circle filled {head_fill} with a bold black outline; NO ears, NO nose, NO cheeks, NO shading, NO stubble, NO freckles, "
-    "NO make-up, NO jewellery. Eyes: two small SOLID BLACK vertical ovals with NO whites, NO outline and NO highlights, set "
-    "wide apart at mid-head. Brows: two HEAVY thick black wedges, clearly angled to show the mood. Mouth: a short thin black "
-    "line (straight, wavy or slightly off-centre); open only for shouting or laughing, without teeth detail. Hair or "
-    "headwear: ONE flat colour cap-like shape sitting on top of the head with a bold outline (no strands, no texture), "
-    "never covering the eyes. Torso: a plain tapered {torso_fill} shape from the neck to the hips with a bold outline, or "
-    "ONE plain adult garment (shirt, blazer, work polo) in a single muted flat colour with no logos, pockets, drawstrings, "
-    "prints or knit texture. Arms and legs: SOLID BLACK single lines of one even bold weight, never hollow tubes and never "
-    "skin-coloured. Hands: small solid black blobs with simply suggested fingers (thumb, pointing finger or fist), never "
-    "mittens or gloves. Feet: small solid black elongated blobs, NO shoes. One bold clean black outline weight everywhere, "
-    "flat colours only, no gradients, no shading. Colours: black, {base_colour} and at most ONE muted accent colour (for "
-    "example brick red, slate blue, olive, charcoal, camel or deep teal); no pastels, no neon. The look is understated and "
-    "adult, NOT a children's cartoon: no big round eyes, no oversized baby head, no chubby or rounded body, no cute details.")
+    "grown-up audience. Proportions: tall and lanky with a LARGE head: the head is about 30% of the total height (between "
+    "28% and 32%), about as tall as the torso; the torso about 30%; long legs about 40%; narrow shoulders; long arms that "
+    "reach mid-thigh. Head: a plain slightly tall circle filled {head_fill} with a heavy black outline; NO ears, NO nose, NO "
+    "cheeks, NO shading, NO stubble, NO freckles, NO make-up, NO jewellery. Eyes: two small SOLID BLACK vertical ovals with "
+    "NO whites, NO outline and NO highlights, set wide apart at mid-head. Brows: two HEAVY thick black wedges, clearly "
+    "angled to show the mood. Mouth: closed, a short thin black line (straight, wavy or slightly off-centre); shocked or "
+    "surprised, a clearly OPEN solid black oval (an 'O' about as wide as one eye is tall); laughing or shouting, an open "
+    "solid black D or oval shape; never teeth or tongue detail. Hair or headwear: ONE flat colour cap-like shape sitting on "
+    "top of the head with a heavy outline (no strands, no texture), never covering the eyes. Torso: a plain {torso_fill} "
+    "torso that clearly TAPERS, wider at the shoulders and narrower at the hips (a soft inverted trapezoid with rounded "
+    "corners), with a heavy outline; or ONE plain adult garment (shirt, blazer, work polo) of that tapered shape in a single "
+    "muted flat colour with no logos, pockets, drawstrings, prints or knit texture. Arms and legs: SOLID BLACK single lines "
+    "of one even HEAVY weight, never hollow tubes and never skin-coloured. Hands: CHUNKY solid black rounded blobs (about as "
+    "big as the gap between the eyes), with NO fingers drawn at all, never mittens or gloves. Feet: solid black elongated "
+    "blobs, NO shoes. Line weight: HEAVY, confident black lines everywhere, about 1.2% of the total height thick (clearly "
+    "bolder than a fine-line drawing), the same weight for outlines and limbs. Flat colours only, no gradients, no shading. "
+    "Colours: black, {base_colour} and at most ONE muted accent colour (for example brick red, slate blue, olive, charcoal, "
+    "camel or deep teal); no pastels, no neon. The look is understated and adult, NOT a children's cartoon: no big round "
+    "eyes with whites, no baby proportions, no chubby or rounded body, no cute details.")
 
 SET_STYLE_V2 = (
-    "Background plate for an adult 2D animated comedy, vertical 2:3 composition, EMPTY of people and characters. Cinematic "
-    "painted illustration in the style of a frame from a feature animated film for grown-ups: smooth painted rendering with "
-    "soft gradients, NO outlines, NO brush or paper texture, NO storybook look. Muted, slightly desaturated palette with "
-    "motivated lighting: warm interior lamp light against cool blue window or night light, with a clear warm/cool contrast. "
-    "Real depth: a few large simple shapes in the foreground slightly out of focus, a sharp mid-ground, a softly blurred far "
-    "background. Sparse, believable adult interior with only the furniture the setting needs; no clutter, no toys, no cute "
-    "props, no posters with text. Camera at a standing adult's eye height with gentle perspective. The lower third must be "
-    "open, flat floor where characters will stand, with no furniture or objects blocking it. No text, no people, no "
-    "animals, no characters.")
+    "Background plate for an adult 2D animated comedy, vertical 2:3 composition, EMPTY of people and characters. A 2D "
+    "PAINTED ILLUSTRATION: a hand-painted digital background for 2D animation, clearly stylised with simplified shapes and "
+    "soft painted gradients. NOT photographic, NOT a photo, NOT a 3D render: no realistic reflections, no photo textures, "
+    "no lens effects. NO outlines, NO brush or paper texture, NO storybook look. BRIGHT, readable mid-tones: the room is "
+    "clearly visible everywhere, never murky, dark or underexposed. Muted, slightly desaturated palette with motivated "
+    "lighting: warm interior lamp light against cool blue window or night light, a clear warm/cool contrast. Gentle depth: "
+    "simple foreground shapes slightly soft, a clear mid-ground, a softer far background. Sparse, believable adult interior "
+    "with only the furniture the setting needs; no clutter, no toys, no cute props, no posters with text. Camera at a "
+    "standing adult's eye height with gentle perspective. The lower third must be open, flat floor where characters will "
+    "stand, with no furniture or objects blocking it. No text, no people, no animals, no characters.")
 
 RESTYLE_DESCRIPTIONS_V2 = {
     "leo": "Leo: a flat dark-brown short side-parted hair cap shape; plain white torso; no garment.",
