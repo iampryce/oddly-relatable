@@ -23,6 +23,9 @@ if [[ "\$1" == compose ]]; then
   exit 0                                                   # stop / start
 fi
 if [[ "\$1" == run ]]; then
+  [[ "\$args" == *" tar "* ]] && echo "\$args" > "$SIM/tar.args"
+  [[ "\$args" == *"find /data/work/uploads"* ]] && { printf 'hints-7-ef56ab78\nvideo-7-ab12cd34.mp4\n'; exit 0; }
+  [[ "\$args" == *"rm -rf -- /data/work/uploads/"* ]] && { echo "\${@: -1}" >> "$SIM/uploads-removed"; exit 0; }
   for a in "\$@"; do
     [[ "\$a" == *:/backup ]] && echo "media-\$(date +%s%N)" > "\${a%:/backup}/media.tar.gz"
     [[ "\$a" == *:/backup:ro ]] && cp "\${a%:/backup:ro}/media.tar.gz" "$SIM/restored.media"
@@ -101,6 +104,15 @@ sed -i "s#$(basename "$dump")#bad.dump#" "$SIM/bad.dump.sha256"
 rm -f "$SIM/restored.db"; ( bash "$HERE/restore.sh" "$SIM/bad.dump" >/dev/null 2>&1 )
 check '[[ ! -f "$SIM/restored.db" ]]' "a dump that fails its checksum is not restored"
 ( bash "$HERE/restore.sh" "$B/does-not-exist" >/dev/null 2>&1 ); check '[[ $? == 1 ]]' "a missing backup is refused"
+
+echo "4. temporary uploads (audio-first Stage 1b)"
+check 'grep -q -- "--exclude=./work/uploads" "$SIM/tar.args"' "the media backup excludes work/uploads"
+out=$(bash "$HERE/maintenance.sh" 2>&1)
+check 'grep -q "would remove  upload leftover video-7-ab12cd34.mp4" <<< "$out"' "maintenance dry run lists upload leftovers older than 24 h"
+check '[[ ! -f "$SIM/uploads-removed" ]]' "the dry run removes nothing"
+bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
+check '[[ "$(cat "$SIM/uploads-removed" 2>/dev/null | tr "\n" " ")" == "/data/work/uploads/hints-7-ef56ab78 /data/work/uploads/video-7-ab12cd34.mp4 " ]]' "--apply removes exactly the listed leftovers"
+check 'grep -q "UPLOAD_HOURS:-24" "$HERE/maintenance.sh"' "the default age is 24 h"
 
 echo
 if (( fails )); then echo "simulate-backups: $fails check(s) FAILED"; exit 1; fi

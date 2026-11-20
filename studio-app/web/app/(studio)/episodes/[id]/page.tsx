@@ -12,7 +12,7 @@ import AudioPanel from '@/components/AudioPanel';
 const TABS = ['Audio', 'Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
 type Tab = typeof TABS[number];
 const tabsFor = (ep: any) => TABS.filter(t => (t !== 'Outline' || ep.format === 'long') && (t !== 'Audio' || ep.source === 'audio'));
-const BUSY = ['audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
+const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 
 function defaultTab(stage: string): Tab {
   if (stage.startsWith('audio')) return 'Audio';

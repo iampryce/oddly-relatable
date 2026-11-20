@@ -2,7 +2,8 @@
 # Oddly Relatable Studio backup (run on the server as the deploy user; nightly from cron, and by deploy.sh before
 # every deployment). Writes to /srv/stickman/backups/<UTC timestamp>-<kind>/ (kind: nightly | deploy):
 #   db.dump       PostgreSQL custom-format dump (all workflow state: ideas, scripts, approvals, jobs, publish records)
-#   media.tar.gz  the work_data volume (local media storage: videos, stills, poses, voice clips)
+#   media.tar.gz  the work_data volume (local media storage: videos, stills, poses, voice clips), without work/uploads
+#                 (temporary upload files: a video waiting for its audio to be extracted, sampled frames)
 #   SHA256SUMS    checksums of both
 # Redis is not backed up: it only carries job IDs, and the worker re-announces queued jobs from PostgreSQL on start.
 # Retention per kind (owner decision 2026-11-20), so frequent deploys never push out the nightly history:
@@ -37,7 +38,7 @@ mkdir -p "$out"
 "${COMPOSE[@]}" exec -T postgres pg_dump -U oddstudio -d oddstudio -Fc > "$out/db.dump"
 # Media: read the volume through a throwaway container (no host path assumptions).
 docker run --rm -v oddstudio_work_data:/data:ro -v "$out":/backup alpine:3.20 \
-  tar -czf /backup/media.tar.gz -C /data .
+  tar -czf /backup/media.tar.gz --exclude=./work/uploads -C /data .
 ( cd "$out" && sha256sum db.dump media.tar.gz > SHA256SUMS )
 test -s "$out/db.dump" || { echo "backup: empty database dump" >&2; exit 1; }
 echo "backup: $out ($(du -sh "$out" | cut -f1))"
