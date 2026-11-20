@@ -32,7 +32,7 @@
    - Leave `COOKIE_SECURE=false` while access is by SSH tunnel over plain HTTP.
    - Optional provider keys (see `VOICE-AND-CASTING.md`).
 3. **Nightly backup:** add a root crontab line, or a systemd timer:
-   `30 3 * * * /srv/stickman/current/studio-app/deploy/backup.sh >> /srv/stickman/backups/backup.log 2>&1`
+   install `deploy/cron.d-oddstudio` as `/etc/cron.d/oddstudio` (nightly backup with `BACKUP_KIND=nightly`); see MAINTENANCE.md
 4. **Recommended but separate (not done by this deployment):** the SSH hardening listed in `docs/VPS_PRODUCTION_READINESS.md`. That covers a named admin account, key-only login and no root password login.
 
 ## 3. Deploy a release
@@ -60,7 +60,7 @@ The first build downloads base images and packages: Debian, Node and Python pack
 
 ## 4. Backups
 
-`deploy/backup.sh`, run nightly and before every deploy, writes `/srv/stickman/backups/<UTC stamp>/` with:
+`deploy/backup.sh`, run nightly and before every deploy, writes `/srv/stickman/backups/<UTC stamp>-<kind>/` (kind `nightly` or `deploy`, kept separately: see MAINTENANCE.md) with:
 - `db.dump`: `pg_dump -Fc` of all workflow state;
 - `media.tar.gz`: the `work_data` volume, which holds local media storage;
 - `SHA256SUMS`.

@@ -5,7 +5,7 @@
 #   /srv/stickman/releases/<git sha>/   unpacked `git archive` of that commit (read-only after unpacking)
 #   /srv/stickman/current -> releases/<git sha>
 #   /srv/stickman/shared/.env           secrets (mode 600, never in git)
-#   /srv/stickman/backups/<stamp>/      backup.sh output
+#   /srv/stickman/backups/<stamp>-<kind>/  backup.sh output (kind: nightly | deploy)
 # Steps: backup (if a release is running) -> build images tagged with the release -> switch `current` ->
 # start (the API applies database migrations on start) -> health check. On a failed health check it rolls back to
 # the previous release's images automatically (see rollback.sh).

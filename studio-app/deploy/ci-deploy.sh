@@ -33,5 +33,5 @@ if [[ ! -d "$dir" ]]; then
   git -C "$REPO" archive "$sha" | tar -x -C "$dir"
   chmod -R a-w "$dir"
 fi
-KEEP=${KEEP:-15} "$dir/studio-app/deploy/deploy.sh" "$tree"
+KEEP_DEPLOY=${KEEP_DEPLOY:-5} "$dir/studio-app/deploy/deploy.sh" "$tree"
 echo "ci-deploy: done $tree"
