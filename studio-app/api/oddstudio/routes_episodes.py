@@ -130,7 +130,8 @@ def start_from_idea(iid: int, body: StartIn, db: Session = Depends(get_db)):
         raise HTTPException(404, "idea not found")
     if i.status in ("in_production", "archived"):
         raise HTTPException(409, f"this idea is already {i.status.replace('_', ' ')}")
-    ep = Episode(idea_id=i.id, title=i.title, stage="script_pending", format=i.format, continues_episode_id=i.continues_episode_id)
+    ep = Episode(idea_id=i.id, title=i.title, stage="script_pending", format=i.format, continues_episode_id=i.continues_episode_id,
+                 dialogue_display=get_section(db, "production").get("dialogue_display", "none"))
     db.add(ep)
     db.flush()
     i.status, i.episode_id = "in_production", ep.id
@@ -189,6 +190,24 @@ def episode_detail(eid: int, db: Session = Depends(get_db)):
             "publish": S.publish(db.query(PublishRecord).filter_by(episode_id=ep.id).one_or_none()),
             "events": [{"kind": e.kind, "message": e.message, "created_at": S.ts(e.created_at)}
                        for e in db.query(Event).filter_by(episode_id=ep.id).order_by(Event.id.desc()).limit(50)]}
+
+
+class DialogueDisplayIn(BaseModel):
+    value: Literal["bubbles", "none", "captions"]
+
+
+@router.put("/episodes/{eid}/dialogue-display")
+def set_dialogue_display(eid: int, body: DialogueDisplayIn, db: Session = Depends(get_db)):
+    """What the viewer sees of the dialogue in this episode's next render: speech bubbles, nothing (the audio carries
+    it) or captions. Not while a render is running (it would apply to part of the video only)."""
+    ep = get_episode(db, eid)
+    if ep.stage in ("producing", "publishing"):
+        raise HTTPException(409, f"not while the episode is {ep.stage}: change it before or after the render")
+    if ep.dialogue_display != body.value:
+        log_event(db, ep.id, "episode", f"Dialogue on screen: {ep.dialogue_display or 'bubbles'} -> {body.value} (applies to the next render)")
+        ep.dialogue_display = body.value
+        db.commit()
+    return S.episode_summary(ep)
 
 
 # ------------------------------------------------------------------ script

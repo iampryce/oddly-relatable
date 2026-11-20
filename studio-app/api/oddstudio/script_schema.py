@@ -4,7 +4,7 @@ A script is plain data (never hard-coded storylines). It is validated on every s
 with a precise message instead of failing later in production.
 
 {
-  "title": "...", "logline": "...", "hook": "on-screen hook text (optional)", "twist": "what the unexpected turn is",
+  "title": "...", "logline": "...", "hook": "on-screen POV banner: 'POV: ...', at most one emoji (optional)", "twist": "what the unexpected turn is",
   "interactive": {"type": "none" | "viewer-choice" | "poll", "question": "...", "options": ["A", "B"]},
   "characters": [{"key": "<character key>", "role": "..."}],
   "new_characters": [{"key": "dad", "name": "Dad", "description": "who they are", "visual_description": "how they look",
@@ -100,7 +100,7 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
     out = {
         "title": _str(doc, "title", "script", max_len=100),
         "logline": _str(doc, "logline", "script", required=False, max_len=400),
-        "hook": _str(doc, "hook", "script", required=False, max_len=60),
+        "hook": _str(doc, "hook", "script", required=False, max_len=90),   # a POV line with one emoji (banner)
         "twist": _str(doc, "twist", "script", required=False, max_len=400),
     }
     inter = doc.get("interactive") or {"type": "none"}

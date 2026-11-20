@@ -243,6 +243,9 @@ export default function Settings() {
             <div><label htmlFor="prod-set">Default set</label><select id="prod-set" value={v.environment} onChange={e => set('environment', e.target.value)}>{data.environments.map((x: string) => <option key={x}>{x}</option>)}</select></div>
             <div><label htmlFor="prod-max">Maximum length (seconds)</label><input id="prod-max" type="number" min={10} max={60} value={v.max_seconds} onChange={e => set('max_seconds', Number(e.target.value))} /></div>
             <div><label htmlFor="prod-end">End card text</label><input id="prod-end" value={v.end_card} onChange={e => set('end_card', e.target.value)} /></div>
+            <div><label htmlFor="prod-dialogue">Dialogue on screen (new episodes)</label>
+              <select id="prod-dialogue" value={v.dialogue_display || 'none'} onChange={e => set('dialogue_display', e.target.value)}>
+                <option value="none">None (the audio carries the dialogue)</option><option value="captions">Captions</option><option value="bubbles">Speech bubbles</option></select></div>
           </div>)}</Section>
         <Section name="creative" title="House comedy style (given to the AI writer)" value={s.creative}>{(v, set) => (<>
           <textarea style={{minHeight: 160}} value={v.house_style} onChange={e => set('house_style', e.target.value)} />

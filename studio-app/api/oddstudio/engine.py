@@ -61,6 +61,12 @@ def strip_direction(text: str) -> str:
     return out.strip()
 
 
+def hook_text(text: str) -> str:
+    """The POV banner's text: performance tags removed, emoji KEPT (the acting renderer draws them with a colour emoji
+    font); spacing tidied. Bubbles and captions still use viewer_text (no emoji: their font has none)."""
+    return re.sub(r"\s{2,}", " ", strip_direction(text)).strip()
+
+
 def viewer_text(text: str) -> str:
     """What the viewer sees for a line (bubble or caption): no performance tags, no emoji; a line that is only a
     direction (\"[laughs]\") shows the house style's silent beat \"...\"."""

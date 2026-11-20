@@ -58,6 +58,8 @@ class Episode(Timestamps, Base):
     audio_rights_source: Mapped[str] = mapped_column(String(20), default="")     # own_recording | licensed | voice_actor | other
     audio_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_transcript: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # What the viewer sees of the dialogue: bubbles | none | captions (new episodes: Settings > Production default)
+    dialogue_display: Mapped[str] = mapped_column(String(10), default="bubbles")
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 

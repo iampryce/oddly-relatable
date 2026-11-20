@@ -7,7 +7,7 @@ import json
 from .script_schema import GESTURES, SHOTS, validate_script
 
 SCRIPT_SHAPE = {
-    "title": "short title", "logline": "one sentence", "hook": "2-5 word on-screen hook (optional)",
+    "title": "short title", "logline": "one sentence", "hook": "the on-screen POV banner: one line starting 'POV: ', at most 12 words, ending with at most one emoji",
     "twist": "the unexpected turn", "interactive": {"type": "none | viewer-choice | poll", "question": "...", "options": ["A", "B"]},
     "characters": [{"key": "<an available character key, or the key of a new character below>", "role": "their part in this story"}],
     "new_characters": [{"key": "lowercase-key", "name": "Name", "description": "who they are and their comic role",
@@ -37,7 +37,9 @@ def _cast_text(characters: list) -> str:
 def system_prompt(creative: dict) -> str:
     return ("You are the head writer of 'Oddly Relatable', an original animated stickman comedy channel for YouTube Shorts "
             "and TikTok. House style:\n" + creative["house_style"] + "\nNever use emoji in dialogue (the show's font cannot "
-            "draw them; say it in words). You always answer with one JSON object only.")
+            "draw them; say it in words). The hook is the on-screen POV banner: one line that starts with 'POV: ' and sets up "
+            "the situation from the viewer's side, at most 12 words, with at most one emoji at the end (the banner can draw "
+            "emoji; dialogue cannot). You always answer with one JSON object only.")
 
 
 def script_prompt(idea, characters: list, environments: list[str], instruction: str = "") -> str:

@@ -47,6 +47,17 @@ def line_texts(text: str) -> tuple[str, str]:
     return engine.viewer_text(text), engine.strip_direction(text)
 
 
+FONTS = REPO_ROOT / "skills/directing-stickman-videos/assets/fonts"
+
+
+def presentation(ep, hook: str) -> dict:
+    """How the dialogue and the hook appear (owner decision 2026-11-20): the episode's dialogue display (bubbles | none
+    | captions) and the POV banner (heavy condensed font, colour emoji kept)."""
+    mode = getattr(ep, "dialogue_display", None) or "bubbles"
+    return {"bubbles": mode == "bubbles", "captions": mode == "captions", "hook": engine.hook_text(hook),
+            "banner_font": str(FONTS / "Anton-Regular.ttf"), "emoji_font": str(FONTS / "NotoColorEmoji-Regular.ttf")}
+
+
 def enabled(db) -> bool:
     return get_section(db, "motion").get("provider") == "procedural-rig"
 
@@ -195,10 +206,10 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
 
     s = get_settings()
     from .tasks import current_script
-    hook = engine.viewer_text((current_script(db, ep) or {}).get("hook") or ep.title)
+    hook = (current_script(db, ep) or {}).get("hook") or ep.title
     # presentation (locked, owner 2026-11-17): comic speech bubbles by the speaker and a permanent top hook banner
-    spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration, "captions": False,
-            "bubbles": True, "hook": hook,
+    spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration,
+            **presentation(ep, hook),
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None}
     spec_file = folder / "acting.json"
