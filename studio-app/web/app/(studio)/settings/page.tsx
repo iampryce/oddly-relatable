@@ -109,7 +109,9 @@ function CapabilityCard({id, cap, sections, data, reload}: {id: string; cap: any
       {id === 'voice' && <div className="grid cols-2">
         <div><label htmlFor="voice-default">Default voice</label><input id="voice-default" value={s.v.default_voice} onChange={e => s.set('default_voice', e.target.value)} placeholder="alloy, an ElevenLabs voice id, or a Piper model file" /></div>
         <div><label htmlFor="voice-gain">Voice level (0.2–2)</label><input id="voice-gain" type="number" step="0.1" min={0.2} max={2} value={s.v.gain ?? 1} onChange={e => s.set('gain', Number(e.target.value))} /></div>
-        <div><label htmlFor="voice-fish-default">Fish Audio default voice (used when Fish is the fallback, and by its test if no character has a Fish voice)</label><input id="voice-fish-default" value={s.v.fish_default_voice ?? ''} onChange={e => s.set('fish_default_voice', e.target.value)} placeholder="Fish voice id" /></div></div>}
+        <div><label htmlFor="voice-fish-default">Fish Audio default voice (used when Fish is the fallback, and by its test if no character has a Fish voice)</label><input id="voice-fish-default" value={s.v.fish_default_voice ?? ''} onChange={e => s.set('fish_default_voice', e.target.value)} placeholder="Fish voice id" /></div>
+        <div style={{gridColumn: '1 / -1'}}><label htmlFor="voice-library">Fish voice library (auto-casting). One voice per line: voice id or fish.audio link | label | him/her/neutral | how it sounds. New characters get the best match; each can be changed.</label>
+          <textarea id="voice-library" rows={6} value={s.v.library ?? ''} onChange={e => s.set('library', e.target.value)} placeholder={'e3cd384158934cc9a01029cd7d278634 | Warm advisor | her | calm, warm, reassuring'} /></div></div>}
       {id === 'voice' && <VoiceCompare />}
       {id === 'transcription' && <div><label htmlFor="tr-lang">Language (empty: detect)</label><input id="tr-lang" value={s.v.language} onChange={e => s.set('language', e.target.value)} placeholder="en" /></div>}
       {id === 'motion' && <>
