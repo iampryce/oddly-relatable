@@ -182,7 +182,9 @@ def create_audio_episode(body: AudioEpisodeIn, db: Session = Depends(get_db), us
         raise HTTPException(422, "Confirm that you have the right to use this audio before creating the episode")
     if not body.rights_source:
         raise HTTPException(422, "Choose where the audio comes from (own recording, licensed, voice actor or other)")
+    from .settings_store import get_section
     ep = Episode(title=body.title, format=body.format, stage="audio_upload", source="audio",
+                 dialogue_display=get_section(db, "production").get("dialogue_display", "none"),
                  audio_rights_confirmed=True, audio_rights_source=body.rights_source)
     db.add(ep)
     db.flush()

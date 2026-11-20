@@ -46,6 +46,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
     <>
       <div className="spread">
         <div><h1>{ep.title}</h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
+        <DialogueDisplay ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
       <div className="tabs" role="tablist">
@@ -62,6 +63,21 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
       {tab === 'Publishing' && <PublishTab {...ctx} />}
       {tab === 'History' && <HistoryTab {...ctx} />}
     </>
+  );
+}
+
+// What the viewer sees of the dialogue in the next render (bubbles | none | captions).
+function DialogueDisplay({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
+  const locked = ['producing', 'publishing'].includes(ep.stage);
+  return (
+    <div style={{minWidth: 220}}>
+      <label htmlFor="dialogue-display">Dialogue on screen</label>
+      <select id="dialogue-display" value={ep.dialogue_display || 'bubbles'} disabled={locked || !!act.busy}
+              onChange={e => act.run('dialogue', () => api(`/episodes/${ep.id}/dialogue-display`, {method: 'PUT', body: {value: e.target.value}}))}>
+        <option value="none">None (audio only)</option><option value="captions">Captions</option><option value="bubbles">Speech bubbles</option>
+      </select>
+      <div className="muted small">{locked ? 'Locked while rendering' : 'Applies to the next render'}</div>
+    </div>
   );
 }
 

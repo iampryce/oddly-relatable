@@ -9,7 +9,8 @@
 // Video only (the studio muxes the voice mix). Deterministic: the same input renders the same frames.
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadRig, drawCharacter, renderVideo, loadImage, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
+import {loadRig, drawCharacter, renderVideo, loadImage, createCanvas, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
+import {registerBannerFonts, layoutBanner, drawBanner} from './banner.mjs';
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const OUT = process.argv[3];
@@ -290,7 +291,14 @@ function wrapText(ctx, text, maxW) {
   return rows;
 }
 
+// The POV banner (spec.hook): laid out once, drawn on every frame. Without banner fonts in the spec, the older yellow
+// hook box below is used (specs written before 2026-11-20).
+const BANNER_FONTS = spec.hook && spec.banner_font ? registerBannerFonts(spec.banner_font, spec.emoji_font) : null;
+const BANNER_LAYOUT = BANNER_FONTS && BANNER_FONTS.banner ? layoutBanner(createCanvas(W, 400).getContext('2d'), spec.hook, W) : null;
+const HOOK_BOTTOM = BANNER_LAYOUT ? BANNER_LAYOUT.bottom : 220;
+
 function drawHook(ctx) {
+  if (BANNER_LAYOUT) { drawBanner(ctx, BANNER_LAYOUT); return; }
   // permanent top banner (the episode's hook): black bold capitals on a yellow box with a black border
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.font = '800 50px Sub'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
@@ -319,7 +327,7 @@ function drawBubble(ctx, t, poses, v, s) {
     if (rows.length <= 4) break;
   }
   const lh = size * 1.18, bw = Math.max(...rows.map(r => ctx.measureText(r).width)) + 64, bh = rows.length * lh + 40;
-  const minY = (spec.hook ? 220 : 40) + 10;
+  const minY = (spec.hook ? HOOK_BOTTOM : 40) + 10;
   // every visible head (screen rectangles): a bubble must not cover any of them
   const heads = KEYS.filter(o => poses[o].onStage).map(o => {
     const q = poses[o], cq = C[o], tp = (headTop(o, q) - v.y0) * s, hh = (q.hip.y + cq.neck.y * cq.S - headTop(o, q)) * s;
@@ -392,7 +400,8 @@ function drawScene(ctx, t) {
       const rows = []; let cur = '';
       for (const w of line.text.split(' ')) { const nx = cur ? cur + ' ' + w : w; if (ctx.measureText(nx).width > W * 0.84 && cur) { rows.push(cur); cur = w; } else cur = nx; }
       rows.push(cur);
-      rows.forEach((r, i) => { const y = H * 0.1 + i * 64; ctx.lineWidth = 10; ctx.strokeStyle = '#111'; ctx.strokeText(r, W / 2, y); ctx.fillStyle = '#fff'; ctx.fillText(r, W / 2, y); });
+      // captions sit in the lower third, clear of the POV banner at the top and of the platform's buttons at the bottom
+      rows.forEach((r, i) => { const y = H * 0.70 + i * 64; ctx.lineWidth = 10; ctx.strokeStyle = '#111'; ctx.strokeText(r, W / 2, y); ctx.fillStyle = '#fff'; ctx.fillText(r, W / 2, y); });
     }
   }
 }

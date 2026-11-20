@@ -33,7 +33,8 @@ DEFAULTS: dict[str, dict] = {
     "motion": {"provider": "none", "model": "", "fallback": "none", "budget_usd": 25.0},
     "lipsync": {"provider": "rhubarb", "fallback": "none"},
     "sound": {"provider": "none", "model": "", "fallback": "none"},
-    "production": {"environment": "living-room-empty-03", "max_seconds": 60, "fps": 30,
+    # dialogue_display: what new episodes show of the dialogue (bubbles | none | captions); each episode can change it
+    "production": {"environment": "living-room-empty-03", "max_seconds": 60, "fps": 30, "dialogue_display": "none",
                    "end_card": "Oddly Relatable"},
     "youtube": {"default_privacy": "private", "category_id": "23", "default_tags": ["stickman", "funny", "relatable", "comedy"]},
     "creative": {"house_style": (
@@ -50,6 +51,7 @@ DEFAULTS: dict[str, dict] = {
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
 IMAGE_PROVIDERS = ("none", "codex-cli", "openai")
+DIALOGUE_DISPLAYS = ("bubbles", "none", "captions")
 VOICE_PROVIDERS = ("none", "openai", "elevenlabs", "piper", "kokoro", "fish")
 
 
@@ -94,6 +96,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         from .house_style import STYLE_VERSIONS
         if value["style_version"] not in STYLE_VERSIONS:
             raise ValueError(f"creative.style_version must be one of {', '.join(STYLE_VERSIONS)}")
+    if key == "production" and value.get("dialogue_display", "none") not in DIALOGUE_DISPLAYS:
+        raise ValueError(f"production.dialogue_display must be one of {', '.join(DIALOGUE_DISPLAYS)}")
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
