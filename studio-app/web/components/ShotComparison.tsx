@@ -45,7 +45,7 @@ export function ShotComparison() {
         <strong>Latest plan: scene line &ldquo;{plan.text}&rdquo; ({plan.seconds} s) · {plan.status}{plan.error ? `: ${plan.error}` : ''}</strong>
         <p className="small">Budget: {usd(plan.spent_usd)} of {usd(plan.budget_usd)} used.</p>
         {plan.status === 'ready' && <div className="row" style={{gap: 12, alignItems: 'flex-start', flexWrap: 'wrap'}}>
-          <div className="stack small"><b>Image sent</b>{plan.frame_url && <img src={plan.frame_url} alt="first frame sent" style={{width: 160, borderRadius: 6}} />}</div>
+          <div className="stack small"><b>Wide first frame</b>{plan.frame_url && <img src={plan.frame_url} alt="wide first frame" style={{width: 160, borderRadius: 6}} />}</div>
           <div className="stack small"><b>Line audio (ours)</b>{plan.audio_url && <audio controls src={plan.audio_url} style={{width: 220}} />}</div>
           <div className="stack small"><b>Rig animator</b>{plan.rig_url ? <video controls src={plan.rig_url} style={{width: 160}} /> : <span className="muted">{plan.rig_error || 'not rendered'}</span>}</div>
           {(plan.requests || []).map((r: any) => (
@@ -53,6 +53,11 @@ export function ShotComparison() {
               <b>{r.label}</b>
               <span>{r.price} · estimate {usd(r.estimate.usd, 3)} ({r.estimate.billed_seconds} s billed){r.estimate.note ? ` · ${r.estimate.note}` : ''}</span>
               <span className="muted">Sends: {r.sends.join(' + ')}</span>
+              <label className="row" style={{gap: 4}}>First frame
+                <select value={r.framing} disabled={!!busy || r.result?.status === 'queued' || r.result?.status === 'running'}
+                  onChange={e => run('framing', () => api(`/motion/shot/${plan.id}/framing`, {method: 'PUT', body: {model: r.model, framing: e.target.value}}))}>
+                  <option value="wide">wide (the whole set)</option><option value="medium">medium (head and upper body)</option></select></label>
+              {r.frame_url && <img src={r.frame_url} alt={`${r.framing} first frame sent to ${r.label}`} style={{width: 110, borderRadius: 6}} />}
               <details><summary>Exact request</summary><pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre></details>
               {r.result?.url ? <video controls src={r.result.url} style={{width: 160}} /> : null}
               {r.result?.status === 'done' && <span>actual {usd(r.result.actual_usd, 3)} · {usd(r.result.per_second_usd, 3)} per second · length {r.result.check.length_ok ? 'OK' : 'off'} ({r.result.check.video_seconds} s video, {r.result.check.audio_seconds} s audio){r.result.check.held_last_frame ? ' · last frame held' : ''}</span>}

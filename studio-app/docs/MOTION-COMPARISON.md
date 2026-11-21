@@ -4,6 +4,7 @@ Production › Motion Model Comparison › **Shot comparison** compares hosted A
 
 - **Inputs:**
   - Only the studio's own approved art: the scene's approved set plate, with the speaker's approved neutral pose composed onto it locally (720×1280 first frame).
+  - Two first frames are composed. **Wide** shows the whole figure on the set; **medium** shows head and upper body filling most of the frame, on the same plate enlarged. The avatar model gets **medium** by default and image-to-video gets **wide**. Each can be switched per model before Run.
   - For the avatar model, the line's own recorded audio, cut from the episode's recording as 48 kHz WAV.
   - Nothing from the reference video is used: its frames and the video are deleted after the notes are made.
 - **Action:** written from the video notes' fixed-list words for that line (pose, emotion, the speaker's own beats), and editable before planning.
