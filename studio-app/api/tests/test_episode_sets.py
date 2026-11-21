@@ -129,6 +129,19 @@ class EpisodeSetTest(unittest.TestCase):
         self.assertEqual(opts["suggestion"], {"word": "office", "set_id": "office"})
         self.assertIsNone(opts["current"], "never applied by itself")
 
+    def test_a_repository_plate_without_staging_is_not_offered(self):
+        from oddstudio import sets
+        from oddstudio.db import new_session
+        bad = sets.REPO_SETS / "no-blocking-test.json"
+        bad.write_text(json.dumps({"plate": "x.png", "width": 10, "height": 10}))
+        try:
+            with new_session() as db:
+                self.assertNotIn("no-blocking-test", sets.usable(db))
+                self.assertIsNone(sets.spec_for(db, "no-blocking-test", self.env.tmp))
+                self.assertIsNotNone(sets.spec_for(db, LIVING, self.env.tmp))
+        finally:
+            bad.unlink()
+
     def test_the_renderer_refuses_without_a_set(self):
         from oddstudio import acting
         from oddstudio.db import new_session
