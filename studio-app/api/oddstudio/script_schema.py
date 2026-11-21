@@ -180,6 +180,17 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
                  "description": _str(s, "description", where, required=False),
                  "action": _str(s, "action", where, required=False),
                  "camera": _str(s, "camera", where, required=False, max_len=400), "lines": []}
+        acts = s.get("actions")
+        if isinstance(acts, list) and acts:
+            # timed actions from the video's beats (feat/action-beats): absolute times, known characters and types
+            from .beats import SUPPORTED
+            ok = []
+            for a in acts[:200]:
+                if (isinstance(a, dict) and a.get("type") in SUPPORTED and a.get("character") in keys
+                        and isinstance(a.get("t"), (int, float))):
+                    ok.append({k: a[k] for k in ("t", "character", "type", "target", "gesture") if k in a})
+            if ok:
+                scene["actions"] = ok
         if isinstance(s.get("set"), str) and s["set"].strip():
             scene["set"] = s["set"].strip()[:80]     # checked against the episode's sets by scene_sets.continuity
         st = s.get("staging")

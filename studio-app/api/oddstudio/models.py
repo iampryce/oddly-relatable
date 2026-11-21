@@ -175,7 +175,9 @@ class StoryboardScene(Base):
     # how the scene starts (feat/seating): {character key: "seated" | "standing"}, in seat order; None = everyone stands
     staging: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     # the scene's own set (one of the episode's sets); None = the episode's set
-    set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)          # [{speaker, text, expression, shot, duration}]
+    set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
+    # timed actions from the video's beats (feat/action-beats): [{t, character, type, target?, gesture?}]
+    actions: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)          # [{speaker, text, expression, shot, duration}]
     status: Mapped[str] = mapped_column(String(30), default="draft")  # draft | needs_revision | ready
     production_status: Mapped[str] = mapped_column(String(30), default="pending")  # pending | running | done | failed
     reference_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -7,7 +7,7 @@ import {api} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 
-const LABEL: Record<string, string> = {set: 'Set', seating: 'Seating', shot: 'Shot', reactors: 'Reactors'};
+const LABEL: Record<string, string> = {set: 'Set', view: 'View', seating: 'Seating', shot: 'Shot', reactors: 'Reactors', movement: 'Movement'};
 
 export default function ReferencePlan({episodeId, notesKey}: {episodeId: number; notesKey: string}) {
   const {data, error, reload} = useApi<any>(`/episodes/${episodeId}/reference-plan`);

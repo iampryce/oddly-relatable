@@ -28,6 +28,19 @@ from .queue import enqueue
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 IMAGE_COST = "about $0.05-0.20 per image"
+TWO_COST = "2 images, about $0.10-0.40"
+# shot / reverse shot: one room, two linked sets with the same description and a view line (owner decision 2026-11-21)
+VIEW_LINES = {"main side": "View: the main side of the room (the first camera angle).",
+              "reverse side": "View: the reverse side of the same room, seen from the opposite direction (the reverse "
+                              "shot), with the same furniture, light and style."}
+
+
+def two_views_for(ep: Episode) -> bool:
+    if ep.source != "audio":
+        return False
+    from .beats import two_views
+    from .reference_plan import effective
+    return two_views(effective(ep.audio_transcript or {}))
 MIN_TEXT, MAX_TEXT = 10, 400
 LOCKED_STAGES = ("producing", "publishing")
 
@@ -62,8 +75,11 @@ def view(db: Session, ep: Episode) -> dict:
     from . import sets
     p = ep.set_proposal or {}
     text = p.get("text", "")
+    two = two_views_for(ep)
     return {"text": text, "source": p.get("source"), "updated": p.get("updated"),
             "prompt": sets.prompt_for(db, text) if text else "", "image_cost": IMAGE_COST,
+            "two_views": two, "two_cost": TWO_COST,
+            "view_prompts": {v: sets.prompt_for(db, f"{text}\n{line}") for v, line in VIEW_LINES.items()} if two and text else {},
             "propose_with": "video notes" if ep.source == "audio" else "writer",
             "can_propose": bool(((ep.audio_transcript or {}).get("video_notes") or {}).get("ranges"))
             if ep.source == "audio" else bool(ep.script_version)}
@@ -126,6 +142,7 @@ def propose(eid: int, db: Session = Depends(get_db)):
 
 class GenerateIn(BaseModel):
     text: str = Field(min_length=MIN_TEXT, max_length=MAX_TEXT)
+    views: bool = False      # both sides of the room (only when the notes show two views of one room)
 
 
 @router.post("/episodes/{eid}/set-proposal/generate")
@@ -143,16 +160,26 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     # (the job is created, given its set id and committed in one transaction, so a worker never sees it without one)
     from .models import Job
     label = f"{ep.title[:44]} (episode {ep.id})"
-    job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
-              payload={"label": label, "description": text, "episode_id": ep.id})
-    db.add(job)
-    db.flush()
-    set_id = f"{sets.slug(ep.title)[:30]}-ep{ep.id}-{job.id}"
-    job.payload = {**job.payload, "set_id": set_id}
-    db.add(Event(episode_id=ep.id, kind="job", message=f"Queued set_candidate (job {job.id})"))
-    db.add(Event(episode_id=ep.id, kind="episode", message=f"Set candidate requested ({set_id}, {IMAGE_COST}); approve it in Settings > Sets"))
+    if body.views and not two_views_for(ep):
+        raise HTTPException(409, "the video notes do not show two views of one room: generate one set")
+    want = list(VIEW_LINES.items()) if body.views else [(None, None)]
+    made, room = [], None
+    for view, line in want:
+        desc = f"{text}\n{line}" if line else text
+        job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
+                  payload={"label": label + (f", {view}" if view else ""), "description": desc, "episode_id": ep.id})
+        db.add(job)
+        db.flush()
+        set_id = f"{sets.slug(ep.title)[:30]}-ep{ep.id}-{job.id}"
+        room = room or set_id
+        job.payload = {**job.payload, "set_id": set_id, **({"view": view, "room": room} if view else {})}
+        db.add(Event(episode_id=ep.id, kind="job", message=f"Queued set_candidate (job {job.id})"))
+        made.append({"set_id": set_id, "view": view, "job": S.job(job), "prompt": sets.prompt_for(db, desc)})
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Set candidate(s) requested ({', '.join(m['set_id'] for m in made)}, "
+                                                          f"{TWO_COST if body.views else IMAGE_COST}); approve in Settings > Sets"))
     db.commit()
-    return {"set_id": set_id, "job": S.job(job), "prompt": sets.prompt_for(db, text)}
+    first = made[0]
+    return {"set_id": first["set_id"], "job": first["job"], "prompt": first["prompt"], "sets": made}
 
 
 # ------------------------------------------------------------------ the writer's proposal (script-first)

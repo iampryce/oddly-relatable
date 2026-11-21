@@ -58,7 +58,7 @@ VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".w
                "video/x-m4v": ".m4v"}
 # Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
 # the Reference plan is kept too: its acceptance is checked against the notes, so a change still asks again
-KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes", "reference_plan")
+KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes", "reference_plan", "person_map")
 RIGHTS_TEXT = "I have the right to use this recording: its audio and any video it came with."
 AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
                "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",
@@ -1015,6 +1015,7 @@ def audio_video_notes(ctx: Ctx) -> dict:
                 got, m = NV.renumber(kept[-1], got)
                 mappings.append(NV.summarize_mapping(m))
             kept += got
+        from . import beats as BT
         ranges, redacted = NV.to_ranges(kept, length, step)
         usage = {"provider": (usages[0] if usages else {}).get("provider"), "model": (usages[0] if usages else {}).get("model"),
                  "input_tokens": sum(u.get("input_tokens") or 0 for u in usages),
@@ -1022,10 +1023,13 @@ def audio_video_notes(ctx: Ctx) -> dict:
         quality = NV.quality(kept, sent, stripped + redacted, usages, est.get("usd"), mappings)
         db.refresh(ep)
         tr = dict(ep.audio_transcript or {})
-        tr["video_notes"] = {"version": NV.VERSION, "ranges": ranges, "people_frames": kept, "quality": quality,
-                             "base": float(p.get("base") or 0.0), "length": round(length, 3), "frames": len(frames),
-                             "redacted": stripped + redacted, "usage": usage, "job_id": job.id, "edited": False,
-                             "source": "video frames (deleted)"}
+        notes = {"version": NV.VERSION, "ranges": ranges, "people_frames": kept, "quality": quality,
+                 "base": float(p.get("base") or 0.0), "length": round(length, 3), "frames": len(frames),
+                 "redacted": stripped + redacted, "usage": usage, "job_id": job.id, "edited": False,
+                 "source": "video frames (deleted)"}
+        # one setting per room (smoothed; the unsmoothed values stay as "was"), views, and the action beats
+        tr["video_notes"] = BT.rebuild(notes, tr.get("lines", []), tr.get("person_map") or {})
+        ranges = tr["video_notes"]["ranges"]
         tr["media_hints"] = {**VN.summary(ranges), "frames": len(frames), "job_id": job.id, "usage": usage,
                              "from": "video notes"}
         ep.audio_transcript = tr

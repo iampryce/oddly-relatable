@@ -79,6 +79,33 @@ def from_notes(db: Session, scenes: list[dict], first_settings: list[str | None]
             prev_word = word
 
 
+def view_sets(db: Session, allowed: list[str]) -> dict[str, str]:
+    """{view: set id} among the episode's sets made as a linked view pair (main side / reverse side of one room)."""
+    from . import sets
+    recs = sets.records(db)
+    return {recs[k]["view"]: k for k in allowed if recs.get(k, {}).get("view") in ("main side", "reverse side")}
+
+
+def from_views(scenes: list[dict], first_views: list[str | None], vsets: dict[str, str], main_set: str | None) -> None:
+    """Shot / reverse shot: each scene takes its side's set (only when both sides have a set)."""
+    if not {"main side", "reverse side"} <= set(vsets):
+        return
+    prev = None
+    for s, v in zip(scenes, first_views):
+        v = v if v in vsets else prev
+        if v:
+            if vsets[v] != main_set:
+                s["set"] = vsets[v]
+            else:
+                s.pop("set", None)
+        prev = v or prev
+
+
+def is_reverse(db: Session, set_id: str | None) -> bool:
+    from . import sets
+    return bool(set_id) and sets.records(db).get(set_id, {}).get("view") == "reverse side"
+
+
 def scene_set(ep: Episode, scene) -> str | None:
     return getattr(scene, "set_id", None) or ep.set_id
 

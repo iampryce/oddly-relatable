@@ -298,9 +298,11 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         sstarts, left = seat_starts(sc.staging or {}, list(cast), len(studio_sets.seats_of(sspec)))
         for k in left:
             ctx.log(f"scene {sc.position}: {k} is seated in the staging, but the set has no free seat: standing")
+        flip = scene_sets.is_reverse(db, scene_sets.scene_set(ep, sc))
         scene_specs.append({"t0": round((lines[i - 1]["end"] + lines[i]["start"]) / 2, 3), "set": sspec, "id": sid,
                             "starts": {k: sstarts.get(k) or ("on" if k in on_stage else "off") for k in cast},
-                            "_changes": sspec is not st or bool(sc.staging)})
+                            **({"flip": True} if flip else {}),
+                            "_changes": sspec is not st or bool(sc.staging) or flip})
     changes = any([x.pop("_changes") for x in scene_specs])   # (a list: every entry loses the key)
     scene_specs = scene_specs if changes else []
     # a character the scene start already places on stage does not also walk in (only the automatic entrances)
@@ -312,6 +314,18 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     for ln in lines:   # the marker is internal: the spec stays as before for renders without scene changes
         (ln.get("move") or {}).pop("auto", None)
 
+    # timed actions from the video's beats (audio episodes: absolute times), only inside this render's span and for
+    # characters in its cast; none -> the spec has no "actions" key, exactly as before
+    actions = []
+    if absolute and lines:
+        lo, hi = lines[0]["start"] - 2.0, lines[-1]["end"] + 2.0
+        seen_scenes = list(dict.fromkeys(sid for rs in refs for sid, _ in rs))
+        for sid in seen_scenes:
+            for a in getattr(scenes[sid], "actions", None) or []:
+                if lo <= a["t"] <= hi and a["character"] in cast and (a.get("type") != "turn_to" or a.get("target") in cast):
+                    actions.append(dict(a))
+        actions.sort(key=lambda a: a["t"])
+
     s = get_settings()
     from .tasks import current_script
     hook = (current_script(db, ep) or {}).get("hook") or ep.title
@@ -320,6 +334,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             **presentation(ep, hook),
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
             **({"scenes": scene_specs} if scene_specs else {}),
+            **({"actions": actions} if actions else {}),
+            **({"flip": True} if first is not None and scene_sets.is_reverse(db, scene_sets.scene_set(ep, first)) else {}),
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
             "timeline": "absolute" if absolute else "sequential"}
     spec_file = folder / "acting.json"

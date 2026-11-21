@@ -5,6 +5,7 @@ import VideoNotesOptions, {type NotesChoice} from './VideoNotesOptions';
 import {NOTE_CAMERA, NOTE_EMOTIONS, NOTE_FACING, NOTE_FURNITURE, NOTE_POSES, NOTE_POSITIONS, NOTE_SETTINGS, NOTE_SHOTS, NOTE_TIME,
   forServer, setField, setRoleField, type NoteRange, type RangeKey, type RoleKey} from '@/lib/videoNotes';
 import ReferencePlan from './ReferencePlan';
+import PeoplePanel from './PeoplePanel';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
@@ -154,6 +155,8 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
       </div>}
 
       {st.video_notes && <VideoNotesPanel st={st} episodeId={episodeId} act={act} />}
+      {st.video_notes?.version === 2 && <PeoplePanel episodeId={episodeId} editable={st.allowed_actions.includes('edit_video_notes')}
+        characters={st.characters.filter((c: any) => new Set([...(st.lines || []).map((l: any) => l.speaker), ...(st.silent_cast || []).map((m: any) => m.character_key)]).has(c.key))} />}
       {st.video_notes?.ranges?.length > 0 && <ReferencePlan episodeId={episodeId} notesKey={JSON.stringify(st.video_notes.ranges)} />}
       {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
         <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
@@ -244,7 +247,10 @@ function NotesQuality({q}: {q: any}) {
       <strong>Notes quality</strong>
       <div>People found: {q.people} · {Object.entries(q.appearances || {}).map(([p, n]: any) => `person ${p} in ${n} of ${total} frame(s)`).join(' · ') || 'nobody'}</div>
       <div>Frames: {q.frames_used} used of {q.frames_sent} sent ({q.calls} call(s)) · with people: {q.frames_with_people} · someone talking: {q.talking_frames}</div>
-      <div>Cost: {q.actual_usd != null ? `$${q.actual_usd.toFixed(4)} actual` : 'not reported'}{q.estimated_usd != null ? ` (estimated $${q.estimated_usd.toFixed(4)})` : ''} · items stripped (outside the lists): {q.stripped}</div>
+      <div>Cost: {q.actual_usd != null ? `$${q.actual_usd.toFixed(4)} actual` : 'not reported'}{q.estimated_usd != null ? ` (estimated $${q.estimated_usd.toFixed(4)}${q.actual_usd != null && q.estimated_usd > 0 ? `, actual ÷ estimate ${(q.actual_usd / q.estimated_usd).toFixed(2)}` : ''})` : ''} · items stripped (outside the lists): {q.stripped}</div>
+      {q.views?.length > 0 && <div>Views of the room: {q.views.join(', ')}</div>}
+      {q.neutral_share != null && <div>Neutral emotions: {Math.round(q.neutral_share * 100)}%</div>}
+      {q.hint && <div className="alert warn small">{q.hint}</div>}
       {q.renumbered?.length > 0 && <div className="muted">Renumbered between batches (from the overlap frame): {q.renumbered.map((m: any) => Object.entries(m).map(([a, b]) => `${a}→${b}`).join(', ')).join(' · ')}</div>}
     </div>);
 }

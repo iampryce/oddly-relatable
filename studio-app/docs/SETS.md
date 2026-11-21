@@ -54,3 +54,12 @@ How seats are used in a render:
 - **Missing sets block:** a scene whose set is no longer approved stops production with the scene named. There is no silent default.
 - **Unchanged otherwise:** a render with one set and no staging is byte-identical to before. Long episodes render their segments the same way. Audio passthrough, lip sync and the audio QA are unchanged.
 - Data: `episodes.scene_set_ids`, `storyboard_scenes.set_id` (migration `0011`).
+
+## Two sides of one room (shot / reverse shot)
+
+When the notes show one room from two sides, the Set card offers **"Generate both sides of the room"**.
+
+- **What is generated:** two linked candidates with the same description plus one view line each ("View: the main side of the room…" / "View: the reverse side of the same room…"). Both exact prompts are shown, and the combined cost is confirmed first.
+- **Approval:** each candidate is approved, and its seats and table front are marked, in Settings › Sets. The pair shows as "main side" / "reverse side".
+- **In scenes:** add both to the episode's sets for scene changes. The simple split then cuts where the camera changes side, and each scene takes its side's set. On the reverse side the standing marks and seats are used in the opposite order, so who sits or stands where flips as it does in the video.
+- **Single-view episodes:** with one view, or only one side's set, nothing switches and nothing flips. The render is identical to before.

@@ -162,10 +162,11 @@ def generate_storyboard(ctx: Ctx) -> dict:
     db.flush()
     for i, s in enumerate(sv.content["scenes"], 1):
         from .acting import referenced
-        cast = list(dict.fromkeys(k for ln in s["lines"] for k in referenced(ln)))   # speakers, look-at targets, reactors
+        cast = list(dict.fromkeys([k for ln in s["lines"] for k in referenced(ln)]
+                                  + [a["character"] for a in s.get("actions") or []]))   # speakers, look-at, reactors, actors
         db.add(StoryboardScene(episode_id=ep.id, position=i, scene_key=s["id"], heading=s["heading"], location=s.get("location", ""),
                                description=s.get("description", ""), action=s.get("action", ""), camera=s.get("camera", ""),
-                               characters=cast, lines=s["lines"], staging=s.get("staging"), set_id=s.get("set"), status="draft"))
+                               characters=cast, lines=s["lines"], staging=s.get("staging"), set_id=s.get("set"), actions=s.get("actions"), status="draft"))
     ep.storyboard_version += 1
     set_stage(ep, "storyboard_review")
     event(db, ep.id, "storyboard", f"Storyboard v{ep.storyboard_version} created from script v{sv.version}")

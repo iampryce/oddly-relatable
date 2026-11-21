@@ -36,6 +36,10 @@ export default function SetProposal({ep, candidates, onChange}: {ep: any; candid
     if (!window.confirm(`Generate one set candidate (${data.image_cost}) from exactly the prompt shown?`)) return;
     run('generate', () => api(`/episodes/${ep.id}/set-proposal/generate`, {body: {text: text.trim()}}));
   };
+  const generateBoth = () => {
+    if (!window.confirm(`Generate both sides of the room: ${data.two_cost} (two linked set candidates, the same description with a view line each; you approve and mark each one)?`)) return;
+    run('generate', () => api(`/episodes/${ep.id}/set-proposal/generate`, {body: {text: text.trim(), views: true}}));
+  };
   const mine = candidates.filter((c: any) => c.for_this_episode);
   return (
     <div className="stack" style={{borderTop: '1px solid var(--line, #ddd)', paddingTop: 10}}>
@@ -54,7 +58,10 @@ export default function SetProposal({ep, candidates, onChange}: {ep: any; candid
         <button className="btn sm" disabled={!!busy || locked || !dirty || text.trim().length < 10} onClick={save}>Save the description</button>
         <button className="btn sm primary" disabled={!!busy || locked || dirty || !data.text} onClick={generate}
           title={dirty ? 'Save the description first, so the prompt below is exactly what is sent' : ''}>Generate this set ({data.image_cost})</button>
+        {data.two_views && <button className="btn sm" disabled={!!busy || locked || dirty || !data.text} onClick={generateBoth}>Generate both sides of the room ({data.two_cost})</button>}
       </div>
+      {data.two_views && !dirty && data.view_prompts?.['reverse side'] && <details><summary className="small">The notes show one room from two sides (shot / reverse shot): the two prompts sent for both sides</summary>
+        {Object.entries(data.view_prompts).map(([v, p]: any) => <pre key={v} className="small" style={{whiteSpace: 'pre-wrap'}}>{p}</pre>)}</details>}
       {prompt ? <details><summary className="small">Sent to the image API (exactly)</summary><pre className="small" style={{whiteSpace: 'pre-wrap'}}>{prompt}</pre></details>
         : data.text ? <p className="muted small">Save the description to see the exact prompt that will be sent.</p> : null}
       {mine.length > 0 && <div className="row small" style={{gap: 8, flexWrap: 'wrap'}}>
