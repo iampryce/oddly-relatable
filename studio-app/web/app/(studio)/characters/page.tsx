@@ -3,6 +3,7 @@ import {useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
+import {groupCharacters, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
 const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null, skin_tone: ''};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
@@ -63,11 +64,21 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
   );
 }
 
-function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
+function thumbOf(c: any): string | null {
+  const poses = c.assets.filter((a: any) => a.kind === 'pose');
+  const p = poses.find((a: any) => a.status === 'approved' && a.expression === 'neutral') || poses.find((a: any) => a.status === 'approved')
+    || poses.find((a: any) => a.status === 'review');
+  return p ? p.url : null;
+}
+
+function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: any; reload: () => unknown; used?: any[]; selectable?: boolean; selected?: boolean; onSelect?: (v: boolean) => void}) {
   const act = useAction(reload);
   const [exprs, setExprs] = useState(SUGGESTED);
   const [editing, setEditing] = useState(false);
-  const poses = c.assets.filter((a: any) => a.kind === 'pose' && a.status !== 'rejected');
+  const [open, setOpen] = useState(false);
+  const [allPoses, setAllPoses] = useState(false);
+  const everyPose = c.assets.filter((a: any) => a.kind === 'pose');
+  const poses = visiblePoses(c.assets, allPoses);
   const refs = c.assets.filter((a: any) => a.kind === 'reference');
   const sheet = c.assets.find((a: any) => a.kind === 'sheet');
   const sample = c.assets.find((a: any) => a.kind === 'voice-sample');
@@ -79,8 +90,25 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
     r.readAsDataURL(file);
   }));
   if (editing) return <CharacterForm initial={c} onDone={() => { setEditing(false); reload(); }} />;
+  const rig = rigStatus(c);
+  const approvedN = everyPose.filter((p: any) => p.status === 'approved').length;
+  const live = (used || []).filter((e: any) => e.live);
+  const header = (
+    <div className="row" style={{alignItems: 'center', gap: 10, cursor: 'pointer'}} onClick={() => setOpen(!open)} role="button" aria-expanded={open}>
+      {selectable && <input type="checkbox" checked={!!selected} onClick={e => e.stopPropagation()} onChange={e => onSelect?.(e.target.checked)} aria-label={`select ${c.name}`} />}
+      {thumbOf(c) ? <img src={thumbOf(c)!} alt="" loading="lazy" style={{width: 40, height: 56, objectFit: 'contain', borderRadius: 4, background: 'var(--panel, #f4f4f4)'}} />
+        : <div style={{width: 40, height: 56, borderRadius: 4, background: 'var(--panel, #eee)'}} />}
+      <div style={{flex: 1, minWidth: 0}}><strong>{c.name}</strong> <span className="muted small mono">{c.key}</span>
+        <div className="row small" style={{gap: 4, flexWrap: 'wrap'}}>
+          <span className={`badge ${c.art_status === 'approved' ? 'good' : c.art_status === 'none' ? 'bad' : 'warn'}`}>art: {c.art_status}</span>
+          <span className={`badge ${rig.tone}`}>{rig.label}</span>
+          <span className="muted">{approvedN} approved pose(s){reviewing ? ` · ${reviewing} to review` : ''} · {live.length ? `in ${live.length} live episode(s)` : 'not in a live episode'}</span></div></div>
+      <span className="muted small">{open ? '▾' : '▸'}</span>
+    </div>);
+  if (!open) return <div className="card">{header}</div>;
   return (
     <div className="card stack">
+      {header}
       <div className="spread">
         <div><h2 style={{marginBottom: 2}}>{c.name} <span className="muted small mono">{c.key}</span></h2>
           <div className="row small"><span className={`badge ${c.art_status === 'approved' ? 'good' : c.art_status === 'none' ? 'bad' : 'warn'}`}>art: {c.art_status}</span>
@@ -111,6 +139,8 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>Approve</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
+      {everyPose.length > poses.length || allPoses ? <label className="small row" style={{gap: 6}}><input type="checkbox" checked={allPoses} onChange={e => setAllPoses(e.target.checked)} />
+        Show all poses ({everyPose.length - visiblePoses(c.assets, false).length} superseded, rejected or extra hidden)</label> : null}
       {!c.locked && (
         <div className="stack">
           <div className="row">{refs.map((r: any) => <a key={r.id} href={r.url} target="_blank" rel="noreferrer" className="small">reference</a>)}
@@ -134,27 +164,70 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
 
 export default function Characters() {
   const {data, error, reload} = useApi<any[]>('/characters', 8000);
+  const {data: use, reload: reloadUse} = useApi<any>('/characters/usage', 30000);
+  const {data: episodes} = useApi<any[]>('/episodes');
   const [creating, setCreating] = useState(false);
   const [checkNote, setCheckNote] = useState('');
+  const [search, setSearch] = useState('');
+  const [story, setStory] = useState<number | null>(null);
+  const [cleanup, setCleanup] = useState(false);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
+  const act = useAction(() => { reload(); reloadUse(); });
+  const usage = use?.usage || {};
+  const groups = groupCharacters(data || [], usage, use?.archived || [], story, search);
+  const live = (episodes || []).filter((e: any) => e.stage !== 'published');
   const checkAll = async () => {
     const r = await api('/characters/rig-check-all', {method: 'POST'});
     setCheckNote(`Rig check queued for ${r.queued.length} character(s)${r.already_running ? ` (${r.already_running} already running)` : ''}. Results appear on the pose cards; approvals are not changed.`);
     reload();
   };
+  const chosen = (data || []).filter(c => picked.includes(c.id));
+  const archive = () => {
+    if (!window.confirm(`Archive ${chosen.length} character(s): ${chosen.map(c => c.name).join(', ')}? They are hidden here and can be restored.`)) return;
+    act.run('archive', async () => { await api('/characters/archive', {body: {ids: picked}}); setPicked([]); });
+  };
+  const remove = () => {
+    const names = chosen.map(c => c.name);
+    if (!window.confirm(`Delete for good ${names.length} character(s): ${names.join(', ')}? Their poses are removed too. This cannot be undone.`)) return;
+    act.run('delete', async () => { await api('/characters/delete', {body: {ids: picked, confirm_names: names}}); setPicked([]); });
+  };
+  const card = (c: any) => {
+    const can = cleanup && removable(c, usage);
+    return <CharacterCard key={c.id} c={c} reload={reload} used={usage[c.key]} selectable={can} selected={picked.includes(c.id)}
+      onSelect={v => setPicked(v ? [...picked, c.id] : picked.filter(x => x !== c.id))} />;
+  };
+  const section = (title: string, list: any[], empty: string) => (
+    <><h2>{title} <span className="muted small">({list.length})</span></h2>
+      {list.length ? <div className="grid cols-2" style={{marginBottom: 20}}>{list.map(card)}</div> : <p className="muted small">{empty}</p>}</>);
   return (
     <>
       <div className="spread"><div><h1>Characters</h1><p className="sub">No fixed cast: stories introduce the characters they need. Approve their expression sheets, then keep the ones you want for future stories.</p></div>
         <div className="row"><button className="btn" title="Checks that the acting rig can be built from every approved pose (informational: approvals are never changed)" onClick={() => checkAll().catch(e => setCheckNote(e.message))}>Run rig check on all approved poses</button>
           {!creating && <button className="btn primary" onClick={() => setCreating(true)}>New character</button>}</div></div>
       {checkNote && <p className="small muted">{checkNote}</p>}
-      <ErrorBox error={error} />
+      <ErrorBox error={error || act.error} />
       {creating && <div style={{marginBottom: 16}}><CharacterForm initial={{}} onDone={() => { setCreating(false); reload(); }} /></div>}
+      <div className="row" style={{gap: 8, marginBottom: 12, flexWrap: 'wrap'}}>
+        <input type="search" placeholder="Search name or key" aria-label="Search characters" value={search} onChange={e => setSearch(e.target.value)} style={{flex: 1, minWidth: 180}} />
+        <select aria-label="Story" value={story ?? ''} onChange={e => setStory(e.target.value ? Number(e.target.value) : null)}>
+          <option value="">This story: choose an episode</option>
+          {live.map((e: any) => <option key={e.id} value={e.id}>{e.title}</option>)}
+        </select>
+        <button className={`btn ${cleanup ? 'primary' : ''}`} onClick={() => { setCleanup(!cleanup); setPicked([]); }}>{cleanup ? 'Done cleaning up' : 'Clean up'}</button>
+      </div>
+      {cleanup && <div className="alert row" style={{justifyContent: 'space-between'}}>
+        <span className="small">Tick characters that no live episode uses (the others have no box). {picked.length} selected.</span>
+        <span className="row"><button className="btn sm" disabled={!picked.length || !!act.busy} onClick={archive}>Archive selected</button>
+          <button className="btn sm danger" disabled={!picked.length || !!act.busy} onClick={remove}>Delete selected</button></span></div>}
       {data && !data.length && <Empty>No characters.</Empty>}
-      <h2>Recurring cast</h2>
-      <div className="grid cols-2" style={{marginBottom: 20}}>{(data || []).filter(c => c.scope === 'recurring').map(c => <CharacterCard key={c.id} c={c} reload={reload} />)}</div>
-      <h2>Introduced by stories</h2>
-      {data && !data.some(c => c.scope === 'episode') && <Empty>No story-specific characters yet. When a script introduces one, it appears here for its expression sheet.</Empty>}
-      <div className="grid cols-2">{(data || []).filter(c => c.scope === 'episode').map(c => <CharacterCard key={c.id} c={c} reload={reload} />)}</div>
+      {story != null && section("This story's characters", groups.story, 'No characters in this story yet.')}
+      {section('Recurring cast', groups.recurring, 'No recurring characters match.')}
+      {section('Everyone else', groups.others, 'No other characters match.')}
+      {groups.archived.length > 0 && <><button className="btn sm" onClick={() => setShowArchived(!showArchived)}>{showArchived ? 'Hide' : 'Show'} archived ({groups.archived.length})</button>
+        {showArchived && <div className="grid cols-2" style={{marginTop: 10}}>{groups.archived.map(c => (
+          <div key={c.id} className="card row" style={{justifyContent: 'space-between'}}><span><strong>{c.name}</strong> <span className="muted small mono">{c.key}</span></span>
+            <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('restore', () => api('/characters/unarchive', {body: {ids: [c.id]}}))}>Restore</button></div>))}</div>}</>}
     </>
   );
 }
