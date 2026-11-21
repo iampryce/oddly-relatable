@@ -64,3 +64,22 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 
 - **Stage 2:** the scenes are runs of consecutive recorded lines (a cut only between two lines); the writer adds staging and acting, the dialogue is locked, and the result goes through the usual script and storyboard approvals.
 - **Stage 3:** each line plays at its recorded time; lip sync comes from the recording, cut per line; the original audio goes into the video unchanged; the render must pass the audio QA (video length equals audio length; first mouth cue within 80 ms of the first word).
+
+## People, views and action beats (from the video)
+
+- **One room, two views.** The notes record which side of the room the camera looks at (`view`: main side, reverse side, side-on, overhead, wide). One room filmed from two angles (shot / reverse shot) stays one setting with two views. Short setting flips (under 20 s) are smoothed to the room's setting; the unsmoothed value is shown in the Reference plan as "was". A real move of 20 s or more is kept.
+- **People in the video.** The numbered people are mapped to characters by you, on the Audio tab. The studio suggests a person only when the vision "talking" flag singles one person out often enough; it is never applied by itself.
+  - Once you confirm who is who, the speaker of each moment comes from the recorded lines (audio timing), in preference to the talking flag.
+  - The ranges and beats are then rebuilt. If you have edited the ranges, use "Rebuild from the video frames" instead, which asks first.
+- **Action beats.** These are derived on the server from the per-person frames:
+  - movement: enters, exits, sits down, stands up, walks (left/center/right);
+  - body and head: leans in or back, turns to someone or away, nods, shakes the head;
+  - hands: phone to ear, and other gestures held for at least a second.
+
+  How they behave:
+  - A camera cut to the other side is never read as a walk.
+  - Lying down and kneeling are listed and **will be skipped**, like hugs, running and camera moves.
+  - Every beat can be removed or changed; the derived beats stay as "was".
+  - Beats are acted only for confirmed people, at their time on the timeline. Dialogue and timing never change.
+- **Reference plan:** two more items per range. **View** shows the side and what a cut to the other side does. **Movement** lists the beats in the range. Both have used/ignored toggles, and ignoring Movement leaves that range's beats out.
+- **Costs:** the OpenAI estimate is calibrated ×1.7 from a real run. Anthropic is not yet calibrated: the notes readout shows "actual ÷ estimate" to set it. When nearly all emotions come back neutral, the readout suggests trying the Anthropic vision provider.

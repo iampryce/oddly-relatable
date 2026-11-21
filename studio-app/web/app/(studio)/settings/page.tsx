@@ -164,7 +164,7 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
   const field = (k: string, label: string) => <div><label htmlFor={`${x.id}-${k}`}>{label}</label><input id={`${x.id}-${k}`} type="number" value={b[k]} onChange={e => setB((o: any) => ({...o, [k]: Number(e.target.value)}))} /></div>;
   return (
     <div className="stack small" style={{borderTop: '1px solid var(--line, #ddd)', paddingTop: 8}}>
-      <div className="row" style={{gap: 8}}><strong>{x.label}</strong><span className={`badge ${x.status === 'approved' ? 'good' : x.status === 'rejected' ? 'bad' : 'warn'}`}>{x.status}</span><span className="muted">{x.width}×{x.height}</span></div>
+      <div className="row" style={{gap: 8}}><strong>{x.label}</strong><span className={`badge ${x.status === 'approved' ? 'good' : x.status === 'rejected' ? 'bad' : 'warn'}`}>{x.status}</span>{x.view && <span className="badge">{x.view}{x.room && x.room !== x.id ? ` · pair of ${x.room}` : ''}</span>}<span className="muted">{x.width}×{x.height}</span></div>
       <ErrorBox error={error} />
       <div className="row" style={{alignItems: 'flex-start', gap: 12, flexWrap: 'wrap'}}>
         {x.url && <a href={x.url} target="_blank" rel="noreferrer"><img src={x.url} alt={x.label} style={{width: 150, borderRadius: 6}} /></a>}

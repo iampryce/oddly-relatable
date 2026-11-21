@@ -28,7 +28,7 @@ from .db import get_db
 from .models import Character, Episode, Event
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
-FIELDS = ("set", "seating", "shot", "reactors")
+FIELDS = ("set", "view", "seating", "shot", "reactors", "movement")
 SET_KEYS = ("setting", "furniture", "time")
 SHOT_KEYS = ("shot", "camera")
 CAMERA_OK = ("static",)
@@ -45,7 +45,8 @@ def stored(tr: dict) -> dict:
 
 def notes_hash(tr: dict) -> str:
     body = {"ranges": [{k: v for k, v in r.items() if k != "line_ids"} for r in ranges_of(tr)],
-            "ignored": sorted(stored(tr).get("ignored", []))}
+            "ignored": sorted(stored(tr).get("ignored", [])),
+            "beats": (tr.get("video_notes") or {}).get("beats") or [], "people": tr.get("person_map") or {}}
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -66,6 +67,8 @@ def effective(tr: dict) -> list[dict]:
         r = {k: v for k, v in r.items() if k != "line_ids"}
         if f"{i}:set" in ign:
             r = {k: v for k, v in r.items() if k not in SET_KEYS}
+        if f"{i}:view" in ign:
+            r.pop("view", None)
         if f"{i}:shot" in ign:
             r = {k: v for k, v in r.items() if k not in SHOT_KEYS}
         roles = [dict(ro) for ro in r.get("roles", [])]
@@ -77,6 +80,19 @@ def effective(tr: dict) -> list[dict]:
             roles = [{k: v for k, v in ro.items() if k not in ("pose", "facing", "position")} for ro in roles]
         r["roles"] = roles
         out.append(r)
+    return out
+
+
+def effective_beats(tr: dict) -> list[dict]:
+    """The beats the builders act: supported types only, without those in ranges whose Movement item is ignored."""
+    from .beats import SUPPORTED
+    ign = set(stored(tr).get("ignored", []))
+    ranges = ranges_of(tr)
+    out = []
+    for b in (tr.get("video_notes") or {}).get("beats") or []:
+        i = next((k for k, r in enumerate(ranges) if r["start"] <= b["t"] < r["end"]), None)
+        if b["type"] in SUPPORTED and not (i is not None and f"{i}:movement" in ign):
+            out.append(b)
     return out
 
 
@@ -162,9 +178,25 @@ def view(db: Session, ep: Episode) -> dict:
             seat_note.append("lying down or kneeling will be skipped: they stand")
         if any(ro.get("role", "").startswith("reactor") and ro["role"] not in roles for ro in r.get("roles", [])):
             seat_note.append("more people than characters: the extra roles are left out")
+        from . import beats as BT
+        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if r["start"] <= b["t"] < r["end"]]
+        pnames = BT.names_of(db, tr)
+        skip = [b for b in in_range if b["type"] in BT.UNSUPPORTED]
+        move_note = []
+        if skip:
+            move_note.append("lying down and kneeling will be skipped (they stand)")
+        if in_range and not tr.get("person_map"):
+            move_note.append("confirm who is who (People) so the beats can be acted")
+        two = BT.two_views(ranges_of(tr))
         items = {
             "set": {"value": _set_text(r), "original": _set_text(o) if o else None,
-                    "note": "used for the set proposal (and, with per-scene sets, this scene's set)"},
+                    "note": "one setting per room (short flips smoothed); used for the set proposal and per-scene sets"},
+            "view": {"value": r.get("view") or "-", "original": (o.get("view") or "-") if o else None,
+                     "note": ("one room seen from two sides: a cut to the other side switches to that side's set "
+                              "(when both view sets are the episode's) and flips who stands where") if two
+                     else "one view of the room"},
+            "movement": {"value": "; ".join(BT.describe(b, pnames) for b in in_range) or "-", "original": None,
+                         "note": "; ".join(move_note) or "acted on the timeline (dialogue and timing stay as recorded)"},
             "seating": {"value": _seat_text(r, names, roles), "original": _seat_text(o, names, roles) if o else None,
                         "note": "; ".join(seat_note) or "each scene starts in this arrangement (speaker first)"},
             "shot": {"value": _shot_text(r), "original": _shot_text(o) if o else None,

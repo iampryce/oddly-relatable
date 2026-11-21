@@ -30,16 +30,20 @@ BATCH = 50                                   # frames per vision call (later bat
 MAX_PEOPLE = 6
 DEFAULT_CAP_USD = 0.50
 OUT_PER_FRAME_V2 = 140                       # output tokens per frame (people are described per frame)
+# estimate x factor from real runs: OpenAI measured 1.72x on the owner's 60 s test (2026-11-21: $0.0364 vs $0.0212);
+# Anthropic not measured yet (the readout shows actual / estimated so it can be set from a real run)
+CALIBRATION = {"openai": 1.7, "anthropic": 1.0}
+NEUTRAL_HINT = 0.9                           # share of neutral (or missing) emotions that triggers the provider hint
 
 POSES = VN.POSES                              # includes kneeling (shown in the plan as "will be skipped")
 GESTURES = ("none", "open_palms", "point", "shrug", "arms_up", "head_scratch", "hands_on_hips", "hand_on_chest",
             "facepalm", "thumbs_up", "wave", "beat", "cross_arms", "hands_on_head", "nod", "head_shake", "phone_to_ear",
             "hands_together")
 FACING_FIXED = VN.FACING_FIXED
-FRAME_KEYS = {"frame", "shot", "camera", "setting", "furniture", "time", "people"}
+FRAME_KEYS = {"frame", "shot", "camera", "setting", "furniture", "time", "view", "people"}
 PERSON_KEYS = {"person", "position", "pose", "facing", "gesture", "emotion", "talking"}
 SCENE_FIELDS = (("shot", VN.SHOTS), ("camera", VN.CAMERA), ("setting", VN.SETTINGS), ("furniture", VN.FURNITURE),
-                ("time", VN.TIME_OF_DAY))
+                ("time", VN.TIME_OF_DAY), ("view", VN.VIEWS))
 PERSON_FIELDS = (("position", VN.POSITIONS), ("pose", POSES), ("gesture", GESTURES), ("emotion", VN.EMOTIONS))
 
 
@@ -72,7 +76,7 @@ def estimate(seconds: float, fmt: str, provider: str, model: str = "", cap_usd: 
         return {"frames": n, "calls": len(calls), "configured": False, "cap_usd": cap_usd}
     tin = len(calls) * VN.PROMPT_TOKENS + sent * p["per_frame"]
     tout = len(calls) * VN.OUT_BASE + sent * OUT_PER_FRAME_V2
-    usd = round((tin * p["in"] + tout * p["out"]) / 1e6, 4)
+    usd = round((tin * p["in"] + tout * p["out"]) / 1e6 * CALIBRATION.get(provider, 1.0), 4)
     priced = model or p["model"]
     return {"frames": n, "calls": len(calls), "configured": True, "provider": provider, "model": priced,
             "input_tokens": tin, "output_tokens": tout, "usd": usd, "cap_usd": cap_usd, "within_cap": usd <= cap_usd,
@@ -112,6 +116,9 @@ def prompt(times: list[float], carried: list[dict] | None = None) -> str:
         '"emotion": ..., "talking": true}]}]}\nOne entry per frame, in order. Allowed values ONLY:\n'
         f"- shot: {', '.join(VN.SHOTS)}\n- camera: {', '.join(VN.CAMERA)}\n- setting: {', '.join(VN.SETTINGS)}\n"
         f"- furniture (the main piece in view): {', '.join(VN.FURNITURE)}\n- time: {', '.join(VN.TIME_OF_DAY)}\n"
+        f"- view: {', '.join(VN.VIEWS)}. One room filmed from two angles (shot / reverse shot) is ONE setting: "
+        "\"main side\" is the angle of the first frame, \"reverse side\" the opposite angle; side-on, overhead, or wide "
+        "(both sides in view)\n"
         f"- position: {', '.join(VN.POSITIONS)}\n- pose: {', '.join(POSES)}\n"
         f"- facing: {', '.join(FACING_FIXED)}, or another person (e.g. \"person 2\")\n"
         f"- gesture: {', '.join(GESTURES)}\n- emotion: {', '.join(VN.EMOTIONS)}\n"
@@ -287,7 +294,23 @@ def quality(frames: list[dict], frames_sent: int, stripped: int, usages: list[di
             "frames_with_people": sum(1 for fr in frames if fr.get("people")),
             "talking_frames": sum(1 for fr in frames if any(p.get("talking") for p in fr.get("people", []))),
             "calls": len(usages), "actual_usd": actual_usd(usages), "estimated_usd": est_usd, "stripped": stripped,
-            "renumbered": [m for m in mappings if any(k != v for k, v in m.items())]}
+            "renumbered": [m for m in mappings if any(k != v for k, v in m.items())],
+            "views": sorted({fr["view"] for fr in frames if fr.get("view")}),
+            "neutral_share": neutral_share(frames), "hint": provider_hint(frames, usages)}
+
+
+def neutral_share(frames: list[dict]) -> float | None:
+    emo = [p.get("emotion") for fr in frames for p in fr.get("people", [])]
+    return round(sum(1 for e in emo if e in (None, "neutral")) / len(emo), 2) if emo else None
+
+
+def provider_hint(frames: list[dict], usages: list[dict]) -> str:
+    share = neutral_share(frames)
+    provider = (usages[0] if usages else {}).get("provider")
+    if share is not None and share >= NEUTRAL_HINT and provider != "anthropic":
+        return ("Emotions are nearly all neutral: try the Anthropic vision provider for richer emotions "
+                "(Settings > Video and visual analysis).")
+    return ""
 
 
 def summarize_mapping(m: dict[int, int]) -> dict:

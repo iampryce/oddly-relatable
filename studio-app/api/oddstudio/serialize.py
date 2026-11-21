@@ -39,7 +39,7 @@ def episode_summary(e: Episode) -> dict:
 def scene(s: StoryboardScene, ref: Asset | None) -> dict:
     return {"id": s.id, "position": s.position, "scene_key": s.scene_key, "heading": s.heading, "location": s.location,
             "description": s.description, "action": s.action, "camera": s.camera, "characters": s.characters, "lines": s.lines,
-            "set_id": s.set_id, "staging": s.staging,
+            "set_id": s.set_id, "staging": s.staging, "actions": s.actions,
             "status": s.status, "production_status": s.production_status, "revision_note": s.revision_note,
             "reference": asset(ref), "updated_at": ts(s.updated_at)}
 

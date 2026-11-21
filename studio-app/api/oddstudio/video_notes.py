@@ -36,9 +36,11 @@ SETTINGS = ("office", "meeting room", "kitchen", "living room", "bedroom", "bath
             "indoors", "other")
 FURNITURE = ("long table", "round table", "desk", "sofa", "counter", "bed", "bench", "none")
 TIME_OF_DAY = ("daytime", "evening", "night")
+# which side of the room the camera looks at (one room seen from two angles, shot / reverse shot, is one setting)
+VIEWS = ("main side", "reverse side", "side-on", "overhead", "wide")
 ROLE = re.compile(r"^(speaker|reactor ([1-9]))$")
 TOP_KEYS = {"ranges"}
-RANGE_KEYS = {"start", "end", "shot", "camera", "setting", "furniture", "time", "roles"}
+RANGE_KEYS = {"start", "end", "shot", "camera", "setting", "furniture", "time", "view", "roles"}
 ROLE_KEYS = {"role", "position", "pose", "facing", "emotion"}
 
 # Emotion words -> the rig's expressions (used by the deterministic scene split for reactions)
@@ -144,7 +146,7 @@ def clean_notes(raw, duration: float) -> tuple[list[dict], int]:
             continue
         rng = {"start": round(start, 2), "end": round(end, 2)}
         for key, allowed in (("shot", SHOTS), ("camera", CAMERA), ("setting", SETTINGS), ("furniture", FURNITURE),
-                             ("time", TIME_OF_DAY)):
+                             ("time", TIME_OF_DAY), ("view", VIEWS)):
             if key in r:
                 v = str(r[key] or "").strip().lower()
                 if v in allowed:
@@ -217,7 +219,7 @@ def describe(r: dict) -> str:
     parts = [f"shot {r['shot']}" if r.get("shot") else "", f"camera {r['camera']}" if r.get("camera") else "",
              f"setting {r['setting']}" if r.get("setting") else "",
              f"furniture {r['furniture']}" if r.get("furniture") and r["furniture"] != "none" else "",
-             r.get("time", "")]
+             r.get("time", ""), f"view {r['view']}" if r.get("view") else ""]
     for ro in r.get("roles", []):
         bits = [ro.get(k) for k in ("position", "pose") if ro.get(k)]
         if ro.get("facing"):

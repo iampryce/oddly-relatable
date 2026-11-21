@@ -258,7 +258,8 @@ def set_candidate(ctx: Ctx) -> dict:
     recs = records(db)
     recs[p["set_id"]] = {"label": p["label"], "description": p["description"], "status": "candidate", "asset_id": a.id,
                          "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id,
-                         "style_version": version, "episode_id": p.get("episode_id")}
+                         "style_version": version, "episode_id": p.get("episode_id"),
+                         **{k: p[k] for k in ("view", "room") if p.get(k)}}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")
     return {"set_id": p["set_id"], "asset_id": a.id, "width": w, "height": h}

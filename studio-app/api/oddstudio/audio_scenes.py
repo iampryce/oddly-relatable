@@ -112,7 +112,8 @@ def notes_acting(lines: list[dict], notes: list[dict], silent: list[str], cast: 
 
 
 def build_script(title: str, lines: list[dict], cast: list[str], silent: list[str], plan: dict | None, fmt: str = "short",
-                 known: set[str] | None = None, notes: list[dict] | None = None, set_words: list | None = None) -> dict:
+                 known: set[str] | None = None, notes: list[dict] | None = None, set_words: list | None = None,
+                 view_split: bool = False, actions: list[dict] | None = None, set_views: list | None = None) -> dict:
     """The audio episode's script: the writer's plan (or the simple split when `plan` is None) around the transcript.
     The simple split uses the video notes (if any) for shots and silent reactions. Raises ScriptError when the plan
     breaks the rules."""
@@ -120,7 +121,22 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
     by_id = {ln["id"]: ln for ln in lines}
     keys = set(cast) | set(silent)
     if plan is None:
-        scenes_in = [{"heading": f"Scene {i + 1}", "line_ids": r} for i, r in enumerate(simple_runs(lines))]
+        runs0 = simple_runs(lines)
+        if view_split and notes:
+            # shot / reverse shot: a cut where the camera changes side (only when both sides have their own set)
+            from . import video_notes as VN
+            vof = {ln["id"]: (VN.for_line(notes, ln) or {}).get("view") for ln in lines}
+            split = []
+            for run in runs0:
+                cur = [run[0]]
+                for a, b in zip(run, run[1:]):
+                    if vof.get(b) and vof.get(a) and vof[b] != vof[a]:
+                        split.append(cur)
+                        cur = []
+                    cur.append(b)
+                split.append(cur)
+            runs0 = split
+        scenes_in = [{"heading": f"Scene {i + 1}", "line_ids": r} for i, r in enumerate(runs0)]
         plan = {"scenes": scenes_in, "lines": notes_acting(lines, notes or [], silent, cast)}
     scenes_in = plan.get("scenes")
     if not isinstance(scenes_in, list) or not scenes_in:
@@ -153,8 +169,16 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
             from . import video_notes as VN
             r = VN.for_line(notes or [], by_id[run[0]])
             set_words.append((r or {}).get("setting"))
+            if set_views is not None:
+                set_views.append((r or {}).get("view"))
         if fmt == "long":   # a long episode's scenes belong to acts 1-3: the recording's order, split in thirds
             scenes[-1]["act"] = 1 + (i * 3) // len(runs)
+    # the video's beats as timed actions, each in the scene whose time span holds it (dialogue and timing untouched)
+    if actions:
+        starts = [by_id[run[0]]["start"] for run in runs]
+        for a in actions:
+            j = max([k for k, s0 in enumerate(starts) if s0 <= a["t"]] or [0])
+            scenes[j].setdefault("actions", []).append(a)
     doc = {"title": str(plan.get("title") or title)[:100] or title[:100], "logline": str(plan.get("logline") or "")[:400],
            "hook": str(plan.get("hook") or "")[:90], "twist": "", "interactive": {"type": "none"},
            "characters": [{"key": k, "role": "silent" if k in silent else ""} for k in list(dict.fromkeys(cast + silent))],
@@ -182,6 +206,28 @@ def transcript_dialogue(ep: Episode) -> list[dict]:
 # ------------------------------------------------------------------ the writer
 SYSTEM = ("You direct an adult 2D animated comedy. The dialogue was RECORDED: you never change, add, remove or reorder a "
           "line. You only decide where the scenes are and how the characters act each line. Reply with one JSON object only.")
+
+
+def beat_actions(beats: list[dict], person_map: dict, keys: set[str]) -> list[dict]:
+    """The beats of CONFIRMED people as actions on character keys (unconfirmed people's beats are not acted)."""
+    who = {int(v): k for k, v in (person_map or {}).items() if v and k in keys}
+    out = []
+    for b in beats:
+        k = who.get(b["person"])
+        if not k:
+            continue
+        a = {"t": b["t"], "character": k, "type": b["type"]}
+        if b["type"] == "turn_to":
+            tgt = who.get(int(b["target"].split()[1]))
+            if not tgt:
+                continue
+            a["target"] = tgt
+        elif b.get("target"):
+            a["target"] = b["target"]
+        if b.get("gesture"):
+            a["gesture"] = b["gesture"]
+        out.append(a)
+    return out
 
 
 def notes_text(lines: list[dict], notes: list[dict]) -> str:
@@ -302,11 +348,16 @@ def audio_scenes(ctx: Ctx) -> dict:
         except (ProviderError, ProviderNotConfigured, ScriptError, ValueError, TypeError, KeyError) as e:
             ctx.log(f"The writer's scenes could not be used ({str(e)[:300]}); using the simple split")
             db.add(Event(episode_id=ep.id, kind="script", message=f"Writer not used ({str(e)[:200]}): simple split instead"))
-    words: list = []
-    script = build_script(ep.title, lines, cast, silent, plan, ep.format, set(chars), notes, words)
+    words, views = [], []
     allowed = scene_sets.episode_sets(db, ep)
+    vsets = scene_sets.view_sets(db, allowed)
+    from .reference_plan import effective_beats
+    acts = beat_actions(effective_beats(tr), tr.get("person_map") or {}, set(chars))
+    script = build_script(ep.title, lines, cast, silent, plan, ep.format, set(chars), notes, words,
+                          view_split={"main side", "reverse side"} <= set(vsets), actions=acts, set_views=views)
     if plan is None and len(allowed) > 1:
         scene_sets.from_notes(db, script["scenes"], words, allowed)   # the notes' setting changes, matched to the episode's sets
+    scene_sets.from_views(script["scenes"], views, vsets, ep.set_id)   # shot / reverse shot: each side its own set
     for note in scene_sets.continuity(script["scenes"], allowed):
         ctx.log(note)
         db.add(Event(episode_id=ep.id, kind="script", message=f"Scene set: {note}"))

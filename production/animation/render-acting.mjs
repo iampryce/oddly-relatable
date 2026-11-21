@@ -5,7 +5,11 @@
 //    set: {plate, width, height, floor_y, stand_min_x, stand_max_x, seat?: {x, hip_y, feet_y},
 //          seats?: [{x, hip_y, feet_y}], table_front?: {x0, y0, x1, y1}},
 //    cast: {key: {rig, height, lips, start: "on" | "off" | "seat:N"}},
-//    scenes?: [{t0, set: {...as set}, starts: {key: "on" | "off" | "seat:N"}}]   (later scenes: at t0 the set changes
+//    actions?: [{t, character, type, target?, gesture?}]   (timed actions from the video's beats, independent of the
+//      lines: enter, exit, sit_down, stand_up, walk (to left/center/right), lean_in, lean_back, turn_to, turn_away, nod,
+//      head_shake, phone_to_ear, gesture)
+//    flip?: true   (the reverse side of a room, shot / reverse shot: marks and seats in the opposite order)
+//    scenes?: [{t0, set: {...as set}, starts: {key: "on" | "off" | "seat:N"}, flip?: true}]   (later scenes: at t0 the set changes
 //      and everyone is placed as the scene starts; without it, one set for the whole render, as before)
 //    (seats: several seats; the older single `seat` is seat 0. table_front: the part of the plate in front of the
 //     seated characters (a table top), drawn again after them so they sit behind it.)
@@ -22,11 +26,11 @@ const OUT = process.argv[3];
 const {width: W, height: H, fps: FPS, duration: DUR} = spec;
 let SET = spec.set;
 const KEYS = Object.keys(spec.cast);
-const seatsOf = s => s.seats?.length ? s.seats : s.seat ? [s.seat] : [];
-let SEATS = seatsOf(SET);
+const seatsOf = (s, flip) => { const l = s.seats?.length ? s.seats : s.seat ? [s.seat] : []; return flip ? l.slice().reverse() : l; };
+let SEATS = seatsOf(SET, spec.flip);
 // scene 0 is spec.set with the cast's starts; later scenes switch set at their t0
-const SCENES = [{t0: -Infinity, set: spec.set}, ...(spec.scenes || []).slice().sort((a, b) => a.t0 - b.t0)];
-const useScene = i => { SET = SCENES[i].set; SEATS = seatsOf(SET); home = homes[i]; };
+const SCENES = [{t0: -Infinity, set: spec.set, flip: !!spec.flip}, ...(spec.scenes || []).slice().sort((a, b) => a.t0 - b.t0)];
+const useScene = i => { SET = SCENES[i].set; SEATS = seatsOf(SET, SCENES[i].flip); home = homes[i]; };
 const sceneAt = t => { let i = 0; while (i + 1 < SCENES.length && SCENES[i + 1].t0 <= t) i++; return i; };
 const startSeat = k => { const m = /^seat:(\d+)$/.exec(spec.cast[k].start || ''); return m && SEATS[+m[1]] ? +m[1] : null; };
 
@@ -50,7 +54,7 @@ function marks(keys) {
 // Per character: a list of locomotion segments {t0, t1, from, to, kind: walk|sit|stand|jump} and a timeline of states.
 const onStart = KEYS.filter(k => spec.cast[k].start !== 'off');
 // every cast member gets a reserved mark (characters who enter later walk to theirs, so nobody overlaps)
-const homes = SCENES.map(sc => { const keep = SET; SET = sc.set; const h = marks(KEYS); SET = keep; return h; });
+const homes = SCENES.map(sc => { const keep = SET; SET = sc.set; const h = marks(sc.flip ? KEYS.slice().reverse() : KEYS); SET = keep; return h; });
 let home = homes[0];
 const state = {};                       // per character: x, seated, seat (index while seated)
 for (const k of KEYS) {
@@ -79,27 +83,22 @@ const GEST = {   // script gesture -> [arm, animator gesture, hand kind]
 };
 const nearestOther = (k, x) => KEYS.filter(o => o !== k && state[o].on).sort((a, b) => Math.abs(state[a].x - x) - Math.abs(state[b].x - x))[0];
 
-let sceneNow = 0;
-for (const ln of spec.lines) {
-  const k = ln.speaker, t = ln.start, len = ln.end - ln.start;
-  // a cut to the next scene: its set, and everyone placed as that scene starts (cuts reset staging)
-  while (sceneNow + 1 < SCENES.length && SCENES[sceneNow + 1].t0 <= t) {
-    sceneNow++;
-    const sc = SCENES[sceneNow];
-    useScene(sceneNow);
-    for (const c of KEYS) {
-      for (const m of moves[c]) if (m.t1 > sc.t0) m.t1 = Math.max(m.t0, sc.t0 - 0.001);
-      const v = (sc.starts || {})[c] || 'off', mm = /^seat:(\d+)$/.exec(v), si = mm && SEATS[+mm[1]] ? +mm[1] : null;
-      state[c] = si !== null ? {x: SEATS[si].x, seated: true, seat: si, on: true}
-        : {x: v === 'on' ? home[c] : SET.width + 160, seated: false, seat: null, on: v === 'on'};
-      moves[c].push({t0: sc.t0, t1: sc.t0, kind: 'place', x: state[c].x, seated: state[c].seated, seat: state[c].seat});
-    }
+function advanceScenes(t) {
+// a cut to the next scene: its set, and everyone placed as that scene starts (cuts reset staging)
+while (sceneNow + 1 < SCENES.length && SCENES[sceneNow + 1].t0 <= t) {
+  sceneNow++;
+  const sc = SCENES[sceneNow];
+  useScene(sceneNow);
+  for (const c of KEYS) {
+    for (const m of moves[c]) if (m.t1 > sc.t0) m.t1 = Math.max(m.t0, sc.t0 - 0.001);
+    const v = (sc.starts || {})[c] || 'off', mm = /^seat:(\d+)$/.exec(v), si = mm && SEATS[+mm[1]] ? +mm[1] : null;
+    state[c] = si !== null ? {x: SEATS[si].x, seated: true, seat: si, on: true}
+      : {x: v === 'on' ? home[c] : SET.width + 160, seated: false, seat: null, on: v === 'on'};
+    moves[c].push({t0: sc.t0, t1: sc.t0, kind: 'place', x: state[c].x, seated: state[c].seated, seat: state[c].seat});
   }
-  exprs[k].push([t, ln.expression || 'neutral']);
-  exprs[k].push([ln.end + 0.5, 'neutral']);
-  // movement first: it starts with the line (characters talk while they move)
-  const mv = ln.move;
-  if (mv) {
+}
+}
+function doMove(k, t, mv) {
     const s = state[k];
     let target = null, kind = 'walk', si = null;
     if (mv.type === 'enter') { s.on = true; s.x = (mv.to === 'left' ? -160 : SET.width + 160); target = home[k]; }
@@ -126,7 +125,41 @@ for (const ln of spec.lines) {
       if (kind === 'walk-sit') { moves[k].push({t0: t0 + dur, t1: t0 + dur + 0.6, kind: 'sit', seat: si, from: s.x, to: SEATS[si].x}); s.seated = true; s.seat = si; s.x = SEATS[si].x; }
       if (mv.type === 'exit') s.on = false;
     }
+}
+// timed actions (feat/action-beats): movement through doMove, the rest as timed head, body and arm actions
+const ACTS = (spec.actions || []).slice().sort((a, b) => a.t - b.t);
+const acts = Object.fromEntries(KEYS.map(k => [k, []]));      // {type, t0, t1, target}
+let ai = 0;
+const MOVE_OF = {enter: {type: 'enter'}, exit: {type: 'exit'}, sit_down: {type: 'sit'}, stand_up: {type: 'stand'}};
+function doAction(a) {
+  const k = a.character;
+  if (!C[k]) { warnings.push(`${k} at ${a.t.toFixed(1)} s: ${a.type} for a character not in this render: skipped`); return; }
+  if (MOVE_OF[a.type]) return doMove(k, a.t, MOVE_OF[a.type]);
+  if (a.type === 'walk') return doMove(k, a.t, {type: 'walk_to', to: a.target});
+  const dur = {nod: 0.9, head_shake: 1.0, lean_in: 2.5, lean_back: 0.6, turn_to: 2.5, turn_away: 2.0, phone_to_ear: 2.5, gesture: 1.6}[a.type];
+  if (!dur) { warnings.push(`${k} at ${a.t.toFixed(1)} s: ${a.type} is not supported yet: skipped`); return; }
+  if (a.type === 'lean_back') { for (const x of acts[k]) if (x.type === 'lean_in' && x.t1 > a.t) x.t1 = a.t + 0.3; return; }
+  if (a.type === 'phone_to_ear') { arms[k].push(['R', 'phone', a.t, a.t + dur]); return; }
+  if (a.type === 'gesture') {
+    const g = GEST[a.gesture];
+    if (!g) { warnings.push(`${k} at ${a.t.toFixed(1)} s: gesture ${a.gesture} is not supported yet: skipped`); return; }
+    const o = nearestOther(k, state[k].x);
+    arms[k].push([g[0], g[1], a.t, a.t + dur, g[2], Math.sign((o ? state[o].x : state[k].x) - state[k].x) || 1]);
+    return;
   }
+  acts[k].push({type: a.type, t0: a.t, t1: a.t + dur, target: a.target});
+}
+const runActionsUntil = t => { while (ai < ACTS.length && ACTS[ai].t < t) { const a = ACTS[ai++]; advanceScenes(a.t); doAction(a); } };
+let sceneNow = 0;
+for (const ln of spec.lines) {
+  const k = ln.speaker, t = ln.start, len = ln.end - ln.start;
+  runActionsUntil(t);
+  advanceScenes(t);
+  exprs[k].push([t, ln.expression || 'neutral']);
+  exprs[k].push([ln.end + 0.5, 'neutral']);
+  // movement first: it starts with the line (characters talk while they move)
+  const mv = ln.move;
+  if (mv) doMove(k, t, mv);
   // the speaker's gesture (held for most of the line); without one, small beat gestures on longer lines
   const g = GEST[ln.gesture];
   if (g) {
@@ -142,6 +175,7 @@ for (const ln of spec.lines) {
     if (rg) arms[r.character].push([rg[0], rg[1], t + 0.3, t + Math.max(1.3, Math.min(len, 2.6)), rg[2], Math.sign(state[k].x - state[r.character].x) || 1]);
   }
 }
+runActionsUntil(Infinity);
 
 // ---------------------------------------------------------------- gesture targets (relative to the shoulder, source px)
 const G = {
@@ -158,7 +192,8 @@ const G = {
   wave: (c, side, u) => ({x: side * c.armLen * 0.55, y: -c.armLen * 0.75, swing: Math.sin(u * 12)}),
   beat: (c, side, u) => ({x: side * c.armLen * 0.25 - side * 30, y: c.armLen * 0.48 - Math.sin(u * 9) * 18}),
   cross: (c, side) => ({x: -side * c.armLen * 0.38, y: c.armLen * 0.4}),
-  onHead: (c, side) => ({x: side * c.armLen * 0.12, y: -c.armLen * 1.25}),   // hands on top of the head, clear of the face
+  onHead: (c, side) => ({x: side * c.armLen * 0.12, y: -c.armLen * 1.25}),
+  phone: (c, side) => ({x: side * c.armLen * 0.18, y: -c.armLen * 0.78}),   // a hand by the ear (phone call)   // hands on top of the head, clear of the face
 };
 
 // ---------------------------------------------------------------- per-frame pose
@@ -238,12 +273,24 @@ function pose(k, t) {
     const open = {B: 0.3, C: 0.6, D: 1, E: 0.6, F: 0.4, G: 0.25, H: 0.5}[viseme(k, t)] || 0;
     p.headNod += -open * 6; p.headTilt += Math.sin(t * 3.1) * 0.05;
   }
+  let actTarget = null;
+  for (const x of acts[k]) {
+    const e = envelope(t, x.t0, x.t1, 0.2, 0.25, false);
+    if (e <= 0) continue;
+    const u = t - x.t0;
+    if (x.type === 'nod') p.headNod += Math.sin(u * 14) * 9 * e;
+    else if (x.type === 'head_shake') p.headTilt += Math.sin(u * 17) * 0.08 * e;
+    else if (x.type === 'lean_in') { const o = nearestOther(k, L.x); p.lean += 0.09 * e * (o ? Math.sign(state[o].x - L.x) || 1 : 1); }
+    else if (x.type === 'turn_to' && C[x.target]) actTarget = x.target;
+    else if (x.type === 'turn_away' && e > 0.5) { const o = nearestOther(k, L.x); p.turn = 1; p.turnDir = o ? -(Math.sign(state[o].x - L.x) || 1) : 1; }
+  }
   p.viseme = viseme(k, t);
   p.blink = blink(k, t);
   // eyes: the speaker looks at look_at / the nearest character; listeners look at the speaker
   const cur = spec.lines.find(l => t >= l.start && t < l.end + 0.4);
   let target = null;
   if (cur) target = cur.speaker === k ? (cur.look_at || nearestOtherAt(k, t)) : cur.speaker;
+  if (actTarget) target = actTarget;
   let look = {x: 0, y: 0.1};
   if (L.walking) look = {x: 0.8 * L.dir, y: 0};
   // a target outside this render's cast (the spec builder adds everyone a line references; this guards older specs)
