@@ -226,10 +226,13 @@ def run_model(pid: str, body: RunIn, db: Session = Depends(get_db), user: str = 
     if not view(db, p).get("urls_ok"):
         raise HTTPException(409, "fal.ai fetches the first frame and the line audio from the studio: set PUBLIC_URL on the server first")
     est = estimate(body.model, p["seconds"])
+    # approved runs that have not been charged yet count too, so two quick approvals cannot pass the cap together
+    pending = sum(r.get("estimated_usd") or 0 for q in records(db).values() for r in (q.get("results") or {}).values()
+                  if r.get("status") in ("queued", "running"))
     try:
-        fal.check_budget(db, est["usd"])
+        fal.check_budget(db, est["usd"] + pending)
     except ProviderError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e) + (f" (including ${pending:.2f} already approved and not yet run)" if pending else ""))
     recs = records(db)
     recs[pid]["results"][body.model] = {"status": "queued", "estimated_usd": est["usd"], "approved_by": user}
     save(db, recs)
@@ -396,7 +399,8 @@ def shot_generate(ctx: Ctx) -> dict:
         data, tm = fal.run(db, m["endpoint"], m["label"], body, est["usd"], f"shot {pid}: {p['text'][:60]}", raw, ctx.log,
                            lambda info: mark(progress=info))
         if m["kind"] == "avatar":
-            billed = float(data.get("duration") or stream_seconds(raw).get("video") or est["billed_seconds"])
+            # billed per second of OUR audio (the output follows it): the reported duration, else the audio's length
+            billed = float(data.get("duration") or p.get("audio_seconds") or p["seconds"])
             actual = round(m["rate"] * billed, 4)
         else:
             actual = est["usd"]

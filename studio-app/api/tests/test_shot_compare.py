@@ -110,7 +110,12 @@ class ShotCompareTest(Base):
         r = self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": "kling-2.6-pro-i2v"})
         self.assertEqual(r.status_code, 409)
         self.assertIn("experimental budget", r.text)
-        self.assertEqual(self.sent, [])
+        self.c.put("/api/settings/motion", json={"budget_usd": 0.4})
+        self.assertEqual(self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": "kling-2.6-pro-i2v"}).status_code, 200)
+        r = self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": "kling-avatar-v2-standard"})
+        self.assertEqual(r.status_code, 409, "the first approval is counted before it runs: 0.35 + 0.17 > 0.40")
+        self.assertIn("already approved and not yet run", r.text)
+        self.assertEqual(self.sent, [], "approving queues; nothing is sent until the worker runs it")
 
     def test_results_keep_our_audio_and_the_line_length(self):
         p = self.plan()
