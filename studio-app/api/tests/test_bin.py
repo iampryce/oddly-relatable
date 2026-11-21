@@ -164,6 +164,28 @@ class BinRulesTest(unittest.TestCase):
         self.assertEqual(self.c.post("/api/bin/bulk/poses", json={"confirm": True}).json()["moved"], 2)
         self.assertEqual(len(self.c.get("/api/bin").json()["items"]), 2)
 
+    def test_comparison_clips_can_be_deleted_from_the_video_library(self):
+        from oddstudio.db import new_session
+        from oddstudio.tasks import store_asset
+        f = Path(self.env.tmp) / "clip.mp4"
+        f.write_bytes(b"v" * 1000)
+        eid = self.ids["used"]
+        with new_session() as s:
+            ids = {}
+            for name, key in (("shot", f"episodes/{eid}/shot-compare/p1/kling.mp4"), ("leo", f"episodes/{eid}/comparison/wan-a1.mp4"),
+                              ("render", f"episodes/{eid}/r1/final.mp4")):
+                ids[name] = store_asset(s, ep_id=eid, src=f, key=key, kind="video", label=name, content_type="video/mp4").id
+            s.commit()
+        lib = next(e for e in self.c.get("/api/library").json() if e["id"] == eid)
+        flags = {v["label"]: v["comparison_clip"] for v in lib["videos"]}
+        self.assertEqual(flags, {"shot": True, "leo": True, "render": False}, "only comparison clips get a Delete")
+        r = self.move("clip", ids["render"])
+        self.assertEqual(r.status_code, 409, "an episode's own render is not a comparison clip")
+        for name in ("shot", "leo"):
+            self.assertEqual(self.move("clip", ids[name]).status_code, 200)
+        lib = next(e for e in self.c.get("/api/library").json() if e["id"] == eid)
+        self.assertEqual([v["label"] for v in lib["videos"]], ["render"], "deleted clips are hidden from the library")
+
     def test_storage_never_deletes_outside_its_folder(self):
         from oddstudio.storage import storage
         for bad in ("../secrets.txt", "/etc/passwd", "a/../../b"):

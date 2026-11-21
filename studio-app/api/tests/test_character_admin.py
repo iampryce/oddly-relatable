@@ -40,12 +40,14 @@ class CharacterAdminTest(unittest.TestCase):
         self.assertEqual(self.c.post("/api/characters/archive", json={"ids": [old]}).json()["archived"], [old])
         self.assertIn(old, self.c.get("/api/characters/usage").json()["archived"])
         self.assertEqual(self.c.post("/api/characters/unarchive", json={"ids": [old]}).json()["archived"], [])
-        r = self.c.post("/api/characters/delete", json={"ids": [old, spare], "confirm_names": ["Oldie"]})
-        self.assertEqual(r.status_code, 422, "the confirmation must name every character")
-        self.assertIn("Oldie, Spare", r.text)
-        r = self.c.post("/api/characters/delete", json={"ids": [old, spare], "confirm_names": ["Spare", "Oldie"]})
-        self.assertEqual(r.json()["deleted"], ["Oldie", "Spare"])
+        # deleting goes through the Bin (the old permanent endpoint is gone)
+        gone = self.c.post("/api/characters/delete", json={"ids": [old], "confirm_names": ["Oldie"]}).status_code
+        self.assertIn(gone, (404, 405), "no permanent delete endpoint any more")
+        for cid in (old, spare):
+            self.assertEqual(self.c.post("/api/bin/move", json={"kind": "character", "ref": str(cid)}).status_code, 200)
         self.assertNotIn("oldie", self.ids())
+        self.assertEqual(sorted(b["label"] for b in self.c.get("/api/bin").json()["items"]),
+                         ["Character Oldie (oldie)", "Character Spare (spare)"])
 
     def test_a_storyboard_line_reference_counts_as_use(self):
         from oddstudio.db import new_session
@@ -72,9 +74,10 @@ class CharacterAdminTest(unittest.TestCase):
             s.commit()
             eid = ep.id
         rid = self.char("ralph")
-        r = self.c.post("/api/characters/delete", json={"ids": [rid], "confirm_names": ["Ralph"]})
+        r = self.c.post("/api/bin/move", json={"kind": "character", "ref": str(rid)})
         self.assertEqual(r.status_code, 409)
-        self.assertIn("Ralph (Will)", r.text)
+        self.assertIn('Ralph is used by episode', r.json()["detail"])
+        self.assertIn('"Will"', r.json()["detail"])
         with new_session() as s:
             s.get(Episode, eid).stage = "published"
             s.commit()

@@ -110,21 +110,4 @@ def unarchive(body: IdsIn, db: Session = Depends(get_db), user: str = Depends(cu
     db.commit()
     return {"archived": sorted(archived(db))}
 
-
-class DeleteIn(IdsIn):
-    confirm_names: list[str] = Field(min_length=1, max_length=200)
-
-
-@router.post("/characters/delete")
-def delete(body: DeleteIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
-    """Permanent: the characters and their pose records. The owner confirms by sending back exactly their names."""
-    chars = _removable(db, body.ids, "deleted")
-    names = sorted(c.name for c in chars)
-    if sorted(body.confirm_names) != names:
-        raise HTTPException(422, f"confirm by naming exactly: {', '.join(names)}")
-    for c in chars:
-        db.delete(c)
-    _save_archived(db, archived(db) - {c.id for c in chars})
-    db.add(Event(episode_id=None, kind="character", message=f"Deleted by {user}: {', '.join(names)}"))
-    db.commit()
-    return {"deleted": names}
+# Deleting characters goes through the Bin (bin.py, POST /api/bin/move): restorable for 30 days, then removed.

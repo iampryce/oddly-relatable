@@ -152,11 +152,17 @@ def protect(db: Session, kind: str, ref: str) -> str | None:
             return f"episode {e.id} \"{e.title}\" is rendered or published ({e.stage})"
     elif kind == "clip":
         a = db.get(Asset, int(ref))
-        if a is None or a.kind != "video" or "comparison" not in (a.storage_key or ""):
+        if a is None or not is_comparison_clip(a):
             return "only motion-comparison clips can be deleted here"
     else:
         return f"unknown kind {kind!r}"
     return None
+
+
+def is_comparison_clip(a) -> bool:
+    """A motion-comparison video (the Leo & Ben comparison or the shot comparison), never an episode's own render."""
+    key = a.storage_key or ""
+    return a.kind == "video" and ("/comparison/" in key or "/shot-compare/" in key)
 
 
 def label_of(db: Session, kind: str, ref: str) -> str:

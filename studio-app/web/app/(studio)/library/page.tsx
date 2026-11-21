@@ -3,10 +3,11 @@ import Link from 'next/link';
 import {useState} from 'react';
 import {when} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
+import {DeleteButton} from '@/components/BinButtons';
 import {Empty, ErrorBox, Stage} from '@/components/ui';
 
 export default function Library() {
-  const {data, error} = useApi<any[]>('/library', 15000);
+  const {data, error, reload} = useApi<any[]>('/library', 15000);
   const [open, setOpen] = useState<number | null>(null);
   return (
     <>
@@ -23,7 +24,8 @@ export default function Library() {
               <strong>Revisions</strong>
               <ul>{ep.videos.map((v: any) => (
                 <li key={v.id}><a href={v.url} target="_blank" rel="noreferrer">Revision {v.revision}</a>
-                  <span className="muted"> · {when(v.created_at)} · {(v.size / 1e6).toFixed(1)} MB{v.id === ep.video_asset_id ? ' · current' : ''}</span></li>))}</ul>
+                  <span className="muted"> · {when(v.created_at)} · {(v.size / 1e6).toFixed(1)} MB{v.id === ep.video_asset_id ? ' · current' : ''}</span>
+                  {v.comparison_clip && <> <span className="muted">· {v.label}</span> <DeleteButton kind="clip" id={v.id} label={`the comparison clip "${v.label}"`} onDone={reload} /></>}</li>))}</ul>
             </div>
           </div>))}
       </div>
