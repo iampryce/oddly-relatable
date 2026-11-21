@@ -43,14 +43,17 @@ MODELS = {
         "endpoint": "fal-ai/kling-video/v2.6/pro/image-to-video", "kind": "i2v", "rate": 0.07,
         "label": "Kling 2.6 Pro image-to-video (audio off)",
         "why": "a strong current image-to-video model; with audio off it is the cheapest Kling Pro tier",
-        "price": "$0.07 per second with audio off; 5 or 10 s clips", "licence": "Commercial use permitted (fal Partner model)"},
+        "price": "$0.07 per second with audio off; 5 or 10 s clips", "licence": "Commercial use permitted (fal Partner model)",
+        "framing": "wide"},
     "kling-avatar-v2-standard": {
         "endpoint": "fal-ai/kling-video/ai-avatar/v2/standard", "kind": "avatar", "rate": 0.0562,
         "label": "Kling AI Avatar v2 Standard (our line audio)",
         "why": "takes an image AND our recorded line, so the mouth follows our audio; the output is as long as the audio; "
                "the page lists cartoons and stylized characters",
-        "price": "$0.0562 per second of audio", "licence": "Commercial use permitted (fal Partner model)"},
+        "price": "$0.0562 per second of audio", "licence": "Commercial use permitted (fal Partner model)",
+        "framing": "medium"},   # a talking-avatar model: head and upper body fill the frame (owner decision 2026-11-21)
 }
+FRAMINGS = ("wide", "medium")
 NEGATIVE = "realistic, photo, 3d render, extra characters, text, logo, watermark, deformed, blur"
 
 
@@ -173,6 +176,11 @@ def make_plan(body: PlanIn, db: Session = Depends(get_db)):
     return {"plan": view(db, recs[pid]), "job_id": job.id}
 
 
+def framing_of(p: dict, model: str) -> str:
+    """The first frame a model gets: the owner's choice for this plan, else the model's default."""
+    return (p.get("framing") or {}).get(model) or MODELS[model]["framing"]
+
+
 def view(db: Session, p: dict) -> dict:
     from . import fal
     from .comparison import public_url
@@ -181,13 +189,16 @@ def view(db: Session, p: dict) -> dict:
     url = lambda aid: storage().url(db.get(Asset, aid).storage_key) if aid and db.get(Asset, aid) else None
     out = {**p, "frame_url": url(p.get("frame_asset_id")), "audio_url": url(p.get("audio_asset_id")),
            "rig_url": url(p.get("rig_asset_id"))}
+    frames = p.get("frame_assets") or {"wide": p.get("frame_asset_id")}
+    out["frame_urls"] = {f: url(a) for f, a in frames.items()}
     if p.get("status") == "ready":
         sent_img = public_url(storage().url(db.get(Asset, p["frame_asset_id"]).storage_key, 7200)) if p.get("frame_asset_id") else ""
         sent_aud = public_url(storage().url(db.get(Asset, p["audio_asset_id"]).storage_key, 7200)) if p.get("audio_asset_id") else ""
         out["requests"] = [{"model": k, "label": m["label"], "endpoint": m["endpoint"], "price": m["price"],
-                            "estimate": estimate(k, p["seconds"]),
-                            "body": request_for(k, p["action"], "<the first frame shown above>", "<the line audio shown above>", p["seconds"]),
-                            "sends": ["the first frame (approved set + approved neutral pose)"]
+                            "estimate": estimate(k, p["seconds"]), "framing": framing_of(p, k),
+                            "frame_url": out["frame_urls"].get(framing_of(p, k)),
+                            "body": request_for(k, p["action"], f"<the {framing_of(p, k)} first frame shown>", "<the line audio shown above>", p["seconds"]),
+                            "sends": [f"the {framing_of(p, k)} first frame (approved set + approved neutral pose)"]
                                      + (["the line's own recorded audio"] if m["kind"] == "avatar" else []),
                             "result": p["results"].get(k)} for k, m in MODELS.items()]
         out["urls_ok"] = bool(sent_img.startswith("http") and sent_aud.startswith("http"))
@@ -202,6 +213,28 @@ def view(db: Session, p: dict) -> dict:
 @router.get("/motion/shot")
 def list_plans(db: Session = Depends(get_db)):
     return {"plans": [view(db, p) for p in sorted(records(db).values(), key=lambda p: -p.get("created", 0))[:10]]}
+
+
+class FramingIn(BaseModel):
+    model: str
+    framing: str
+
+
+@router.put("/motion/shot/{pid}/framing")
+def set_framing(pid: str, body: FramingIn, db: Session = Depends(get_db)):
+    """Free: which first frame a model gets (wide: the whole set; medium: head and upper body filling the frame)."""
+    recs = records(db)
+    p = recs.get(pid)
+    if not p:
+        raise HTTPException(404, "no such plan")
+    if body.model not in MODELS or body.framing not in FRAMINGS:
+        raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
+    if (p["results"].get(body.model) or {}).get("status") in ("queued", "running"):
+        raise HTTPException(409, "not while that model is running")
+    p["framing"] = {**(p.get("framing") or {}), body.model: body.framing}
+    save(db, recs)
+    db.commit()
+    return view(db, p)
 
 
 class RunIn(BaseModel):
@@ -280,12 +313,29 @@ def finish(video: Path, wav: Path, seconds: float, out: Path) -> dict:
             "length_ok": abs(v - seconds) <= 1.0 / FPS + 1e-3 and abs(a - seconds) <= 1.0 / FPS + 1e-3}
 
 
-def compose(plate: Path, pose: Path, blocking: dict, plate_w: int, plate_h: int, out: Path) -> Path:
-    """The first frame: the approved set plate (cover-fit to 720x1280) and the approved neutral pose standing on the
-    floor line, centred. Our own art only."""
+def compose(plate: Path, pose: Path, blocking: dict, plate_w: int, plate_h: int, out: Path, framing: str = "wide") -> Path:
+    """The first frame: the approved set plate (cover-fit to 720x1280) and the approved neutral pose, centred. Our own
+    art only. wide: the whole figure standing on the floor line. medium: closer on the same plate, the head and upper
+    body filling most of the frame (the figure runs off the bottom edge, the plate is enlarged to match)."""
     from PIL import Image
     bg = Image.open(plate).convert("RGB")
     k = max(W / bg.width, H / bg.height)
+    if framing == "medium":
+        fig = Image.open(pose).convert("RGBA")
+        box = fig.getchannel("A").getbbox() or (0, 0, fig.width, fig.height)
+        fig = fig.crop(box)
+        fh = round(H * 1.55)                          # the head and upper body fill the frame, legs below the edge
+        fig = fig.resize((max(1, round(fig.width * fh / fig.height)), fh))
+        k2 = k * 1.55 / 0.46                          # the plate enlarged as much as the figure (same apparent scale)
+        bg = bg.resize((round(bg.width * k2), round(bg.height * k2)))
+        head_top = round(H * 0.06)
+        floor = round(blocking.get("floor_y", plate_h * 0.86) * k2)
+        top = max(0, min(bg.height - H, floor - (head_top + fh)))
+        left = (bg.width - W) // 2
+        bg = bg.crop((left, top, left + W, top + H))
+        bg.paste(fig, ((W - fig.width) // 2, head_top), fig)
+        bg.save(out)
+        return out
     bg = bg.resize((round(bg.width * k), round(bg.height * k)))
     left, top = (bg.width - W) // 2, (bg.height - H) // 2
     bg = bg.crop((left, top, left + W, top + H))
@@ -328,16 +378,18 @@ def shot_prepare(ctx: Ctx) -> dict:
         spec = studio_sets.spec_for(db, set_id, folder / "set") if set_id else None
         if not spec:
             raise RuntimeError("the scene has no approved set")
-        frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], folder / "first-frame.png")
-        fa = store_asset(db, ep_id=ep.id, src=frame, key=f"episodes/{ep.id}/shot-compare/{pid}/first-frame.png",
-                         kind="scene-reference", label="Shot comparison first frame (approved set + approved neutral pose)",
-                         content_type="image/png", job_id=job.id)
+        frame_assets = {}
+        for f in FRAMINGS:
+            frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], folder / f"first-frame-{f}.png", f)
+            frame_assets[f] = store_asset(db, ep_id=ep.id, src=frame, key=f"episodes/{ep.id}/shot-compare/{pid}/first-frame-{f}.png",
+                                          kind="scene-reference", label=f"Shot comparison first frame, {f} (approved set + approved neutral pose)",
+                                          content_type="image/png", job_id=job.id).id
         src, _ = source_audio(db, ep, folder / "source")
         wav = media.cut_audio(src, folder / "line.wav", p["start"], p["end"])
         aa = store_asset(db, ep_id=ep.id, src=wav, key=f"episodes/{ep.id}/shot-compare/{pid}/line.wav", kind="audio",
                          label="Shot comparison: the line's recorded audio", content_type="audio/wav", job_id=job.id)
         recs = records(db)
-        recs[pid].update({"frame_asset_id": fa.id, "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
+        recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
                           "audio_seconds": round(media.probe(wav)["duration"] or p["seconds"], 3)})
         save(db, recs)
         db.commit()
@@ -382,7 +434,8 @@ def shot_generate(ctx: Ctx) -> dict:
     p = records(db)[pid]
     m = MODELS[model]
     folder = ctx.folder("shot-compare", pid)
-    img = public_url(storage().url(db.get(Asset, p["frame_asset_id"]).storage_key, 7200))
+    framing = framing_of(p, model)
+    img = public_url(storage().url(db.get(Asset, (p.get("frame_assets") or {}).get(framing) or p["frame_asset_id"]).storage_key, 7200))
     aud = public_url(storage().url(db.get(Asset, p["audio_asset_id"]).storage_key, 7200))
     body = request_for(model, p["action"], img, aud, p["seconds"])
     est = estimate(model, p["seconds"])
@@ -411,7 +464,7 @@ def shot_generate(ctx: Ctx) -> dict:
         check = finish(raw, wav, p["seconds"], out)
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
                          kind="video", label=f"Shot comparison: {m['label']}", content_type="video/mp4", job_id=job.id)
-        mark(status="done", asset_id=va.id, actual_usd=actual, per_second_usd=round(actual / max(0.001, p["seconds"]), 4),
+        mark(status="done", asset_id=va.id, actual_usd=actual, framing=framing, per_second_usd=round(actual / max(0.001, p["seconds"]), 4),
              check=check, seconds=tm["seconds"], request_id=tm["request_id"])
         return {"pid": pid, "model": model, "actual_usd": actual, "check": check}
     except Exception as e:

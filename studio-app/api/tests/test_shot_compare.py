@@ -104,6 +104,49 @@ class ShotCompareTest(Base):
         self.assertFalse(req["kling-2.6-pro-i2v"]["body"]["generate_audio"])
         self.assertIn("the line's own recorded audio", req["kling-avatar-v2-standard"]["sends"])
 
+    def test_the_avatar_gets_a_medium_shot_by_default_and_wide_is_an_option(self):
+        p = self.plan()
+        req = {r["model"]: r for r in p["requests"]}
+        self.assertEqual((req["kling-avatar-v2-standard"]["framing"], req["kling-2.6-pro-i2v"]["framing"]), ("medium", "wide"))
+        from oddstudio.db import new_session
+        from oddstudio.models import Asset
+        from oddstudio.storage import storage
+        with new_session() as s:
+            for f, a in p["frame_assets"].items():
+                self.assertEqual(Image.open(storage().get_to_file(s.get(Asset, a).storage_key, self.media / f"{f}.png")).size, (720, 1280))
+        # the geometry, measured on a plain plate (a real plate has dark lines of its own)
+        plain = self.media / "plain.png"
+        Image.new("RGB", (941, 1672), (200, 180, 150)).save(plain)
+        blk = {"floor_y": 1440}
+        imgs = {f: Image.open(SC.compose(plain, self.media / "neutral.png", blk, 941, 1672, self.media / f"g-{f}.png", f)).convert("RGB")
+                for f in SC.FRAMINGS}
+
+        def figure_box(im):
+            # the figure's bold black outline: dark pixels (the plate has none this dark at this size)
+            px = im.load()
+            ys = [y for y in range(0, im.height, 4) for x in range(0, im.width, 4) if sum(px[x, y]) < 90]
+            xs = [x for y in range(0, im.height, 4) for x in range(0, im.width, 4) if sum(px[x, y]) < 90]
+            return min(xs), min(ys), max(xs), max(ys)
+        wx0, wy0, wx1, wy1 = figure_box(imgs["wide"])
+        mx0, my0, mx1, my1 = figure_box(imgs["medium"])
+        self.assertLess((wy1 - wy0) / 1280, 0.5, "wide: the whole figure, under half the frame")
+        self.assertLess(my0 / 1280, 0.12, "medium: the head near the top")
+        self.assertGreater((my1 - my0) / 1280, 0.85, "medium: head and upper body fill most of the frame")
+        self.assertGreater((mx1 - mx0), 1.8 * (wx1 - wx0), "medium: the figure is much larger")
+        self.stub({"i2v": 5, "avatar": 3.04})
+        r = self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "wide"})
+        self.assertEqual(r.json()["requests"][1]["framing"], "wide")
+        self.assertEqual(self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "close"}).status_code, 422)
+        self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "medium"})
+        for m in SC.MODELS:
+            self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": m})
+        self.env.run_jobs(["shot_generate"])
+        sent = {("avatar" if "avatar" in e else "i2v"): b for e, b in self.sent}
+        with new_session() as s:
+            key = lambda f: s.get(Asset, p["frame_assets"][f]).storage_key
+            self.assertIn(key("medium").split("/")[-1], sent["avatar"]["image_url"], "the avatar is sent the medium frame")
+            self.assertIn(key("wide").split("/")[-1], sent["i2v"]["start_image_url"], "image-to-video keeps the wide frame")
+
     def test_nothing_runs_without_the_click_and_the_budget_caps_it(self):
         p = self.plan()
         self.c.put("/api/settings/motion", json={"budget_usd": 0.2})
