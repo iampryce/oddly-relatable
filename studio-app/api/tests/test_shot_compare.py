@@ -17,6 +17,8 @@ from oddstudio import shot_compare as SC
 
 LINE = {"line_id": "l1", "speaker": "mortimer", "text": "I leave everything to the cat.", "start": 1.0, "end": 4.0,
         "expression": "smug", "shot": "medium"}
+LINE2 = {"line_id": "l2", "speaker": "mortimer", "text": "I, Mortimer the Magnificent, hereby leave Winifred nothing.",
+         "start": 4.2, "end": 5.8, "expression": "neutral", "shot": "close"}
 
 
 class ShotCompareTest(Base):
@@ -52,7 +54,7 @@ class ShotCompareTest(Base):
             s.flush()
             c.expressions = {"neutral": f"p{ca.id}"}
             sc = StoryboardScene(episode_id=ep.id, position=1, scene_key="s1", heading="The will", location="", description="",
-                                 action="", camera="", characters=["mortimer"], lines=[LINE], status="draft")
+                                 action="", camera="", characters=["mortimer"], lines=[LINE, LINE2], status="draft")
             s.add(sc)
             s.commit()
             self.eid, self.sid = ep.id, sc.id
@@ -83,6 +85,83 @@ class ShotCompareTest(Base):
         ran = self.env.run_jobs(["shot_prepare"])
         self.assertEqual(ran[0][1], "succeeded", ran)
         return self.c.get("/api/motion/shot").json()["plans"][0]
+
+    def batch_ready(self):
+        lines = [{"scene_id": self.sid, "line": 0}, {"scene_id": self.sid, "line": 1}]
+        r = self.c.post("/api/motion/shot-batch/plan", json={"episode_id": self.eid, "lines": lines})
+        self.assertEqual(r.json()["queued"], 2, "ticking lines plans them by themselves")
+        self.assertEqual(self.c.post("/api/motion/shot-batch/plan", json={"episode_id": self.eid, "lines": lines}).json()["queued"], 0,
+                         "ticking again reuses the plans")
+        self.env.run_jobs(["shot_prepare"])
+        b = self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()
+        self.assertEqual((b["ready"], b["preparing"]), (2, 0))
+        return b["plans"]
+
+    def test_batch_auto_planning_with_toned_actions(self):
+        plans = {p["line"]: p for p in self.batch_ready()}
+        self.assertEqual(self.sent, [], "planning sends nothing")
+        a0, a1 = plans[0]["action"], plans[1]["action"]
+        self.assertNotIn("talks (neutral)", a0 + a1)
+        self.assertIn("smug", a0, "the line's mood")
+        self.assertIn("pompous", a1, "a tone cue from the line's own words")
+        self.assertIn("insulting", a1)
+        self.assertIn("hereby leave Winifred nothing", a1)
+        r = self.c.put(f"/api/motion/shot/{plans[1]['id']}/action", json={"action": "glares and says it slowly"})
+        self.assertEqual(r.json()["action"], "glares and says it slowly")
+
+    def test_one_summary_one_confirm_and_the_cap(self):
+        plans = self.batch_ready()
+        ids = [p["id"] for p in plans]
+        body = {"plan_ids": ids, "models": ["rig", "kling-2.6-pro-i2v", "kling-avatar-v2-standard"]}
+        s = self.c.post("/api/motion/shot-batch/run", json=body).json()
+        self.assertEqual(s["clips"], 4, "2 lines x 2 paid models (the rig is free)")
+        self.assertEqual(s["total_usd"], round(0.35 + 0.1686 + 0.35 + 0.1124, 4))
+        self.assertTrue(s["fits"])
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True}).status_code, 409,
+                         "the confirm must carry the total the owner saw")
+        self.assertEqual(self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True, "expected_usd": 0.5}).status_code, 409)
+        self.c.put("/api/settings/motion", json={"budget_usd": 0.9})
+        s = self.c.post("/api/motion/shot-batch/run", json=body).json()
+        self.assertFalse(s["fits"])
+        r = self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True, "expected_usd": s["total_usd"]})
+        self.assertEqual(r.status_code, 409, "over the cap")
+        self.c.put("/api/settings/motion", json={"budget_usd": 25})
+        r = self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True, "expected_usd": s["total_usd"]})
+        self.assertEqual(r.json()["queued"], 4, "ONE confirm queues exactly the summarised clips")
+        self.assertEqual(self.c.post("/api/motion/shot-batch/run", json=body).json()["pending_usd"], s["total_usd"],
+                         "approved but not yet charged: counted against the cap")
+        self.assertEqual(self.c.post("/api/motion/shot-batch/run", json=body).json()["clips"], 0, "nothing runs twice")
+
+    def test_result_grid_with_a_failed_clip_and_its_retry(self):
+        plans = self.batch_ready()
+        self.stub({"i2v": 5, "avatar": 3.04})
+        broken = {"on": True}
+        good = fal._test_run
+
+        def run(endpoint, body, out):
+            if "avatar" in endpoint and broken["on"]:
+                raise RuntimeError("fal.ai: generation failed (test)")
+            return good(endpoint, body, out)
+        fal.set_test_run(run)
+        body = {"plan_ids": [plans[0]["id"]], "models": ["kling-2.6-pro-i2v", "kling-avatar-v2-standard"]}
+        s = self.c.post("/api/motion/shot-batch/run", json=body).json()
+        self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True, "expected_usd": s["total_usd"]})
+        self.env.run_jobs(["shot_generate"])
+        row = next(p for p in self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()["plans"] if p["id"] == plans[0]["id"])
+        self.assertEqual(row["results"]["kling-2.6-pro-i2v"]["status"], "done")
+        self.assertTrue(row["results"]["kling-2.6-pro-i2v"]["url"])
+        self.assertEqual(row["results"]["kling-avatar-v2-standard"]["status"], "failed")
+        self.assertIn("generation failed", row["results"]["kling-avatar-v2-standard"]["error"])
+        broken["on"] = False
+        self.assertEqual(self.c.post(f"/api/motion/shot/{plans[0]['id']}/run", json={"model": "kling-avatar-v2-standard"}).status_code, 200,
+                         "a single retry for the failed clip")
+        self.assertEqual(self.c.post(f"/api/motion/shot/{plans[0]['id']}/run", json={"model": "kling-2.6-pro-i2v"}).status_code, 409,
+                         "a done clip is not run again")
+        self.env.run_jobs(["shot_generate"])
+        row = next(p for p in self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()["plans"] if p["id"] == plans[0]["id"])
+        self.assertEqual(row["results"]["kling-avatar-v2-standard"]["status"], "done")
+        self.assertTrue(row["results"]["kling-avatar-v2-standard"]["check"]["length_ok"])
 
     def test_free_preparation_from_our_own_art_and_audio(self):
         p = self.plan()

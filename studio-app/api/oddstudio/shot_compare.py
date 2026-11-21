@@ -107,24 +107,58 @@ def _episode_line(db: Session, eid: int, scene_id: int, line: int):
     return ep, sc, sc.lines[line]
 
 
+# Tone cues read from the line's own words (our transcript of our recording): a fixed list, so the action always says
+# HOW the line is delivered (owner request 2026-11-21: never a flat "talks (neutral)").
+TONE_CUES = (
+    ("pompous", ("hereby", "bequeath", "magnificent", "as you all know", "henceforth", "my dear", "indeed", "allow me",
+                 "it is my", "i, ", "esteemed", "distinguished")),
+    ("insulting", ("idiot", "fool", "useless", "pathetic", "stupid", "loser", "moron", "disgrace", "you never", "worthless",
+                   "nothing for", "not a penny", "gets nothing", "nothing.")),
+    ("pleading", ("please", "i beg", "just this once", "you have to", "can't you")),
+    ("shocked", ("what?!", "no way", "you're joking", "are you serious", "excuse me?")),
+    ("sarcastic", ("oh great", "how lovely", "wonderful.", "of course you did", "sure,", "brilliant.")),
+    ("smug", ("i told you", "obviously", "naturally", "as expected")),
+    ("deadpan", ("fine.", "okay.", "right.", "cool.")),
+)
+EXPRESSION_TONE = {"smug": "smug", "deadpan": "deadpan", "angry": "angry", "annoyed": "irritated", "shocked": "shocked",
+                   "worried": "nervous", "sad": "sad", "happy": "cheerful", "laughing": "laughing", "confused": "puzzled"}
+
+
+def tone_of(text: str, expression: str | None, emotion: str | None) -> str:
+    t = f" {(text or '').lower()} "
+    tones = [name for name, cues in TONE_CUES if any(c in t for c in cues)]
+    for e in (expression, emotion):
+        x = EXPRESSION_TONE.get((e or "").lower())
+        if x and x not in tones:
+            tones.append(x)
+    if not tones:
+        s = (text or "").strip()
+        tones = ["exclaiming"] if s.endswith("!") else ["asking, puzzled"] if s.endswith("?") else ["matter-of-fact, dry"]
+    return ", ".join(tones[:3])
+
+
 def action_from_notes(db: Session, ep: Episode, ln: dict) -> str:
-    """A short action description from the video notes' fixed-list words for the line's time (editable)."""
+    """The action for a line, filled in automatically and editable: the video notes' fixed-list words for the line's
+    time (pose, emotion, the speaker's own beats), plus the line's own words and mood (tone cues)."""
     from . import beats as BT
     from . import video_notes as VN
     from .reference_plan import effective
     tr = ep.audio_transcript or {}
-    if "start" not in ln or not (tr.get("video_notes") or {}).get("ranges"):
-        return f"talks ({ln.get('expression') or 'neutral'}), with small natural head and hand movements"
-    r = VN.for_line(effective(tr), ln) or {}
-    sp = next((ro for ro in r.get("roles", []) if ro.get("role") == "speaker"), {})
-    bits = [sp.get("pose"), sp.get("emotion") and f"looking {sp['emotion']}"]
-    names = BT.names_of(db, tr)
-    who = {v: k for k, v in (tr.get("person_map") or {}).items()}
-    own = [b for b in (tr.get("video_notes") or {}).get("beats") or []
-           if ln["start"] <= b["t"] < ln["end"] and who.get(b["person"]) == ln.get("speaker") and b["type"] in BT.SUPPORTED]
-    acts = [BT.describe(b, names).split(" ", 1)[1].rsplit(" (", 1)[0] for b in own]
-    words = ", ".join(x for x in bits if x) or "talking"
-    return f"is {words} and talks" + (f"; {', '.join(acts)}" if acts else "") + ", with small natural head and hand movements"
+    sp, acts = {}, []
+    if "start" in ln and (tr.get("video_notes") or {}).get("ranges"):
+        r = VN.for_line(effective(tr), ln) or {}
+        sp = next((ro for ro in r.get("roles", []) if ro.get("role") == "speaker"), {})
+        names = BT.names_of(db, tr)
+        who = {v: k for k, v in (tr.get("person_map") or {}).items()}
+        own = [b for b in (tr.get("video_notes") or {}).get("beats") or []
+               if ln["start"] <= b["t"] < ln["end"] and who.get(b["person"]) == ln.get("speaker") and b["type"] in BT.SUPPORTED]
+        acts = [BT.describe(b, names).split(" ", 1)[1].rsplit(" (", 1)[0] for b in own]
+    tone = tone_of(ln.get("text", ""), ln.get("expression"), sp.get("emotion"))
+    words = (ln.get("text") or "").strip()
+    quote = (words[:90] + "…") if len(words) > 90 else words
+    where = f"{sp['pose']}, " if sp.get("pose") else ""
+    return (f"is {where}delivering the line in a {tone} way (\"{quote}\")" + (f"; {', '.join(acts)}" if acts else "")
+            + ", with matching facial expression and natural head and hand movements")
 
 
 @router.get("/motion/shot/options")
@@ -258,25 +292,197 @@ def run_model(pid: str, body: RunIn, db: Session = Depends(get_db), user: str = 
         raise HTTPException(422, "unknown model")
     if p.get("status") != "ready":
         raise HTTPException(409, "the plan is not ready yet (its free preparation is still running or failed)")
-    if (p["results"].get(body.model) or {}).get("status") in ("queued", "running"):
-        raise HTTPException(409, "already running")
+    if (p["results"].get(body.model) or {}).get("status") in ("queued", "running", "done"):
+        raise HTTPException(409, "already queued, running or done")
     if not view(db, p).get("urls_ok"):
         raise HTTPException(409, "fal.ai fetches the first frame and the line audio from the studio: set PUBLIC_URL on the server first")
     est = estimate(body.model, p["seconds"])
-    # approved runs that have not been charged yet count too, so two quick approvals cannot pass the cap together
-    pending = sum(r.get("estimated_usd") or 0 for q in records(db).values() for r in (q.get("results") or {}).values()
-                  if r.get("status") in ("queued", "running"))
-    try:
-        fal.check_budget(db, est["usd"] + pending)
-    except ProviderError as e:
-        raise HTTPException(409, str(e) + (f" (including ${pending:.2f} already approved and not yet run)" if pending else ""))
-    recs = records(db)
-    recs[pid]["results"][body.model] = {"status": "queued", "estimated_usd": est["usd"], "approved_by": user}
-    save(db, recs)
-    job = enqueue(db, "shot_generate", episode_id=p["episode_id"], payload={"pid": pid, "model": body.model})
-    db.add(Event(episode_id=p["episode_id"], kind="episode", message=f"Shot comparison: {MODELS[body.model]['label']} approved by {user} (estimated ${est['usd']:.2f})"))
+    check_cap(db, est["usd"])
+    job = approve(db, pid, body.model, user)
     db.commit()
     return {"job_id": job.id, "estimate": est}
+
+
+def pending_usd(db: Session) -> float:
+    """Approved runs not charged yet (queued or running): they count against the cap."""
+    return round(sum(r.get("estimated_usd") or 0 for q in records(db).values() for r in (q.get("results") or {}).values()
+                     if r.get("status") in ("queued", "running")), 4)
+
+
+def check_cap(db: Session, usd: float) -> None:
+    from . import fal
+    from .providers import ProviderError
+    pending = pending_usd(db)
+    try:
+        fal.check_budget(db, usd + pending)
+    except ProviderError as e:
+        raise HTTPException(409, str(e) + (f" (including ${pending:.2f} already approved and not yet run)" if pending else ""))
+
+
+def approve(db: Session, pid: str, model: str, user: str):
+    """Record the owner's approval of one clip and queue it (the caller checked the cap for everything it approves)."""
+    from .queue import enqueue
+    recs = records(db)
+    p = recs[pid]
+    est = estimate(model, p["seconds"])
+    p["results"][model] = {"status": "queued", "estimated_usd": est["usd"], "approved_by": user}
+    save(db, recs)
+    job = enqueue(db, "shot_generate", episode_id=p["episode_id"], payload={"pid": pid, "model": model})
+    db.add(Event(episode_id=p["episode_id"], kind="episode", message=f"Shot comparison: {MODELS[model]['label']} approved by {user} "
+                                                                    f"(estimated ${est['usd']:.2f})"))
+    return job
+
+
+# ------------------------------------------------------------------ batch mode (one screen, one confirm)
+def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int) -> tuple[dict, bool]:
+    """The episode line's plan: the existing one (not failed), else a new one with its free preparation queued."""
+    from .queue import enqueue
+    recs = records(db)
+    for p in sorted(recs.values(), key=lambda p: -p.get("created", 0)):
+        if p["episode_id"] == ep.id and p["scene_id"] == sc.id and p["line"] == line and p.get("status") != "failed":
+            return p, False
+    ln = sc.lines[line]
+    if "start" not in ln:
+        raise HTTPException(409, "the comparison uses recorded lines (an audio-first episode)")
+    pid = uuid.uuid4().hex[:10]
+    recs[pid] = {"id": pid, "episode_id": ep.id, "scene_id": sc.id, "line": line, "speaker": ln.get("speaker"),
+                 "text": ln.get("text"), "start": float(ln["start"]), "end": float(ln["end"]),
+                 "seconds": round(float(ln["end"]) - float(ln["start"]), 3), "action": action_from_notes(db, ep, ln),
+                 "status": "preparing", "created": time.time(), "results": {}}
+    save(db, recs)
+    enqueue(db, "shot_prepare", episode_id=ep.id, payload={"pid": pid})
+    return recs[pid], True
+
+
+class LineRef(BaseModel):
+    scene_id: int
+    line: int = Field(ge=0)
+
+
+class BatchPlanIn(BaseModel):
+    episode_id: int
+    lines: list[LineRef] = Field(default_factory=list, max_length=60)
+
+
+@router.post("/motion/shot-batch/plan")
+def batch_plan(body: BatchPlanIn, db: Session = Depends(get_db)):
+    """Free and automatic: called as lines are ticked; one plan per line (an existing one is reused), its first frames,
+    audio cut and rig render prepared by a local job. The action is filled in from the notes and the line itself."""
+    ep = db.get(Episode, body.episode_id)
+    if ep is None or ep.source != "audio":
+        raise HTTPException(404, "an audio-first episode is needed")
+    made = 0
+    for x in body.lines:
+        _, sc, _ = _episode_line(db, ep.id, x.scene_id, x.line)
+        _, new = plan_for_line(db, ep, sc, x.line)
+        made += new
+    db.commit()
+    return {"queued": made, **batch_view(db, ep.id)}
+
+
+def batch_view(db: Session, eid: int) -> dict:
+    """The episode's latest plan per line (progress, actions, first frames, results) and the budget."""
+    from . import fal
+    latest: dict[tuple, dict] = {}
+    for p in sorted(records(db).values(), key=lambda p: p.get("created", 0)):
+        if p["episode_id"] == eid:
+            latest[(p["scene_id"], p["line"])] = p
+    led = fal.spent(db)
+    plans = [view(db, p) for p in latest.values()]
+    return {"plans": plans, "ready": sum(1 for p in plans if p["status"] == "ready"),
+            "preparing": sum(1 for p in plans if p["status"] == "preparing"),
+            "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db), "budget_usd": fal.budget(db)}
+
+
+@router.get("/motion/shot-batch")
+def get_batch(episode_id: int, db: Session = Depends(get_db)):
+    return batch_view(db, episode_id)
+
+
+class ActionIn(BaseModel):
+    action: str = Field(min_length=3, max_length=400)
+
+
+@router.put("/motion/shot/{pid}/action")
+def set_action(pid: str, body: ActionIn, db: Session = Depends(get_db)):
+    """Free: the owner's edit of one line's action (used by every model's request for that line)."""
+    recs = records(db)
+    p = recs.get(pid)
+    if not p:
+        raise HTTPException(404, "no such plan")
+    if any((r or {}).get("status") in ("queued", "running") for r in p["results"].values()):
+        raise HTTPException(409, "not while a clip of this line is running")
+    p["action"] = body.action.strip()
+    save(db, recs)
+    db.commit()
+    return view(db, p)
+
+
+class BatchIn(BaseModel):
+    plan_ids: list[str] = Field(default_factory=list, max_length=60)
+    models: list[str] = Field(default_factory=list, max_length=4)
+    framing: dict[str, str] = Field(default_factory=dict)     # optional override per model, for every selected line
+    confirm: bool = False
+    expected_usd: float | None = None                          # the total the owner saw (refused if it changed)
+
+
+def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float]], list[str]]:
+    recs = records(db)
+    paid = [m for m in body.models if m in MODELS]
+    bad = [m for m in body.models if m not in MODELS and m != "rig"]
+    if bad:
+        raise HTTPException(422, f"unknown model: {', '.join(bad)}")
+    for m, f in body.framing.items():
+        if m not in MODELS or f not in FRAMINGS:
+            raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
+    clips, skipped = [], []
+    for pid in body.plan_ids:
+        p = recs.get(pid)
+        if not p:
+            raise HTTPException(404, f"no such plan {pid}")
+        for m in paid:
+            r = p["results"].get(m) or {}
+            if p.get("status") != "ready":
+                skipped.append(f"line {p['line'] + 1} ({p['text'][:30]}): still preparing")
+            elif r.get("status") in ("queued", "running", "done"):
+                skipped.append(f"line {p['line'] + 1}, {MODELS[m]['label']}: already {r['status']}")
+            else:
+                clips.append((pid, m, estimate(m, p["seconds"])["usd"]))
+    return clips, skipped
+
+
+@router.post("/motion/shot-batch/run")
+def batch_run(body: BatchIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Without confirm: the ONE summary (exact clips, total estimate, budget and approved-but-uncharged runs against the
+    cap). With confirm (and the total the owner saw): queue exactly those clips. The rig renders are free and already made."""
+    from . import fal
+    clips, skipped = _batch_clips(db, body)
+    total = round(sum(c[2] for c in clips), 4)
+    led = fal.spent(db)
+    summary = {"clips": len(clips), "total_usd": total, "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db),
+               "budget_usd": fal.budget(db), "fits": led["total"] + pending_usd(db) + total <= fal.budget(db) + 1e-9,
+               "rig": "rig" in body.models, "skipped": skipped,
+               "items": [{"plan_id": pid, "model": m, "usd": u} for pid, m, u in clips]}
+    if not body.confirm:
+        return summary
+    if body.expected_usd is None or abs(body.expected_usd - total) > 1e-6:
+        raise HTTPException(409, f"the selection changed since the summary (now {len(clips)} clip(s), ${total:.2f}): check it again")
+    if not clips:
+        raise HTTPException(409, "nothing to run")
+    recs = records(db)
+    if any(not view(db, recs[pid]).get("urls_ok") for pid, _, _ in clips):
+        raise HTTPException(409, "fal.ai fetches the first frames and the line audio from the studio: set PUBLIC_URL on the server first")
+    check_cap(db, total)
+    for pid in {pid for pid, _, _ in clips}:
+        if body.framing:
+            recs = records(db)
+            recs[pid]["framing"] = {**(recs[pid].get("framing") or {}), **body.framing}
+            save(db, recs)
+    jobs = [approve(db, pid, m, user).id for pid, m, _ in clips]
+    db.add(Event(episode_id=recs[clips[0][0]]["episode_id"], kind="episode",
+                 message=f"Shot comparison batch approved by {user}: {len(clips)} clip(s), estimated ${total:.2f}"))
+    db.commit()
+    return {**summary, "queued": len(jobs)}
 
 
 # ------------------------------------------------------------------ media helpers
