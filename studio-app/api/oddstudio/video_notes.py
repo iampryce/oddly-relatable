@@ -34,9 +34,11 @@ SETTINGS = ("office", "meeting room", "kitchen", "living room", "bedroom", "bath
             "restaurant", "cafe", "bar", "shop", "supermarket", "street", "car", "bus", "train", "park", "garden",
             "beach", "school", "classroom", "hospital", "gym", "stage", "studio", "lobby", "elevator", "outdoors",
             "indoors", "other")
+FURNITURE = ("long table", "round table", "desk", "sofa", "counter", "bed", "bench", "none")
+TIME_OF_DAY = ("daytime", "evening", "night")
 ROLE = re.compile(r"^(speaker|reactor ([1-9]))$")
 TOP_KEYS = {"ranges"}
-RANGE_KEYS = {"start", "end", "shot", "camera", "setting", "roles"}
+RANGE_KEYS = {"start", "end", "shot", "camera", "setting", "furniture", "time", "roles"}
 ROLE_KEYS = {"role", "position", "pose", "facing", "emotion"}
 
 # Emotion words -> the rig's expressions (used by the deterministic scene split for reactions)
@@ -91,10 +93,11 @@ def prompt(times: list[float]) -> str:
         "You are helping stage an ORIGINAL 2D animated comedy scene. The frames below come from a reference video; we "
         "will never copy it. Describe only how the scene is staged, as anonymous roles.\n"
         f"Frames ({when}; times in seconds from the start of the part being used).\n"
-        "Return JSON only: {\"ranges\": [{\"start\": s, \"end\": s, \"shot\": ..., \"camera\": ..., \"setting\": ..., "
+        "Return JSON only: {\"ranges\": [{\"start\": s, \"end\": s, \"shot\": ..., \"camera\": ..., \"setting\": ..., \"furniture\": ..., \"time\": ..., "
         "\"roles\": [{\"role\": ..., \"position\": ..., \"pose\": ..., \"facing\": ..., \"emotion\": ...}]}]}\n"
         "Group consecutive frames with the same staging into one range. Allowed values ONLY:\n"
         f"- shot: {', '.join(SHOTS)}\n- camera: {', '.join(CAMERA)}\n- setting: {', '.join(SETTINGS)}\n"
+        f"- furniture (the main piece in view): {', '.join(FURNITURE)}\n- time: {', '.join(TIME_OF_DAY)}\n"
         "- role: \"speaker\" (whoever seems to be talking) or \"reactor 1\" .. \"reactor 9\" for the others\n"
         f"- position: {', '.join(POSITIONS)}\n- pose: {', '.join(POSES)}\n"
         f"- facing: {', '.join(FACING_FIXED)}, or another role (e.g. \"speaker\", \"reactor 2\")\n"
@@ -140,7 +143,8 @@ def clean_notes(raw, duration: float) -> tuple[list[dict], int]:
             redacted += 1
             continue
         rng = {"start": round(start, 2), "end": round(end, 2)}
-        for key, allowed in (("shot", SHOTS), ("camera", CAMERA), ("setting", SETTINGS)):
+        for key, allowed in (("shot", SHOTS), ("camera", CAMERA), ("setting", SETTINGS), ("furniture", FURNITURE),
+                             ("time", TIME_OF_DAY)):
             if key in r:
                 v = str(r[key] or "").strip().lower()
                 if v in allowed:
@@ -211,7 +215,9 @@ def for_line(ranges: list[dict], line: dict) -> dict | None:
 def describe(r: dict) -> str:
     """One readable line for the writer's prompt (text only; every value is from the enumerations)."""
     parts = [f"shot {r['shot']}" if r.get("shot") else "", f"camera {r['camera']}" if r.get("camera") else "",
-             f"setting {r['setting']}" if r.get("setting") else ""]
+             f"setting {r['setting']}" if r.get("setting") else "",
+             f"furniture {r['furniture']}" if r.get("furniture") and r["furniture"] != "none" else "",
+             r.get("time", "")]
     for ro in r.get("roles", []):
         bits = [ro.get(k) for k in ("position", "pose") if ro.get(k)]
         if ro.get("facing"):
@@ -220,6 +226,37 @@ def describe(r: dict) -> str:
             bits.append(ro["emotion"])
         parts.append(f"{ro['role']}: {', '.join(bits)}" if bits else ro["role"])
     return "; ".join(p for p in parts if p)
+
+
+# The proposed set, assembled by a fixed sentence from the notes' list values only (owner decision 2026-11-21: no AI
+# wording for audio episodes; the owner edits the text before anything is generated)
+SENTENCE_WORDS = {"an", "original", "room", "with", "a", "people", "person", "seated", "standing", "facing", "each", "other",
+                  "the", "mood", "is"}
+
+
+def _most(values):
+    values = [v for v in values if v]
+    return max(dict.fromkeys(values), key=lambda v: (values.count(v), -values.index(v))) if values else ""
+
+
+def proposal_text(ranges: list[dict]) -> str:
+    """e.g. "An original dining room with a long table, daytime, 4 people seated facing each other; the mood is tense."
+    Every word is either a fixed word of this sentence or a value from the notes' lists (never free text)."""
+    setting = _most(r.get("setting") for r in ranges if r.get("setting") not in ("other", "indoors", "outdoors"))
+    furniture = _most(r.get("furniture") for r in ranges if r.get("furniture") != "none")
+    time = _most(r.get("time") for r in ranges)
+    seated = max((sum(1 for ro in r.get("roles", []) if ro.get("pose") == "seated") for r in ranges), default=0)
+    standing = max((sum(1 for ro in r.get("roles", []) if ro.get("pose") in ("standing", "leaning")) for r in ranges), default=0)
+    facing = any(ro.get("facing", "").startswith(("speaker", "reactor")) for r in ranges for ro in r.get("roles", []))
+    mood = _most(ro.get("emotion") for r in ranges for ro in r.get("roles", []))
+    text = f"An original {setting or 'room'}" + (f" with a {furniture}" if furniture else "") + (f", {time}" if time else "")
+    if seated:
+        text += f", {seated} {'person' if seated == 1 else 'people'} seated" + (" facing each other" if facing and seated > 1 else "")
+    if standing:
+        text += f", {standing} {'person' if standing == 1 else 'people'} standing"
+    if mood:
+        text += f"; the mood is {mood}"
+    return text + "."
 
 
 def summary(ranges: list[dict]) -> dict:

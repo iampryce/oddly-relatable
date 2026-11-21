@@ -81,7 +81,7 @@ class EpisodeSetTest(unittest.TestCase):
         opts = self.c.get(f"/api/episodes/{eid}/set-options").json()
         self.assertEqual(opts["current"], "office")
         self.assertEqual(sorted(o["id"] for o in opts["options"]), [LIVING, "office"])
-        self.assertEqual(opts["candidates"], [{"id": "kitchen", "label": "Kitchen"}])
+        self.assertEqual([(c["id"], c["label"], c["for_this_episode"]) for c in opts["candidates"]], [("kitchen", "Kitchen", False)])
         self.assertTrue(all(o["thumbnail"] for o in opts["options"]), "every option has a thumbnail")
 
     def test_reuse_is_visible_and_deliberate(self):
