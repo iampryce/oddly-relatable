@@ -6,10 +6,11 @@ The uploaded audio is the voice track: no voice provider is used for these lines
                                                      (append-only Review record "audio_rights")
   2. upload   PUT  /api/episodes/{id}/audio         raw request body (audio/* or video/*), owner upload only: nothing
                                                      here downloads media from other sites. Stage 1b: a video is only a
-                                                     carrier: job `audio_media_prepare` extracts its audio track and
-                                                     deletes the original (the picture is never reused); with ?hints=1 a
-                                                     few frames give casting/setting hints (job `audio_media_hints`:
-                                                     people count, setting, mood only) and are deleted right after.
+                                                     carrier: job `audio_media_prepare`
+                                                     extracts its audio track and deletes the original (the picture is
+                                                     never reused); with ?hints=1 a few frames of the part the episode
+                                                     uses become TEXT-ONLY staging notes (job `audio_video_notes`,
+                                                     video_notes.py) and are deleted right after.
      trim     POST /api/episodes/{id}/audio/trim    Shorts only: the 60 s window of a longer recording
   3. transcribe (worker job `audio_transcribe`)    the selected transcription provider (word timestamps), split into
                                                      timed lines (pauses, sentence ends, maximum length)
@@ -56,7 +57,7 @@ MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "video/x-matroska": ".mkv",
                "video/x-m4v": ".m4v"}
 # Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
-KEEP_KEYS = ("source_media", "media_hints", "trim")
+KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes")
 RIGHTS_TEXT = "I have the right to use this recording: its audio and any video it came with."
 AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
                "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",
@@ -154,6 +155,8 @@ def state(db: Session, ep: Episode) -> dict:
                            if tr.get("lines") is not None else None),
             # Stage 1b: the uploaded media (an extracted video's audio), the Short's 60 s window, the video hints
             "source_media": tr.get("source_media"), "trim": tr.get("trim"), "media_hints": tr.get("media_hints"),
+            # "reference, not copy": text-only staging notes from the video, aligned to the recorded lines
+            "video_notes": _notes_view(tr),
             "needs_trim": bool((tr.get("source_media") or {}).get("needs_trim")),
             "window_seconds": MAX_SECONDS["short"] if ep.format == "short" else None,
             "full_audio": _full_audio(db, ep),
@@ -174,6 +177,14 @@ def state(db: Session, ep: Episode) -> dict:
             "characters": [{"key": c.key, "name": c.name, "scope": c.scope, "voice_style": c.voice_style}
                            for c in sorted(keys.values(), key=lambda c: c.id)
                            if c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id]}
+
+
+def _notes_view(tr: dict) -> dict | None:
+    from . import video_notes as VN
+    notes = tr.get("video_notes")
+    if not notes:
+        return None
+    return {**{k: v for k, v in notes.items() if k != "ranges"}, "ranges": VN.align(notes.get("ranges", []), tr.get("lines", []))}
 
 
 def _full_audio(db: Session, ep: Episode) -> dict | None:
@@ -272,11 +283,14 @@ def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, sec
 
 
 @router.put("/episodes/{eid}/audio")
-async def upload_audio(eid: int, request: Request, hints: bool = False, db: Session = Depends(get_db)):
+async def upload_audio(eid: int, request: Request, hints: bool = False, start: float | None = None, end: float | None = None,
+                       db: Session = Depends(get_db)):
     """The audio or video file is the raw request body (Content-Type audio/* or video/*), streamed to disk with a size
     cap after a free-space check. Audio is stored right away. A video is checked here (it must have an audio track) and
-    handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the video; `hints` (video only)
-    also samples a few frames for the casting and setting hints, deleted as soon as the hints are made."""
+    handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the video.
+    `hints` (video only): text-only staging notes from frames of the part the episode uses (video_notes.py); a Short
+    longer than 60 s then needs its window (`start`, `end`) with the upload, so only that part is analysed. The frames
+    are deleted as soon as the notes are made."""
     ep = audio_episode(db, eid)
     gate(ep, "upload_audio")
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -326,16 +340,29 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, db: Sess
             limit = MAX_SOURCE_SECONDS if ep.format == "short" else MAX_SECONDS[ep.format]
             if seconds is not None and seconds > limit + 0.5:
                 raise HTTPException(422, f"the video runs {seconds:.0f} s; a {ep.format} episode allows at most {limit} s")
+            window = None
+            if start is not None or end is not None:
+                if ep.format != "short":
+                    raise HTTPException(422, "a window is for Shorts only (a long episode uses the whole recording)")
+                if start is None or end is None:
+                    raise HTTPException(422, "give the window's start and end")
+                check_window(start, end, seconds)
+                window = {"start": round(start, 3), "end": round(end, 3)}
+            elif hints and ep.format == "short" and seconds is not None and seconds > MAX_SECONDS["short"] + 0.5:
+                raise HTTPException(422, f"the video runs {seconds:.0f} s: choose the Short's 60 s window with the upload, "
+                                         "so only that part of the video is analysed for the notes")
             ep.audio_asset_id, ep.last_error = None, ""
             ep.audio_transcript = {"source_media": {"type": "video", "preparing": True, "hints_requested": bool(hints)}}
             set_stage(ep, "audio_preparing")
             db.add(Event(episode_id=ep.id, kind="episode", message=f"Video uploaded ({size / 1048576:.1f} MB): extracting its audio"
-                                                                  + (" and sampling frames for hints" if hints else "")))
+                                                                  + (" and sampling frames for the video notes" if hints else "")))
             db.commit()
             keep_for_worker = True
             enqueue(db, "audio_media_prepare", episode_id=ep.id, revision=ep.revision,
-                    payload={"upload": tmp.name, "hints": bool(hints), "seconds": seconds})
+                    payload={"upload": tmp.name, "hints": bool(hints), "seconds": seconds, "window": window})
             return state(db, ep)
+        if start is not None or end is not None:
+            raise HTTPException(422, "for an audio file, choose the window after the upload (Audio tab)")
         msg = accept_audio(db, ep, tmp, ctype, ext, info["duration"], {"type": "audio"})
     finally:
         if not keep_for_worker:
@@ -352,26 +379,28 @@ class TrimIn(BaseModel):
     end: float = Field(gt=0)
 
 
-@router.post("/episodes/{eid}/audio/trim")
-def trim_audio(eid: int, body: TrimIn, db: Session = Depends(get_db)):
-    """Shorts only: the episode uses the window [start, end) of the uploaded recording (at most 60 s). The whole
-    recording is kept, so the window can be moved later; a new window is transcribed again (labels start over)."""
-    ep = audio_episode(db, eid)
-    gate(ep, "trim_audio")
-    if ep.format != "short":
-        raise HTTPException(422, "trimming is for Shorts only (a long episode uses the whole recording)")
+def check_window(start: float, end: float, duration: float | None) -> None:
+    """A Short's window: at most 60 s, inside the recording (HTTPException 422 otherwise)."""
+    window = MAX_SECONDS["short"]
+    if end <= start:
+        raise HTTPException(422, "the window must end after it starts")
+    if end - start > window + 0.05:
+        raise HTTPException(422, f"a Short's window is at most {window} s (this one is {end - start:.1f} s)")
+    if duration and end > float(duration) + 0.05:
+        raise HTTPException(422, f"the window ends after the recording ({float(duration):.1f} s)")
+
+
+def apply_window(db: Session, ep: Episode, start: float, end: float) -> None:
+    """Cut the window [start, end) from the whole recording as the episode's audio and transcribe it. Video notes move
+    with the window (their times are the audio's); notes outside the new window are dropped."""
+    from . import video_notes as VN
     tr = dict(ep.audio_transcript or {})
     sm = dict(tr.get("source_media") or {})
     full = db.get(Asset, sm.get("full_asset_id")) if sm.get("full_asset_id") else None
     if full is None:
         raise HTTPException(409, "upload the recording first")
-    window, duration = MAX_SECONDS["short"], sm.get("duration")
-    if body.end <= body.start:
-        raise HTTPException(422, "the window must end after it starts")
-    if body.end - body.start > window + 0.05:
-        raise HTTPException(422, f"a Short's window is at most {window} s (this one is {body.end - body.start:.1f} s)")
-    if duration and body.end > float(duration) + 0.05:
-        raise HTTPException(422, f"the window ends after the recording ({float(duration):.1f} s)")
+    duration = sm.get("duration")
+    check_window(start, end, duration)
     try:
         media.check_free_space(uploads_dir(), int(full.size or 0))
     except OSError as e:
@@ -383,26 +412,96 @@ def trim_audio(eid: int, body: TrimIn, db: Session = Depends(get_db)):
     try:
         storage().get_to_file(full.storage_key, src)
         try:
-            out = media.cut_audio(src, out, body.start, min(body.end, float(duration) if duration else body.end))
+            out = media.cut_audio(src, out, start, min(end, float(duration) if duration else end))
         except media.MediaToolMissing as e:
             raise HTTPException(503, str(e))
         except media.MediaError as e:
             raise HTTPException(422, str(e))
         a = store_asset(db, ep_id=ep.id, src=out, key=f"episodes/{ep.id}/source-audio-{sha256_file(out)[:12]}.wav",
                         kind="source-audio", content_type="audio/wav", revision=ep.revision,
-                        label=f"Short window {body.start:.1f}-{body.end:.1f} s ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
+                        label=f"Short window {start:.1f}-{end:.1f} s ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
     finally:
         src.unlink(missing_ok=True)
         out.unlink(missing_ok=True)
     sm["needs_trim"] = False
-    ep.audio_transcript = {k: v for k, v in {**tr, "source_media": sm, "trim": {"start": round(body.start, 3), "end": round(body.end, 3)}}.items()
-                           if k in KEEP_KEYS}
+    notes = tr.get("video_notes")
+    if notes:
+        notes = {**notes, "ranges": VN.shift(notes.get("ranges", []), float(notes.get("base", 0.0)) - start, end - start),
+                 "base": round(start, 3), "length": round(end - start, 3)}
+    ep.audio_transcript = {k: v for k, v in {**tr, "source_media": sm, "video_notes": notes,
+                                             "trim": {"start": round(start, 3), "end": round(end, 3)}}.items()
+                           if k in KEEP_KEYS and v is not None}
     ep.audio_asset_id, ep.last_error = a.id, ""
     set_stage(ep, "audio_transcribing")
-    db.add(Event(episode_id=ep.id, kind="episode", message=f"Short window chosen: {body.start:.1f}-{body.end:.1f} s; transcribing it"))
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Short window chosen: {start:.1f}-{end:.1f} s; transcribing it"))
     db.commit()
     enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": a.id})
+
+
+@router.post("/episodes/{eid}/audio/trim")
+def trim_audio(eid: int, body: TrimIn, db: Session = Depends(get_db)):
+    """Shorts only: the episode uses the window [start, end) of the uploaded recording (at most 60 s). The whole
+    recording is kept, so the window can be moved later; a new window is transcribed again (labels start over)."""
+    ep = audio_episode(db, eid)
+    gate(ep, "trim_audio")
+    if ep.format != "short":
+        raise HTTPException(422, "trimming is for Shorts only (a long episode uses the whole recording)")
+    apply_window(db, ep, body.start, body.end)
     return state(db, ep)
+
+
+class NotesIn(BaseModel):
+    ranges: list[dict] = Field(default_factory=list, max_length=40)
+
+
+@router.put("/episodes/{eid}/audio/video-notes")
+def edit_video_notes(eid: int, body: NotesIn, db: Session = Depends(get_db)):
+    """The owner's edit of the video notes (same schema as the model's; anything outside it is refused, not kept)."""
+    from . import video_notes as VN
+    ep = audio_episode(db, eid)
+    gate(ep, "edit_video_notes")
+    tr = dict(ep.audio_transcript or {})
+    notes = tr.get("video_notes")
+    if not notes:
+        raise HTTPException(409, "this episode has no video notes")
+    strip = [{k: v for k, v in r.items() if k != "line_ids"} for r in body.ranges]   # the view adds line ids
+    ranges, redacted = VN.clean_notes({"ranges": strip}, float(notes.get("length") or 0) or 1e9)
+    if redacted or len(ranges) != len(body.ranges):
+        raise HTTPException(422, "the notes can only hold the listed values (shot, camera, setting, roles with position, "
+                                 "pose, facing and emotion) and ranges inside the clip")
+    tr["video_notes"] = {**notes, "ranges": ranges, "edited": True}
+    tr["media_hints"] = {**(tr.get("media_hints") or {}), **VN.summary(ranges)}
+    ep.audio_transcript = tr
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Video notes edited ({len(ranges)} range(s))"))
+    db.commit()
+    return state(db, ep)
+
+
+@router.delete("/episodes/{eid}/audio/video-notes")
+def clear_video_notes(eid: int, db: Session = Depends(get_db)):
+    """Remove the video notes (and the hints derived from them); the scenes are then built without them."""
+    ep = audio_episode(db, eid)
+    gate(ep, "edit_video_notes")
+    tr = dict(ep.audio_transcript or {})
+    tr.pop("video_notes", None)
+    if (tr.get("media_hints") or {}).get("from") == "video notes":
+        tr.pop("media_hints", None)
+    ep.audio_transcript = tr
+    db.add(Event(episode_id=ep.id, kind="episode", message="Video notes cleared"))
+    db.commit()
+    return state(db, ep)
+
+
+@router.get("/audio/video-notes/estimate")
+def video_notes_estimate(seconds: float, db: Session = Depends(get_db)):
+    """Before an upload: how many frames the notes would use for `seconds` of video and what the call should cost with
+    the configured vision provider (an estimate from list prices)."""
+    from . import video_notes as VN
+    try:
+        cfg = hints_vision_config(db)
+    except ValueError as e:
+        return {"configured": False, "frames": len(VN.frame_times(0.0, max(0.0, seconds))), "message": str(e)}
+    return VN.estimate(max(0.0, min(seconds, MAX_SECONDS["long"])), cfg["provider"], cfg.get("model", ""))
 
 
 @router.post("/episodes/{eid}/audio/transcribe")
@@ -756,8 +855,9 @@ def audio_transcribe(ctx: Ctx) -> dict:
 
 @task
 def audio_media_prepare(ctx: Ctx) -> dict:
-    """A video upload: extract its audio track, delete the original video (always, even on failure), optionally sample
-    frames for the hints (job `audio_media_hints`), then store the audio like an audio upload."""
+    """A video upload: extract its audio track, optionally sample frames for the video notes (only inside the chosen
+    window, or the whole clip; job `audio_video_notes`), delete the original video (always, even on failure), then store
+    the audio like an audio upload and apply the window."""
     db, job = ctx.db, ctx.job
     ep = db.get(Episode, job.episode_id)
     p = job.payload or {}
@@ -773,10 +873,13 @@ def audio_media_prepare(ctx: Ctx) -> dict:
             out = media.extract_audio(src, out)
             ctx.log("Audio track extracted from the video")
             frames = []
+            win = p.get("window") or {"start": 0.0, "end": float(p.get("seconds") or media.probe(out)["duration"] or 0)}
             if p.get("hints"):
-                frames_dir = uploads_dir() / f"hints-{ep.id}-{uuid.uuid4().hex[:8]}"
-                frames = media.sample_frames(src, frames_dir, p.get("seconds"))
-                ctx.log(f"{len(frames)} frame(s) sampled for the hints (deleted after use)")
+                from . import video_notes as VN
+                frames_dir = uploads_dir() / f"notes-{ep.id}-{uuid.uuid4().hex[:8]}"
+                frames = media.sample_frames_at(src, frames_dir, VN.frame_times(win["start"], win["end"]))
+                ctx.log(f"{len(frames)} frame(s) sampled in {win['start']:.1f}-{win['end']:.1f} s for the video notes "
+                        "(deleted after use)")
         finally:
             src.unlink(missing_ok=True)       # the original video is never kept: only its audio is used
         ctx.log("Original video deleted")
@@ -790,15 +893,22 @@ def audio_media_prepare(ctx: Ctx) -> dict:
             raise media.MediaError(str(e.detail)) from None
         db.add(Event(episode_id=ep.id, kind="episode", message=msg))
         db.commit()
-        if ep.audio_asset_id:
+        full_id = ep.audio_transcript["source_media"]["full_asset_id"]
+        if p.get("window"):
+            try:
+                apply_window(db, ep, p["window"]["start"], p["window"]["end"])   # transcribes the window
+            except HTTPException as e:
+                raise media.MediaError(str(e.detail)) from None
+        elif ep.audio_asset_id:
             enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": ep.audio_asset_id})
         if frames:
-            full_id = ep.audio_transcript["source_media"]["full_asset_id"]
-            enqueue(db, "audio_media_hints", episode_id=ep.id, revision=ep.revision,
-                    payload={"frames": frames_dir.name, "full_asset_id": full_id})
-            frames_dir = None                 # handed to the hints job, which deletes it
+            enqueue(db, "audio_video_notes", episode_id=ep.id, revision=ep.revision,
+                    payload={"frames": frames_dir.name, "full_asset_id": full_id, "base": win["start"],
+                             "length": round(win["end"] - win["start"], 3),
+                             "times": {f.name: round(t - win["start"], 2) for f, t in frames}})
+            frames_dir = None                 # handed to the notes job, which deletes it
         elif p.get("hints"):
-            db.add(Event(episode_id=ep.id, kind="episode", message="No frames could be read from the video: no hints"))
+            db.add(Event(episode_id=ep.id, kind="episode", message="No frames could be read from the video: no notes"))
             db.commit()
         return {"audio_asset_id": ep.audio_asset_id, "needs_trim": ep.audio_asset_id is None, "frames": len(frames)}
     except (media.MediaError, media.MediaToolMissing) as e:
@@ -814,29 +924,7 @@ def audio_media_prepare(ctx: Ctx) -> dict:
             shutil.rmtree(frames_dir, ignore_errors=True)
 
 
-HINTS_SYSTEM = ("You help set up a scene for an adult 2D animated comedy. You are shown a few frames of the owner's video "
-                "ONLY to suggest how many characters the scene needs, what kind of place it is and its mood. Never describe, "
-                "identify or name anyone; never mention faces, bodies, clothing, age, gender, ethnicity or any other trait of "
-                "a person; never read out text, logos or brands. Reply with one JSON object only.")
-HINTS_PROMPT = ('From these frames give: the largest number of people visible in any one frame; the kind of place in at '
-                'most 6 generic words (e.g. "small office, daytime", "kitchen at night"); the mood in at most 4 words. '
-                'JSON: {"people_count": 0, "setting": "", "mood": ""}')
-
-
-def clean_hints(ans: dict) -> dict:
-    """Only the three allowed facts, short and plain: anything else in the model's answer is dropped."""
-    def short(v, words: int, chars: int) -> str:
-        text = re.sub(r"\s+", " ", re.sub(r"[^\w\s,'&/-]", " ", str(v or ""))).strip()
-        return " ".join(text.split()[:words])[:chars]
-    try:
-        n = int(ans.get("people_count"))
-        n = n if 0 <= n <= 20 else None
-    except (TypeError, ValueError):
-        n = None
-    return {"people_count": n, "setting": short(ans.get("setting"), 6, 60), "mood": short(ans.get("mood"), 4, 40)}
-
-
-API_VISION = ("openai", "anthropic")    # the hints use the studio's API vision provider only, never a Codex login
+API_VISION = ("openai", "anthropic")    # the video notes use the studio's API vision provider only, never a Codex login
 
 
 def hints_vision_config(db: Session) -> dict:
@@ -845,7 +933,7 @@ def hints_vision_config(db: Session) -> dict:
     from .settings_store import get_section
     cfg = dict(get_section(db, "vision"))
     if cfg.get("provider") not in API_VISION:
-        raise ValueError("video hints need an API vision provider: set Settings > Video and visual analysis to "
+        raise ValueError("video notes need an API vision provider: set Settings > Video and visual analysis to "
                          "OpenAI or Anthropic (the Codex login is never used for them)")
     if cfg.get("fallback") not in API_VISION:
         cfg["fallback"] = "none"
@@ -853,10 +941,12 @@ def hints_vision_config(db: Session) -> dict:
 
 
 @task
-def audio_media_hints(ctx: Ctx) -> dict:
-    """Casting and setting hints from the sampled frames (people count, setting, mood only), asked of the studio's API
-    vision provider (its token usage is recorded); the frames are deleted when this job ends, whatever happens."""
+def audio_video_notes(ctx: Ctx) -> dict:
+    """Text-only staging notes from the sampled frames, asked once of the studio's API vision provider (token usage
+    recorded). Only the schema survives (video_notes.clean_notes); the frames are deleted when this job ends,
+    whatever happens."""
     from . import analysis
+    from . import video_notes as VN
     db, job = ctx.db, ctx.job
     ep = db.get(Episode, job.episode_id)
     p = job.payload or {}
@@ -870,25 +960,31 @@ def audio_media_hints(ctx: Ctx) -> dict:
         try:
             cfg = hints_vision_config(db)
         except ValueError as e:
-            db.add(Event(episode_id=ep.id, kind="episode", message=f"No hints from the video: {e}"))
+            db.add(Event(episode_id=ep.id, kind="episode", message=f"No video notes: {e}"))
             db.commit()
             return {"skipped": str(e)}
+        times = [float((p.get("times") or {}).get(f.name, 0.0)) for f in frames]
         analysis.last_vision_usage.clear()
-        ans = analysis.analyse_images(cfg, frames, HINTS_SYSTEM + "\n\n" + HINTS_PROMPT)
+        ans = analysis.analyse_images(cfg, frames, VN.prompt(times))
         usage = dict(analysis.last_vision_usage)
-        hints = clean_hints(ans if isinstance(ans, dict) else {})
+        length = float(p.get("length") or 0) or (max(times) + VN.FRAME_EVERY)
+        ranges, redacted = VN.clean_notes(ans, length)
         db.refresh(ep)
         tr = dict(ep.audio_transcript or {})
-        tr["media_hints"] = {**hints, "frames": len(frames), "job_id": job.id, "usage": usage}
+        tr["video_notes"] = {"ranges": ranges, "base": float(p.get("base") or 0.0), "length": round(length, 3),
+                             "frames": len(frames), "redacted": redacted, "usage": usage, "job_id": job.id,
+                             "edited": False, "source": "video frames (deleted)"}
+        tr["media_hints"] = {**VN.summary(ranges), "frames": len(frames), "job_id": job.id, "usage": usage,
+                             "from": "video notes"}
         ep.audio_transcript = tr
-        people = "?" if hints["people_count"] is None else hints["people_count"]
-        db.add(Event(episode_id=ep.id, kind="episode", message=f"Hints from the video: {people} people, "
-                                                              f"{hints['setting'] or '?'}, {hints['mood'] or '?'} (frames deleted)"))
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"Video notes: {len(ranges)} range(s) from {len(frames)} "
+                                                              f"frame(s); {redacted} value(s) outside the notes' schema "
+                                                              "removed; frames deleted"))
         db.commit()
         if usage:
             ctx.log(f"Vision call: {usage.get('provider')} {usage.get('model')}, {usage.get('input_tokens')} input / "
                     f"{usage.get('output_tokens')} output tokens")
-        return {**hints, "frames": len(frames), "usage": usage}
+        return {"ranges": len(ranges), "frames": len(frames), "redacted": redacted, "usage": usage}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

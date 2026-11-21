@@ -16,8 +16,7 @@ from pathlib import Path
 from .config import get_settings
 
 MIN_FREE_BYTES = 1024 ** 3          # always leave 1 GB free on the work disk after an upload and its extraction
-FRAME_COUNT = 6                     # frames sampled for the hints (small JPEGs, deleted after use)
-FRAME_WIDTH = 512
+FRAME_WIDTH = 512                   # px: frames for the video notes are downscaled (small JPEGs, deleted after use)
 
 
 class MediaError(ValueError):
@@ -98,16 +97,15 @@ def cut_audio(src: Path, dst: Path, start: float, end: float) -> Path:
     return dst
 
 
-def sample_frames(src: Path, folder: Path, duration: float | None, count: int = FRAME_COUNT) -> list[Path]:
-    """`count` small JPEG frames spread over the video (for the hints only; the caller deletes the folder)."""
+def sample_frames_at(src: Path, folder: Path, times: list[float]) -> list[tuple[Path, float]]:
+    """Small JPEG frames at the given times (seconds in the video), downscaled to FRAME_WIDTH: for the video notes
+    only; the caller deletes the folder. Returns (file, time) for every frame that could be read."""
     folder.mkdir(parents=True, exist_ok=True)
-    d = duration or 1.0
     out = []
-    for k in range(count):
-        t = d * (k + 0.5) / count
-        f = folder / f"frame-{k + 1}.jpg"
+    for k, t in enumerate(times):
+        f = folder / f"frame-{k + 1:02d}.jpg"
         r = _run([_ffmpeg(), "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
                   "-vf", f"scale={FRAME_WIDTH}:-2", "-q:v", "5", str(f)], 120)
         if r.returncode == 0 and f.exists() and f.stat().st_size:
-            out.append(f)
+            out.append((f, t))
     return out

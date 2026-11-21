@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import {Suspense, useEffect, useState} from 'react';
 import {useRouter, useSearchParams} from 'next/navigation';
-import {api, isVideoFile, uploadAudio, when} from '@/lib/api';
+import {api, uploadAudio, when} from '@/lib/api';
+import VideoNotesOptions, {type NotesChoice} from '@/components/VideoNotesOptions';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 
@@ -67,12 +68,11 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
   const [file, setFile] = useState<File | null>(null);
   const [rights, setRights] = useState(false);
   const [source, setSource] = useState('');
-  const [hints, setHints] = useState(false);
+  const [notes, setNotes] = useState<NotesChoice>({notes: false, window: null, ready: true});
   const {busy, error, run} = useAction();
-  const video = isVideoFile(file);
   const create = () => run('create', async () => {
     const ep = await api('/audio-episodes', {body: {title, format, rights_confirmed: rights, rights_source: source || null}});
-    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: video && hints});
+    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: notes.notes, window: notes.window});
     onDone(ep.id);
   });
   return (
@@ -87,10 +87,7 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
       </div>
       <div className="field"><label htmlFor="afile">Audio or video file (audio: MP3, WAV, M4A, AAC, OGG, FLAC up to 60 MB; video: MP4, MOV, WEBM, MKV up to 250 MB)</label>
         <input id="afile" type="file" accept="audio/*,video/*" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
-      {video && <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
-        <input type="checkbox" style={{width: 'auto'}} checked={hints} onChange={e => setHints(e.target.checked)} />
-        Use the video for casting and setting hints (how many people, the kind of place, the mood; nobody is described). A few frames are read once and deleted.
-      </label>}
+      <VideoNotesOptions file={file} format={format} onChange={setNotes} />
       <div className="field"><label htmlFor="asrc">Where the audio comes from</label>
         <select id="asrc" value={source} onChange={e => setSource(e.target.value)}>
           <option value="">Choose…</option><option value="own_recording">My own recording</option><option value="licensed">Licensed</option>
@@ -100,7 +97,7 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
         I have the right to use this recording: its audio and any video it came with
       </label>
       <div className="row" style={{marginTop: 12}}>
-        <button className="btn primary" disabled={!!busy || !title || !file || !rights || !source} onClick={create}>{busy ? 'Uploading…' : 'Create and upload'}</button>
+        <button className="btn primary" disabled={!!busy || !title || !file || !rights || !source || !notes.ready} onClick={create}>{busy ? 'Uploading…' : 'Create and upload'}</button>
         <button className="btn" onClick={() => onDone()}>Cancel</button>
       </div>
     </div>
