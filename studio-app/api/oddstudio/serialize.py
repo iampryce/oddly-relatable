@@ -58,13 +58,14 @@ def review(r: Review) -> dict:
             "actor": r.actor, "created_at": ts(r.created_at)}
 
 
-def character(c: Character, assets: list[CharacterAsset]) -> dict:
+def character(c: Character, assets: list[CharacterAsset], rig_checks: dict | None = None) -> dict:
     return {"id": c.id, "key": c.key, "name": c.name, "description": c.description, "visual_description": c.visual_description,
             "bubble_style": c.bubble_style, "scope": c.scope, "episode_id": c.episode_id, "engine_character": c.engine_character,
             "expressions": c.expressions, "default_expression": c.default_expression, "locked": c.locked, "art_status": c.art_status,
             "voice": c.voice, "voice_style": c.voice_style, "voice_speed": c.voice_speed, "skin_tone": c.skin_tone or "",
             "assets": [{"id": a.id, "kind": a.kind, "expression": a.expression, "status": a.status, "width": a.width, "height": a.height,
                         "style_version": a.style_version or "v1",
+                        "rig_check": (rig_checks or {}).get(str(a.id)) if a.kind == "pose" and a.status == "approved" else None,
                         "url": storage().url(a.storage_key), "created_at": ts(a.created_at)} for a in assets]}
 
 

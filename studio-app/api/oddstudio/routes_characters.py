@@ -36,7 +36,9 @@ def get_char(db: Session, cid: int) -> Character:
 
 
 def out(db: Session, c: Character) -> dict:
-    return S.character(c, db.query(CharacterAsset).filter_by(character_id=c.id).order_by(CharacterAsset.id.desc()).all())
+    from . import rig_check
+    return S.character(c, db.query(CharacterAsset).filter_by(character_id=c.id).order_by(CharacterAsset.id.desc()).all(),
+                       rig_check.records(db))
 
 
 class CharacterIn(BaseModel):
@@ -196,7 +198,16 @@ def decide_pose(aid: int, body: DecisionIn, db: Session = Depends(get_db), user:
     refresh_art(db, c)
     db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: pose '{a.expression}' {a.status} by {user}"))
     db.commit()
+    if a.status == "approved":
+        queue_rig_check(db, c)
     return out(db, c)
+
+
+def queue_rig_check(db: Session, c: Character) -> None:
+    """Check at approval that the acting rig can be built from the approved poses (so a pose with hidden hands is
+    flagged now, not an hour into a render). The result shows on the pose cards; it never changes an approval."""
+    if not c.locked and c.art_status == "approved":
+        enqueue(db, "rig_check", episode_id=c.episode_id, character_id=c.id)
 
 
 class SheetIn(BaseModel):
@@ -303,6 +314,8 @@ def decide_sheet(cid: int, body: DecisionIn, db: Session = Depends(get_db), user
     db.add(Event(episode_id=c.episode_id, kind="approval" if body.decision == "approve" else "character",
                  message=f"{c.name}: expression sheet {body.decision}d by {user} ({len(pending)} poses)"))
     db.commit()
+    if body.decision == "approve":
+        queue_rig_check(db, c)
     return out(db, c)
 
 
