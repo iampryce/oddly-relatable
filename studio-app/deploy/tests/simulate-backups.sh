@@ -38,6 +38,8 @@ if [[ "\$1 \$2" == "system df" ]]; then
   exit 0
 fi
 [[ "\$1 \$2" == "builder prune" ]] && { echo "\$args" >> "$SIM/prune.log"; exit 0; }
+[[ "\$1" == ps && "\$args" == *Names* ]] && { echo oddstudio-api-1; exit 0; }
+[[ "\$1" == exec ]] && { echo "\$args" >> "$SIM/exec.log"; echo "bin: 0 item(s) in the Bin"; exit 0; }
 case "\$1 \$2" in "ps --format") echo "oddstudio-api:r1" ;; "images oddstudio-api"|"images oddstudio-web") echo r1 ;; esac
 exit 0
 EOF
@@ -145,6 +147,14 @@ check 'grep -q "^backups:" <<< "$out" && grep -q "^done (APPLY)" <<< "$out"' "th
 wait $holder                                                       # the deploy ends: the lock is free again
 out=$(bash "$HERE/maintenance.sh" --apply 2>&1)
 check '[[ ! -d "$STICKMAN_ROOT/releases/old7" ]] && grep -q -- "--max-used-space 10GB" "$SIM/prune.log"' "after the deploy: old releases go and the cache is capped"
+
+echo "6. the Bin (items deleted in the studio over 30 days ago)"
+rm -f "$SIM/exec.log"
+out=$(bash "$HERE/maintenance.sh" 2>&1)
+check 'grep -q "python -m oddstudio.bin purge --days 30 --dry-run" "$SIM/exec.log" && grep -q "^bin: items deleted" <<< "$out"' "dry run: the Bin is only listed"
+rm -f "$SIM/exec.log"
+bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
+check 'grep -q "exec oddstudio-api-1 python -m oddstudio.bin purge --days 30$" "$SIM/exec.log"' "--apply purges the Bin inside the API container"
 
 echo
 if (( fails )); then echo "simulate-backups: $fails check(s) FAILED"; exit 1; fi

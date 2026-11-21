@@ -58,7 +58,9 @@ class CharacterIn(BaseModel):
 
 @router.get("/characters")
 def list_characters(db: Session = Depends(get_db)):
-    return [out(db, c) for c in db.query(Character).order_by(Character.id)]
+    from .bin import hidden_ids
+    gone = hidden_ids(db, "character")
+    return [out(db, c) for c in db.query(Character).order_by(Character.id) if c.id not in gone]
 
 
 @router.post("/characters/rig-check-all")

@@ -8,6 +8,7 @@ import {useEffect, useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import {DeleteButton} from '@/components/BinButtons';
 
 const usd = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
 
@@ -59,7 +60,8 @@ export function ShotComparison() {
                   <option value="wide">wide (the whole set)</option><option value="medium">medium (head and upper body)</option></select></label>
               {r.frame_url && <img src={r.frame_url} alt={`${r.framing} first frame sent to ${r.label}`} style={{width: 110, borderRadius: 6}} />}
               <details><summary>Exact request</summary><pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre></details>
-              {r.result?.url ? <video controls src={r.result.url} style={{width: 160}} /> : null}
+              {r.result?.url ? <><video controls src={r.result.url} style={{width: 160}} /><DeleteButton kind="clip" id={r.result.asset_id} label={`the ${r.label} clip`} onDone={reload} /></> : null}
+              {r.result?.binned && <span className="muted">clip in the Bin</span>}
               {r.result?.status === 'done' && <span>actual {usd(r.result.actual_usd, 3)} · {usd(r.result.per_second_usd, 3)} per second · length {r.result.check.length_ok ? 'OK' : 'off'} ({r.result.check.video_seconds} s video, {r.result.check.audio_seconds} s audio){r.result.check.held_last_frame ? ' · last frame held' : ''}</span>}
               {r.result?.status === 'failed' && <span className="bad">{r.result.error}</span>}
               {(!r.result || r.result.status === 'failed') && <button className="btn sm primary" disabled={!!busy}

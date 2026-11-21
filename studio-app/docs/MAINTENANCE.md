@@ -56,3 +56,18 @@ sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.
   - `restore.sh /srv/stickman/db-dumps/20261105T023000Z-nightly.dump`: database only, from up to 30 days back.
 - **Check the next morning:** `ls -l /srv/stickman/backups` should show a new folder.
 - **Undo:** `rm /etc/cron.d/oddstudio`. Releases, images and backups that were already removed cannot be restored, which is why the job stays a dry run until step 4.
+
+## The Bin and cleared jobs
+
+- **Delete moves an item to the Bin** (Characters, single poses, Settings › Sets, an episode's page, comparison clips). The item is hidden everywhere and can be restored for 30 days.
+  - **Refused, with the reason:** anything another non-deleted episode uses, locked artwork, and rendered or published episodes.
+  - Deleting an episode never deletes its characters or sets.
+- **Bin page:** Restore, Delete forever and Empty Bin. The confirm lists exactly what goes and the space freed. Rows and files are removed, only inside the studio's storage and work folders.
+- **Weekly purge:** the weekly `maintenance.sh --apply` removes items that have been in the Bin for more than 30 days (`BIN_DAYS`), inside the API container (`python -m oddstudio.bin purge`), and logs each one. The dry run only lists them.
+- **Backups:** until purged, binned items are still in the database and storage, so backups cover them as before.
+- **Bulk actions** show the list and count first:
+  - Characters: "Delete all rejected / never-approved poses";
+  - Settings › Sets: "Delete unused candidates";
+  - Production: "Delete failed episodes".
+- **Archive is different** (Characters › Clean up): it only hides a character on that page, and nothing is ever removed.
+- **Clearing failed jobs** (Production): per row, or "Clear all failed jobs older than today" with the count first. A cleared job is only hidden; it is never deleted. A failed job that a live episode still needs to retry (the latest of its kind for an episode whose production or publishing failed) stays, with the reason. "Recent jobs" shows the latest 10, with "Show more".

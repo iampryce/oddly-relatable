@@ -38,6 +38,9 @@ def get_episode(db: Session, eid: int) -> Episode:
     ep = db.get(Episode, eid)
     if ep is None:
         raise HTTPException(404, "episode not found")
+    from .bin import hidden_ids
+    if ep.id in hidden_ids(db, "episode"):
+        raise HTTPException(404, "this episode is in the Bin (restore it there)")
     return ep
 
 
@@ -152,7 +155,9 @@ def list_episodes(stage: str | None = None, db: Session = Depends(get_db)):
     q = db.query(Episode)
     if stage:
         q = q.filter(Episode.stage.in_(stage.split(",")))
-    return [S.episode_summary(e) for e in q.order_by(Episode.updated_at.desc())]
+    from .bin import hidden_ids
+    gone = hidden_ids(db, "episode")
+    return [S.episode_summary(e) for e in q.order_by(Episode.updated_at.desc()) if e.id not in gone]
 
 
 @router.get("/episodes/{eid}")

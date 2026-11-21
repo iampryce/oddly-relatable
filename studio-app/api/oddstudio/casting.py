@@ -13,9 +13,11 @@ BASE_EXPRESSIONS = ["neutral", "happy", "shocked", "angry", "worried", "laughing
 
 def writer_characters(db: Session, episode_id: int | None) -> list[Character]:
     """Characters the writer may use: the recurring cast, any character with approved art, and this episode's own."""
+    from .bin import hidden_ids
+    gone = hidden_ids(db, "character")
     q = db.query(Character).filter(or_(Character.scope == "recurring", Character.art_status == "approved",
                                        Character.episode_id == episode_id))
-    return q.order_by(Character.id).all()
+    return [c for c in q.order_by(Character.id).all() if c.id not in gone]
 
 
 def register_new_characters(db: Session, episode_id: int, script: dict) -> list[str]:

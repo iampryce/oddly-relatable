@@ -177,7 +177,13 @@ def state(db: Session, ep: Episode) -> dict:
             "fragment": fragment_of(tr),
             "characters": [{"key": c.key, "name": c.name, "scope": c.scope, "voice_style": c.voice_style}
                            for c in sorted(keys.values(), key=lambda c: c.id)
-                           if c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id]}
+                           if (c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id)
+                           and c.id not in _binned_characters(db)]}
+
+
+def _binned_characters(db: Session) -> set[int]:
+    from .bin import hidden_ids
+    return hidden_ids(db, "character")
 
 
 def _notes_view(tr: dict) -> dict | None:

@@ -202,9 +202,13 @@ def view(db: Session, p: dict) -> dict:
                                      + (["the line's own recorded audio"] if m["kind"] == "avatar" else []),
                             "result": p["results"].get(k)} for k, m in MODELS.items()]
         out["urls_ok"] = bool(sent_img.startswith("http") and sent_aud.startswith("http"))
+    from .bin import hidden_ids
+    gone = hidden_ids(db, "clip")
     for k, r in (p.get("results") or {}).items():
-        if r.get("asset_id"):
+        if r.get("asset_id") and r["asset_id"] not in gone:
             r["url"] = url(r["asset_id"])
+        elif r.get("asset_id"):
+            r["binned"] = True
     led = fal.spent(db)
     out["spent_usd"], out["budget_usd"] = round(led["total"], 2), fal.budget(db)
     return out

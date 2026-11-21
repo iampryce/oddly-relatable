@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from . import audio_first, audio_scenes, beats, shot_compare, character_admin, character_looks, reference_plan, scene_sets, set_proposals, engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, audio_scenes, beats, bin as studio_bin, shot_compare, character_admin, character_looks, reference_plan, scene_sets, set_proposals, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -80,6 +80,7 @@ app.include_router(reference_plan.router)
 app.include_router(scene_sets.router)
 app.include_router(beats.router)
 app.include_router(shot_compare.router)
+app.include_router(studio_bin.router)
 
 
 @app.middleware("http")
@@ -170,12 +171,14 @@ def overview(db: Session = Depends(get_db)):
 # ------------------------------------------------------------------ jobs
 @app.get("/api/jobs", dependencies=[Depends(current_user)])
 def list_jobs(status: str | None = None, episode_id: int | None = None, limit: int = 100, db: Session = Depends(get_db)):
-    q = db.query(Job)
+    from .bin import job_keep_reason
+    q = db.query(Job).filter(Job.cleared_at.is_(None))      # failed jobs the owner cleared are not listed
     if status:
         q = q.filter(Job.status.in_(status.split(",")))
     if episode_id:
         q = q.filter_by(episode_id=episode_id)
-    return [S.job(j) for j in q.order_by(Job.id.desc()).limit(min(limit, 500))]
+    return [{**S.job(j), **({"keep_reason": job_keep_reason(db, j)} if j.status == "failed" else {})}
+            for j in q.order_by(Job.id.desc()).limit(min(limit, 500))]
 
 
 @app.get("/api/jobs/{jid}", dependencies=[Depends(current_user)])
@@ -189,9 +192,14 @@ def job_detail(jid: int, db: Session = Depends(get_db)):
 # ------------------------------------------------------------------ library
 @app.get("/api/library", dependencies=[Depends(current_user)])
 def library(db: Session = Depends(get_db)):
+    from .bin import hidden_ids
     out = []
+    gone_eps, gone_clips = hidden_ids(db, "episode"), hidden_ids(db, "clip")
     for ep in db.query(Episode).order_by(Episode.updated_at.desc()):
-        videos = db.query(Asset).filter_by(episode_id=ep.id, kind="video").order_by(Asset.id.desc()).all()
+        if ep.id in gone_eps:
+            continue
+        videos = [v for v in db.query(Asset).filter_by(episode_id=ep.id, kind="video").order_by(Asset.id.desc()).all()
+                  if v.id not in gone_clips]
         if videos:
             out.append({**S.episode_summary(ep), "videos": [S.asset(v) for v in videos]})
     return out
@@ -337,7 +345,8 @@ class SetDecisionIn(BaseModel):
 def list_sets(db: Session = Depends(get_db)):
     from . import sets
     out = []
-    for sid, r in sorted(sets.records(db).items(), key=lambda kv: -kv[1].get("created", 0)):
+    for sid, r in sorted(((k, v) for k, v in sets.records(db).items() if v.get("status") != "binned"),
+                         key=lambda kv: -kv[1].get("created", 0)):
         a, pv = db.get(Asset, r.get("asset_id")), db.get(Asset, r.get("preview_asset_id"))
         out.append({"id": sid, **{k: v for k, v in r.items() if k not in ("asset_id", "preview_asset_id")},
                     "url": storage().url(a.storage_key) if a else None, "preview_url": storage().url(pv.storage_key) if pv else None})

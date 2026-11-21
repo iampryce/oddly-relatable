@@ -7,7 +7,7 @@ import {useApi} from '@/lib/hooks';
 const NAV = [
   ['/', 'Overview'], ['/ideas', 'Ideas'], ['/scripts', 'Scripts'], ['/characters', 'Characters'],
   ['/storyboards', 'Storyboards'], ['/production', 'Production'], ['/library', 'Video Library'],
-  ['/publishing', 'Publishing'], ['/settings', 'Settings'],
+  ['/publishing', 'Publishing'], ['/settings', 'Settings'], ['/bin', 'Bin'],
 ] as const;
 
 export default function Shell({children}: {children: React.ReactNode}) {
