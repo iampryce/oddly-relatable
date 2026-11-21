@@ -102,11 +102,11 @@ def usable(db) -> dict[str, dict]:
             continue
         out[p.stem] = {"id": p.stem, "label": p.stem.replace("-", " ").capitalize(), "source": "repository",
                        "description": spec.get("note", ""), "style_version": "v1", "width": spec.get("width"),
-                       "height": spec.get("height"), "seat": bool(spec.get("seat"))}
+                       "height": spec.get("height"), "seat": bool(seats_of(spec)), "seats": len(seats_of(spec))}
     for k, r in approved(db).items():
         out[k] = {"id": k, "label": r.get("label", k), "source": "studio", "description": r.get("description", ""),
                   "style_version": r.get("style_version") or "v1", "width": r.get("width"), "height": r.get("height"),
-                  "seat": bool((r.get("blocking") or {}).get("seat"))}
+                  "seat": bool(seats_of(r.get("blocking") or {})), "seats": len(seats_of(r.get("blocking") or {}))}
     return out
 
 
@@ -119,6 +119,18 @@ def spec_for(db, set_id: str, folder: Path) -> dict | None:
         spec = dict(spec)
         spec["plate"] = str(REPO_ROOT / spec["plate"])
     return spec
+
+
+def blocking_of(db, set_id: str) -> dict | None:
+    """A usable set's staging (no image download): floor, standing area, seats, table front."""
+    if set_id in approved(db):
+        return dict(approved(db)[set_id].get("blocking") or {})
+    return repo_spec(set_id)
+
+
+def seats_of(blocking: dict) -> list[dict]:
+    """The set's seats: `seats` (several), else the older single `seat`."""
+    return list(blocking.get("seats") or ([blocking["seat"]] if blocking.get("seat") else []))
 
 
 def thumbnail_url(db, set_id: str) -> str | None:
@@ -203,9 +215,13 @@ def preview(src: Path, blocking: dict, out: Path) -> Path:
     y = blocking["floor_y"]
     d.line((0, y, im.width, y), fill=(255, 40, 40), width=4)
     d.rectangle((blocking["stand_min_x"], y - 8, blocking["stand_max_x"], y + 8), outline=(40, 200, 255), width=3)
-    if blocking.get("seat"):
-        s = blocking["seat"]
+    for i, s in enumerate(seats_of(blocking)):
         d.ellipse((s["x"] - 14, s["hip_y"] - 14, s["x"] + 14, s["hip_y"] + 14), outline=(255, 220, 0), width=4)
+        d.line((s["x"] - 20, s["feet_y"], s["x"] + 20, s["feet_y"]), fill=(255, 220, 0), width=3)
+        d.text((s["x"] + 18, s["hip_y"] - 10), str(i + 1), fill=(255, 220, 0))
+    tf = blocking.get("table_front")
+    if tf:
+        d.rectangle((tf["x0"], tf["y0"], tf["x1"], tf["y1"]), outline=(255, 120, 0), width=3)
     im.save(out)
     return out
 

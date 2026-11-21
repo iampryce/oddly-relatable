@@ -169,7 +169,9 @@ class StoryboardScene(Base):
     action: Mapped[str] = mapped_column(Text, default="")
     camera: Mapped[str] = mapped_column(Text, default="")
     characters: Mapped[list] = mapped_column(JSON, default=list)
-    lines: Mapped[list] = mapped_column(JSON, default=list)          # [{speaker, text, expression, shot, duration}]
+    lines: Mapped[list] = mapped_column(JSON, default=list)
+    # how the scene starts (feat/seating): {character key: "seated" | "standing"}, in seat order; None = everyone stands
+    staging: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)          # [{speaker, text, expression, shot, duration}]
     status: Mapped[str] = mapped_column(String(30), default="draft")  # draft | needs_revision | ready
     production_status: Mapped[str] = mapped_column(String(30), default="pending")  # pending | running | done | failed
     reference_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

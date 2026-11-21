@@ -57,7 +57,8 @@ MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "video/x-matroska": ".mkv",
                "video/x-m4v": ".m4v"}
 # Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
-KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes")
+# the Reference plan is kept too: its acceptance is checked against the notes, so a change still asks again
+KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes", "reference_plan")
 RIGHTS_TEXT = "I have the right to use this recording: its audio and any video it came with."
 AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
                "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",
@@ -426,8 +427,11 @@ def apply_window(db: Session, ep: Episode, start: float, end: float) -> None:
     sm["needs_trim"] = False
     notes = tr.get("video_notes")
     if notes:
-        notes = {**notes, "ranges": VN.shift(notes.get("ranges", []), float(notes.get("base", 0.0)) - start, end - start),
+        delta = float(notes.get("base", 0.0)) - start
+        notes = {**notes, "ranges": VN.shift(notes.get("ranges", []), delta, end - start),
                  "base": round(start, 3), "length": round(end - start, 3)}
+        if notes.get("original"):
+            notes["original"] = VN.shift(notes["original"], delta, end - start)
     ep.audio_transcript = {k: v for k, v in {**tr, "source_media": sm, "video_notes": notes,
                                              "trim": {"start": round(start, 3), "end": round(end, 3)}}.items()
                            if k in KEEP_KEYS and v is not None}
@@ -469,7 +473,8 @@ def edit_video_notes(eid: int, body: NotesIn, db: Session = Depends(get_db)):
     if redacted or len(ranges) != len(body.ranges):
         raise HTTPException(422, "the notes can only hold the listed values (shot, camera, setting, roles with position, "
                                  "pose, facing and emotion) and ranges inside the clip")
-    tr["video_notes"] = {**notes, "ranges": ranges, "edited": True}
+    # the unedited notes are kept (once) so the Reference plan can show what the vision model said and what you changed
+    tr["video_notes"] = {**notes, "ranges": ranges, "edited": True, "original": notes.get("original") or notes.get("ranges", [])}
     tr["media_hints"] = {**(tr.get("media_hints") or {}), **VN.summary(ranges)}
     ep.audio_transcript = tr
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Video notes edited ({len(ranges)} range(s))"))

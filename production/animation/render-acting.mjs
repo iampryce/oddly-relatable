@@ -2,8 +2,11 @@
 //   node render-acting.mjs <acting.json> <out.mp4>
 // acting.json (built by the studio, oddstudio/acting.py):
 //   {width, height, fps, duration, captions: bool,
-//    set: {plate, width, height, floor_y, stand_min_x, stand_max_x, seat?: {x, hip_y, feet_y}},
-//    cast: {key: {rig, height, lips, start: "on" | "off"}},
+//    set: {plate, width, height, floor_y, stand_min_x, stand_max_x, seat?: {x, hip_y, feet_y},
+//          seats?: [{x, hip_y, feet_y}], table_front?: {x0, y0, x1, y1}},
+//    cast: {key: {rig, height, lips, start: "on" | "off" | "seat:N"}},
+//    (seats: several seats; the older single `seat` is seat 0. table_front: the part of the plate in front of the
+//     seated characters (a table top), drawn again after them so they sit behind it.)
 //    lines: [{speaker, text, start, end, expression, gesture?, move?: {type, to?}, look_at?, reactions?: [...],
 //             cues: [{start, end, value}]}]}
 // Video only (the studio muxes the voice mix). Deterministic: the same input renders the same frames.
@@ -17,6 +20,8 @@ const OUT = process.argv[3];
 const {width: W, height: H, fps: FPS, duration: DUR} = spec;
 const SET = spec.set;
 const KEYS = Object.keys(spec.cast);
+const SEATS = SET.seats?.length ? SET.seats : SET.seat ? [SET.seat] : [];
+const startSeat = k => { const m = /^seat:(\d+)$/.exec(spec.cast[k].start || ''); return m && SEATS[+m[1]] ? +m[1] : null; };
 
 // ---------------------------------------------------------------- cast and blocking
 const C = {};
@@ -39,8 +44,21 @@ function marks(keys) {
 const onStart = KEYS.filter(k => spec.cast[k].start !== 'off');
 // every cast member gets a reserved mark (characters who enter later walk to theirs, so nobody overlaps)
 const home = marks(KEYS);
-const state = {};                       // per character: x, seated
-for (const k of KEYS) state[k] = {x: spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated: false, on: spec.cast[k].start !== 'off'};
+const state = {};                       // per character: x, seated, seat (index while seated)
+for (const k of KEYS) {
+  const si = startSeat(k);
+  state[k] = si !== null ? {x: SEATS[si].x, seated: true, seat: si, on: true}
+    : {x: spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated: false, seat: null, on: spec.cast[k].start !== 'off'};
+}
+const seatTaken = i => KEYS.some(o => state[o].seated && state[o].seat === i);
+const warnings = [];   // reported with the result (the studio logs them on the job)
+// the seat a move asks for ("seat:N"), else the nearest free one
+function pickSeat(k, to) {
+  const m = /^seat:(\d+)$/.exec(to || '');
+  if (m && SEATS[+m[1]] && !seatTaken(+m[1])) return +m[1];   // a taken seat: the nearest free one instead
+  const free = SEATS.map((s, i) => i).filter(i => !seatTaken(i));
+  return free.sort((a, b) => Math.abs(SEATS[a].x - state[k].x) - Math.abs(SEATS[b].x - state[k].x))[0] ?? null;
+}
 const moves = Object.fromEntries(KEYS.map(k => [k, []]));
 const WALK_SPEED = 230;                 // world px per second
 const arms = Object.fromEntries(KEYS.map(k => [k, []]));      // [arm, gesture, t0, t1, kind, arg]
@@ -61,27 +79,29 @@ for (const ln of spec.lines) {
   const mv = ln.move;
   if (mv) {
     const s = state[k];
-    let target = null, kind = 'walk';
+    let target = null, kind = 'walk', si = null;
     if (mv.type === 'enter') { s.on = true; s.x = (mv.to === 'left' ? -160 : SET.width + 160); target = home[k]; }
     else if (mv.type === 'exit') target = (s.x < SET.width / 2 ? -200 : SET.width + 200);
-    else if (mv.type === 'sit' && SET.seat) target = SET.seat.x + 40, kind = 'walk-sit';
+    else if (mv.type === 'sit' && !s.seated && (si = pickSeat(k, mv.to)) !== null) target = SEATS[si].x + 40, kind = 'walk-sit';
+    else if (mv.type === 'sit' && !s.seated) warnings.push(`${k} at ${t.toFixed(1)} s: asked to sit, but ${SEATS.length ? 'every seat is taken' : 'the set has no seat'}: stays standing`);
     else if (mv.type === 'stand') kind = 'stand';
     else if (mv.type === 'jump') kind = 'jump';
     else if (mv.type === 'walk_to') {
-      if (mv.to === 'seat' && SET.seat) target = SET.seat.x + 40;
+      if (/^seat(:\d+)?$/.test(mv.to || '') && (si = pickSeat(k, mv.to)) !== null) target = SEATS[si].x + 40;
+      else if (/^seat(:\d+)?$/.test(mv.to || '')) warnings.push(`${k} at ${t.toFixed(1)} s: asked to walk to a seat, but ${SEATS.length ? 'every seat is taken' : 'the set has no seat'}: stays in place`);
       else if (KEYS.includes(mv.to)) { const o = state[mv.to]; target = o.x + (o.x > s.x ? -1 : 1) * (halfW(k) + halfW(mv.to)); }
       else if (mv.to === 'left') target = SET.stand_min_x + halfW(k); else if (mv.to === 'right') target = SET.stand_max_x - halfW(k);
       else target = (SET.stand_min_x + SET.stand_max_x) / 2;
     }
-    if (kind === 'stand' && s.seated) { moves[k].push({t0: t, t1: t + 0.6, kind: 'stand', from: s.x, to: SET.seat.x + 40}); s.seated = false; s.x = SET.seat.x + 40; }
+    if (kind === 'stand' && s.seated) { moves[k].push({t0: t, t1: t + 0.6, kind: 'stand', seat: s.seat, from: s.x, to: SEATS[s.seat].x + 40}); s.seated = false; s.x = SEATS[s.seat].x + 40; s.seat = null; }
     else if (kind === 'jump') moves[k].push({t0: t, t1: t + 1.1, kind: 'jump', from: s.x, to: s.x});
     else if (target !== null) {
-      if (s.seated) { moves[k].push({t0: t, t1: t + 0.6, kind: 'stand', from: s.x, to: SET.seat.x + 40}); s.seated = false; s.x = SET.seat.x + 40; }
+      if (s.seated) { moves[k].push({t0: t, t1: t + 0.6, kind: 'stand', seat: s.seat, from: s.x, to: SEATS[s.seat].x + 40}); s.seated = false; s.x = SEATS[s.seat].x + 40; s.seat = null; }
       const t0 = moves[k].at(-1)?.t1 > t ? moves[k].at(-1).t1 : t;
       const dur = Math.max(0.8, Math.abs(target - s.x) / WALK_SPEED);
       moves[k].push({t0, t1: t0 + dur, kind: 'walk', from: s.x, to: target});
       s.x = target;
-      if (kind === 'walk-sit') { moves[k].push({t0: t0 + dur, t1: t0 + dur + 0.6, kind: 'sit', from: s.x, to: SET.seat.x}); s.seated = true; s.x = SET.seat.x; }
+      if (kind === 'walk-sit') { moves[k].push({t0: t0 + dur, t1: t0 + dur + 0.6, kind: 'sit', seat: si, from: s.x, to: SEATS[si].x}); s.seated = true; s.seat = si; s.x = SEATS[si].x; }
       if (mv.type === 'exit') s.on = false;
     }
   }
@@ -132,18 +152,19 @@ function blink(k, t) {
 // Where a character is at time t: replays its locomotion segments.
 function locomotion(k, t) {
   const c = C[k], stand = FLOOR() - hipHeight(c);
-  let x = spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated = false, out = null;
+  const s0 = startSeat(k);
+  let x = s0 !== null ? SEATS[s0].x : spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated = s0 !== null, seat = s0, out = null;
   for (const m of moves[k]) {
     if (t < m.t0) break;
     const u = clamp((t - m.t0) / (m.t1 - m.t0));
     if (m.kind === 'walk') {
       if (t <= m.t1) out = walkPose(c, m, t); else x = m.to;
-    } else if (m.kind === 'sit') { if (t <= m.t1) out = sitPose(c, m, u, false); else { seated = true; x = SET.seat.x; } }
-    else if (m.kind === 'stand') { if (t <= m.t1) out = sitPose(c, m, 1 - u, true); else { seated = false; x = m.to; } }
+    } else if (m.kind === 'sit') { if (t <= m.t1) out = sitPose(c, m, u, false); else { seated = true; seat = m.seat; x = SEATS[m.seat].x; } }
+    else if (m.kind === 'stand') { if (t <= m.t1) out = sitPose(c, m, 1 - u, true); else { seated = false; seat = null; x = m.to; } }
     else if (m.kind === 'jump' && t <= m.t1) out = {jump: (t - m.t0) / (m.t1 - m.t0), x, hipY: stand};
     if (out) return {...out, x: out.x ?? x};
   }
-  if (seated) return sitPose(c, {from: SET.seat.x + 40, to: SET.seat.x}, 1, false);
+  if (seated) return sitPose(c, {seat, from: SEATS[seat].x + 40, to: SEATS[seat].x}, 1, false);
   return {x, hipY: stand};
 }
 const FLOOR = () => SET.floor_y;
@@ -164,11 +185,12 @@ function walkPose(c, m, t) {
 }
 
 function sitPose(c, m, u, rising) {
+  const S = SEATS[m.seat ?? 0];
   const down = rising ? ease.inOut(u) : ease.back(u);
   const standHip = FLOOR() - hipHeight(c);
-  const fy = lerp(FLOOR(), SET.seat.feet_y, ease.inOut(u));
-  return {seated: u > 0.5, sitting: u, x: lerp(m.from ?? SET.seat.x + 40, SET.seat.x, ease.inOut(u)), hipY: lerp(standHip, SET.seat.hip_y, down),
-    feet: {L: {x: SET.seat.x - 34, y: fy}, R: {x: SET.seat.x + 34, y: fy}}, seatedFeetY: SET.seat.feet_y};
+  const fy = lerp(FLOOR(), S.feet_y, ease.inOut(u));
+  return {seated: u > 0.5, sitting: u, x: lerp(m.from ?? S.x + 40, S.x, ease.inOut(u)), hipY: lerp(standHip, S.hip_y, down),
+    feet: {L: {x: S.x - 34, y: fy}, R: {x: S.x + 34, y: fy}}, seatedFeetY: S.feet_y};
 }
 
 const looks = Object.fromEntries(KEYS.map(k => [k, {x: 0, y: 0.1}]));
@@ -224,7 +246,7 @@ function pose(k, t) {
   if (!feet) feet = {L: {x: x + c.hipL.x * c.S * 0.75, y: FLOOR()}, R: {x: x + c.hipR.x * c.S * 0.75, y: FLOOR()}};
   const ankleUp = (c.footDrop - c.ankleL.y) * c.S;
   p.footL = {x: feet.L.x, y: feet.L.y - ankleUp}; p.footR = {x: feet.R.x, y: feet.R.y - ankleUp};
-  p.kneeDir = kneeDir; p.hip = {x, y: hipY}; p.seated = !!L.seated; p.onStage = x > -150 && x < SET.width + 150;
+  p.kneeDir = kneeDir; p.hip = {x, y: hipY}; p.seated = !!L.seated; p.seatedFeetY = L.seatedFeetY; p.onStage = x > -150 && x < SET.width + 150;
   return p;
 }
 function nearestOtherAt(k, t) {
@@ -389,8 +411,13 @@ function drawScene(ctx, t) {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(plate, 0, 0);
   const order = [...KEYS].sort((a, b) => (poses[a].seated ? -1 : 0) - (poses[b].seated ? -1 : 0));
-  for (const k of order) { const p = poses[k]; if (!p.onStage) continue; const fy = p.seated ? SET.seat.feet_y : FLOOR(); ctx.fillStyle = 'rgba(40,20,10,0.22)'; ctx.beginPath(); ctx.ellipse(p.hip.x, fy, halfW(k) * 0.7, 13, 0, 0, Math.PI * 2); ctx.fill(); }
-  for (const k of order) if (poses[k].onStage) drawCharacter(ctx, C[k], poses[k]);
+  for (const k of order) { const p = poses[k]; if (!p.onStage) continue; const fy = p.seated ? (p.seatedFeetY ?? FLOOR()) : FLOOR(); ctx.fillStyle = 'rgba(40,20,10,0.22)'; ctx.beginPath(); ctx.ellipse(p.hip.x, fy, halfW(k) * 0.7, 13, 0, 0, Math.PI * 2); ctx.fill(); }
+  // seated characters, then the table front (that part of the plate again, so they sit behind the table), then
+  // everyone standing (in front of it)
+  for (const k of order) if (poses[k].onStage && poses[k].seated) drawCharacter(ctx, C[k], poses[k]);
+  const tf = SET.table_front;
+  if (tf && tf.x1 > tf.x0 && tf.y1 > tf.y0) ctx.drawImage(plate, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0);
+  for (const k of order) if (poses[k].onStage && !poses[k].seated) drawCharacter(ctx, C[k], poses[k]);
   if (spec.bubbles) drawBubble(ctx, t, poses, v, s);
   if (spec.hook) drawHook(ctx);
   if (spec.captions) {
@@ -410,4 +437,4 @@ function drawScene(ctx, t) {
 const t0 = Date.now();
 await renderVideo({width: W, height: H, fps: FPS, seconds: DUR, drawFrame: (ctx, t) => drawFrame(ctx, t), out: OUT,
   ffmpeg: process.env.FFMPEG || 'ffmpeg', font: spec.font});
-console.log(JSON.stringify({out: OUT, seconds: DUR, frames: Math.round(DUR * FPS), render_seconds: (Date.now() - t0) / 1000}));
+console.log(JSON.stringify({out: OUT, seconds: DUR, frames: Math.round(DUR * FPS), render_seconds: (Date.now() - t0) / 1000, warnings}));

@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from . import audio_first, audio_scenes, character_admin, character_looks, set_proposals, engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, audio_scenes, character_admin, character_looks, reference_plan, set_proposals, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -76,6 +76,7 @@ app.include_router(routes_characters.router)
 app.include_router(audio_first.router)
 app.include_router(audio_scenes.router)
 app.include_router(set_proposals.router)
+app.include_router(reference_plan.router)
 
 
 @app.middleware("http")
@@ -367,6 +368,25 @@ def decide_set(sid: str, body: SetDecisionIn, db: Session = Depends(get_db), use
         r["blocking"].update(b)
         if isinstance(body.blocking.get("seat"), dict):
             r["blocking"]["seat"] = {k: int(body.blocking["seat"][k]) for k in ("x", "hip_y", "feet_y")}
+        if isinstance(body.blocking.get("seats"), list):
+            # several seats (feat/seating): each inside the image, the hips above the feet
+            seats = []
+            for s in body.blocking["seats"][:8]:
+                v = {k: int(s[k]) for k in ("x", "hip_y", "feet_y")}
+                if not (0 <= v["x"] <= r["width"] and 0 <= v["hip_y"] < v["feet_y"] <= r["height"]):
+                    raise HTTPException(422, "each seat must be inside the image, with the hips above the feet")
+                seats.append(v)
+            r["blocking"]["seats"] = seats
+            r["blocking"].pop("seat", None)
+        if "table_front" in body.blocking:
+            tf = body.blocking["table_front"]
+            if tf:
+                v = {k: int(tf[k]) for k in ("x0", "y0", "x1", "y1")}
+                if not (0 <= v["x0"] < v["x1"] <= r["width"] and 0 <= v["y0"] < v["y1"] <= r["height"]):
+                    raise HTTPException(422, "the table front must be a box inside the image")
+                r["blocking"]["table_front"] = v
+            else:
+                r["blocking"].pop("table_front", None)
     r["status"] = "approved" if body.decision == "approve" else "rejected"
     r["decided_by"], r["decided_at"] = user, time_now()
     sets.save(db, recs)

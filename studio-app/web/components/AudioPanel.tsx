@@ -2,7 +2,9 @@
 import {useEffect, useRef, useState} from 'react';
 import {api, uploadAudio} from '@/lib/api';
 import VideoNotesOptions, {type NotesChoice} from './VideoNotesOptions';
-import {NOTE_CAMERA, NOTE_SETTINGS, NOTE_SHOTS, describeRoles, forServer, setField, type NoteRange} from '@/lib/videoNotes';
+import {NOTE_CAMERA, NOTE_EMOTIONS, NOTE_FACING, NOTE_FURNITURE, NOTE_POSES, NOTE_POSITIONS, NOTE_SETTINGS, NOTE_SHOTS, NOTE_TIME,
+  forServer, setField, setRoleField, type NoteRange, type RangeKey, type RoleKey} from '@/lib/videoNotes';
+import ReferencePlan from './ReferencePlan';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
@@ -152,6 +154,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
       </div>}
 
       {st.video_notes && <VideoNotesPanel st={st} episodeId={episodeId} act={act} />}
+      {st.video_notes?.ranges?.length > 0 && <ReferencePlan episodeId={episodeId} notesKey={JSON.stringify(st.video_notes.ranges)} />}
       {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
         <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
       {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
@@ -200,9 +203,13 @@ function VideoNotesPanel({st, episodeId, act}: {st: any; episodeId: number; act:
   const [draft, setDraft] = useState<NoteRange[] | null>(null);
   const ranges: NoteRange[] = draft || notes.ranges || [];
   const editable = st.allowed_actions.includes('edit_video_notes');
-  const sel = (i: number, key: 'shot' | 'camera' | 'setting', opts: string[]) => (
+  const sel = (i: number, key: RangeKey, opts: string[]) => (
     <select aria-label={key} style={{width: 'auto'}} disabled={!editable} value={(ranges[i] as any)[key] || ''}
             onChange={e => setDraft(setField(ranges, i, key, e.target.value))}>
+      <option value="">{key}: –</option>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>);
+  const roleSel = (i: number, j: number, key: RoleKey, opts: string[]) => (
+    <select aria-label={`${ranges[i].roles?.[j]?.role} ${key}`} style={{width: 'auto'}} disabled={!editable} value={(ranges[i].roles?.[j] as any)?.[key] || ''}
+            onChange={e => setDraft(setRoleField(ranges, i, j, key, e.target.value))}>
       <option value="">{key}: –</option>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>);
   return (
     <div className="card stack">
@@ -214,8 +221,9 @@ function VideoNotesPanel({st, episodeId, act}: {st: any; episodeId: number; act:
         <div key={i} className="row small" style={{flexWrap: 'wrap', alignItems: 'center'}}>
           <strong>{r.start.toFixed(1)}-{r.end.toFixed(1)} s</strong>
           <span className="muted">{(r.line_ids || []).join(', ') || 'no line'}</span>
-          {sel(i, 'shot', NOTE_SHOTS)}{sel(i, 'camera', NOTE_CAMERA)}{sel(i, 'setting', NOTE_SETTINGS)}
-          <span>{describeRoles(r.roles)}</span>
+          {sel(i, 'shot', NOTE_SHOTS)}{sel(i, 'camera', NOTE_CAMERA)}{sel(i, 'setting', NOTE_SETTINGS)}{sel(i, 'furniture', NOTE_FURNITURE)}{sel(i, 'time', NOTE_TIME)}
+          {(r.roles || []).map((ro, j) => <span key={j} className="row" style={{gap: 2}}><em>{ro.role}</em>
+            {roleSel(i, j, 'position', NOTE_POSITIONS)}{roleSel(i, j, 'pose', NOTE_POSES)}{roleSel(i, j, 'facing', NOTE_FACING.filter(f => f !== ro.role))}{roleSel(i, j, 'emotion', NOTE_EMOTIONS)}</span>)}
           {editable && <button className="btn sm" onClick={() => setDraft(ranges.filter((_, k) => k !== i))}>Remove</button>}
         </div>))}
       {editable && <div className="row">
@@ -232,13 +240,16 @@ function ScenesCard({st, episodeId, act, dirty}: {st: any; episodeId: number; ac
   const keys = new Set(st.characters.map((c: any) => c.key));
   const lines: any[] = st.lines || [];
   const notCast = lines.filter(l => !keys.has(l.speaker)).length;
-  const ready = lines.length > 0 && notCast === 0 && !dirty;
+  const plan = useApi<any>(st.video_notes?.ranges?.length ? `/episodes/${episodeId}/reference-plan` : null, 5000).data;
+  const planWaiting = !!plan?.needs_acceptance;
+  const ready = lines.length > 0 && notCast === 0 && !dirty && !planWaiting;
   const build = (mode: string) => act.run('scenes', () => api(`/episodes/${episodeId}/audio/scenes`, {body: {mode}}));
   return (
     <div className="card stack">
       <h2 style={{margin: 0}}>Scenes</h2>
       <p className="muted small">The scenes are built around the recording: each scene is a run of recorded lines, a cut falls only between two lines, and the words, speakers and timing never change. The AI writer chooses the cuts and how each line is acted (expression, gesture, who they look at, shot, silent reactions); if it is not set up or its plan breaks these rules, the simple split is used (a new scene at each long pause). You review and approve the result in the Script tab.</p>
-      {st.stage === 'audio_labelling' && !ready && <div className="alert warn small">{dirty ? 'Save the lines first.' : notCast ? `${notCast} line(s) do not have a cast character as speaker yet: label them and apply the cast.` : 'Transcribe the audio first.'}</div>}
+      {planWaiting && <div className="alert warn small">Accept the Reference plan above first: nothing is built from the video notes until you do.</div>}
+      {st.stage === 'audio_labelling' && !ready && !planWaiting && <div className="alert warn small">{dirty ? 'Save the lines first.' : notCast ? `${notCast} line(s) do not have a cast character as speaker yet: label them and apply the cast.` : 'Transcribe the audio first.'}</div>}
       <div className="row">
         <button className="btn primary" disabled={!ready || !!act.busy || !st.allowed_actions.includes('build_audio_scenes')} onClick={() => build('writer')}>{st.stage === 'script_review' ? 'Rebuild the scenes (AI writer)' : 'Build the scenes (AI writer)'}</button>
         <button className="btn" disabled={!ready || !!act.busy || !st.allowed_actions.includes('build_audio_scenes')} onClick={() => build('simple')}>Simple split</button>

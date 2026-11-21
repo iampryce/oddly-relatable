@@ -84,10 +84,12 @@ def _acting(raw: dict, keys: set[str]) -> dict:
     return out
 
 
-def notes_acting(lines: list[dict], notes: list[dict], silent: list[str]) -> dict:
-    """The simple split's use of the video notes (soft suggestions only): each line's shot from the note that covers
-    it, and reaction cutaways of the silent characters for the note's reactors. Never touches the dialogue."""
+def notes_acting(lines: list[dict], notes: list[dict], silent: list[str], cast: list[str] | None = None) -> dict:
+    """The simple split's use of the video notes: each line's shot from the note that covers it, the speaker looking
+    at whom the note says they face, and reaction cutaways of the silent characters for the note's reactors. Never
+    touches the dialogue."""
     from . import video_notes as VN
+    from .reference_plan import role_map
     out = {}
     for ln in lines:
         r = VN.for_line(notes, ln)
@@ -96,7 +98,11 @@ def notes_acting(lines: list[dict], notes: list[dict], silent: list[str]) -> dic
         a = {}
         if r.get("shot"):
             a["shot"] = r["shot"]
-        reactors = [ro for ro in r.get("roles", []) if ro["role"].startswith("reactor")]
+        roles = role_map([ln], cast or [], silent)
+        sp = next((ro for ro in r.get("roles", []) if ro.get("role") == "speaker"), None)
+        if sp and roles.get(sp.get("facing", "")) and roles[sp["facing"]] != ln["speaker"]:
+            a["look_at"] = roles[sp["facing"]]
+        reactors = [ro for ro in r.get("roles", []) if ro["role"].startswith("reactor") and ro.get("react", True)]
         if silent and reactors:
             a["reactions"] = [{"character": silent[(int(ro["role"].split()[1]) - 1) % len(silent)],
                                "expression": VN.EMOTION_EXPRESSION.get(ro.get("emotion", ""), "neutral")} for ro in reactors[:3]]
@@ -115,7 +121,7 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
     keys = set(cast) | set(silent)
     if plan is None:
         scenes_in = [{"heading": f"Scene {i + 1}", "line_ids": r} for i, r in enumerate(simple_runs(lines))]
-        plan = {"scenes": scenes_in, "lines": notes_acting(lines, notes or [], silent)}
+        plan = {"scenes": scenes_in, "lines": notes_acting(lines, notes or [], silent, cast)}
     scenes_in = plan.get("scenes")
     if not isinstance(scenes_in, list) or not scenes_in:
         raise ScriptError("the plan has no scenes")
@@ -132,6 +138,15 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
         scenes.append({"id": f"s{i + 1}", "heading": str(s.get("heading") or f"Scene {i + 1}")[:200],
                        "location": str(s.get("location") or "")[:80], "description": str(s.get("description") or ""),
                        "action": str(s.get("action") or ""), "camera": str(s.get("camera") or "")[:400], "lines": sl})
+        # how the scene starts: the writer's staging when valid, else the note covering its first line (speaker first)
+        st = s.get("staging") if isinstance(s.get("staging"), dict) else None
+        st = {k: v for k, v in (st or {}).items() if k in keys and v in ("seated", "standing")} or None
+        if st is None and notes:
+            from . import video_notes as VN
+            from .reference_plan import staging_for
+            st = staging_for([by_id[run[0]]], VN.for_line(notes, by_id[run[0]]), cast, silent) or None
+        if st:
+            scenes[-1]["staging"] = st
         if fmt == "long":   # a long episode's scenes belong to acts 1-3: the recording's order, split in thirds
             scenes[-1]["act"] = 1 + (i * 3) // len(runs)
     doc = {"title": str(plan.get("title") or title)[:100] or title[:100], "logline": str(plan.get("logline") or "")[:400],
@@ -172,9 +187,11 @@ def notes_text(lines: list[dict], notes: list[dict]) -> str:
             rows.append(f"[{ln['id']}] {VN.describe(r)}")
     if not rows:
         return ""
-    return ("\nVideo notes (from a reference video, text only; SOFT suggestions for staging: shots, who reacts, where "
-            "people stand. Never change, add or remove dialogue; the characters and sets stay our own originals; roles "
-            "are anonymous: 'speaker' is the line's speaker, 'reactor N' any of the others):\n" + "\n".join(rows) + "\n")
+    return ("\nVideo notes (from a reference video, text only, accepted by the owner in the Reference plan). Use them as "
+            "STRONG suggestions: each line's shot and camera, who reacts, and how each scene starts (who is seated or "
+            "standing, whom they face). Never change, add or remove dialogue or its timing; the characters and sets stay "
+            "our own originals; roles are anonymous: 'speaker' is the line's speaker, 'reactor N' any of the others):\n"
+            + "\n".join(rows) + "\n")
 
 
 def prompt(lines: list[dict], cast: list[Character], silent: list[Character], hints: dict, environments: list[str],
@@ -191,8 +208,10 @@ def prompt(lines: list[dict], cast: list[Character], silent: list[Character], hi
             f"{', '.join(EXPRESSIONS)}), gesture (one of {', '.join(g for g in GESTURES if g != 'none')} or none), look_at "
             "(a character key), shot (wide, medium or close), and optional silent reactions of other characters on "
             "screen. Also a title, a one-sentence logline and an on-screen hook starting with 'POV: ' (at most one emoji).\n"
+            "For each scene, optionally give its starting staging: each on-screen character seated or standing, the "
+            "speaker of its first line first (the order is the seat order).\n"
             'JSON: {"title": "", "logline": "", "hook": "POV: ...", "scenes": [{"heading": "", "location": "", '
-            '"description": "", "action": "", "camera": "", "line_ids": ["l1", "l2"]}], '
+            '"description": "", "action": "", "camera": "", "staging": {"key": "seated"}, "line_ids": ["l1", "l2"]}], '
             '"lines": {"l1": {"expression": "neutral", "gesture": "none", "look_at": "", "shot": "medium", '
             '"reactions": [{"character": "", "expression": "", "gesture": ""}]}}}')
 
@@ -217,6 +236,10 @@ def build_scenes(eid: int, body: ScenesIn, db: Session = Depends(get_db)):
     from .audio_first import audio_episode
     ep = audio_episode(db, eid)
     _gate(ep, "build_audio_scenes")
+    from .reference_plan import needs_acceptance
+    if needs_acceptance(ep.audio_transcript or {}):
+        raise HTTPException(409, "accept the Reference plan first (Audio tab, Reference plan): it shows what the video "
+                                 "notes will drive, and nothing is built from them until you accept it")
     if body.mode not in ("writer", "simple"):
         raise HTTPException(422, "mode must be writer or simple")
     lines = (ep.audio_transcript or {}).get("lines", [])
@@ -259,7 +282,8 @@ def audio_scenes(ctx: Ctx) -> dict:
     chars = {c.key: c for c in db.query(Character).all()}
     cast = list(dict.fromkeys(ln["speaker"] for ln in lines))
     silent = [m["character_key"] for m in tr.get("silent_cast", []) if m["character_key"] in chars and m["character_key"] not in cast]
-    notes = (tr.get("video_notes") or {}).get("ranges") or []
+    from .reference_plan import effective
+    notes = effective(tr)    # the notes as accepted in the Reference plan (edits applied, ignored items left out)
     plan, how = None, "simple split"
     if (job.payload or {}).get("mode") == "writer":
         try:

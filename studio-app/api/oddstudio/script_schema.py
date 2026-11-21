@@ -180,6 +180,13 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
                  "description": _str(s, "description", where, required=False),
                  "action": _str(s, "action", where, required=False),
                  "camera": _str(s, "camera", where, required=False, max_len=400), "lines": []}
+        st = s.get("staging")
+        if isinstance(st, dict) and st:
+            # how the scene starts (feat/seating): {character: seated | standing}, in seat order
+            bad = [k for k, v in st.items() if k not in keys or v not in ("seated", "standing")]
+            if bad:
+                raise ScriptError(f"{where}.staging: unknown character or position for {', '.join(map(str, bad[:3]))}")
+            scene["staging"] = {k: st[k] for k in list(st)[:12]}
         lines = s.get("lines")
         if not isinstance(lines, list) or not lines:
             raise ScriptError(f"{where}.lines must contain at least one line")
