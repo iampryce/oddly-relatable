@@ -57,7 +57,8 @@ MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "video/x-matroska": ".mkv",
                "video/x-m4v": ".m4v"}
 # Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
-KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes")
+# the Reference plan is kept too: its acceptance is checked against the notes, so a change still asks again
+KEEP_KEYS = ("source_media", "media_hints", "trim", "video_notes", "reference_plan")
 RIGHTS_TEXT = "I have the right to use this recording: its audio and any video it came with."
 AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav",
                "audio/vnd.wave": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/m4a": ".m4a", "audio/aac": ".aac",

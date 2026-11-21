@@ -116,6 +116,10 @@ class PlanTest(unittest.TestCase):
         words = set(re.findall(r"[a-z]+", " ".join(v for s in sc for v in (s.get("staging") or {}).values())))
         self.assertLessEqual(words, {"seated", "standing"}, "only fixed values")
 
+    def test_the_plan_survives_a_transcript_rebuild(self):
+        from oddstudio.audio_first import KEEP_KEYS
+        self.assertIn("reference_plan", KEEP_KEYS, "re-transcribing or re-trimming keeps your ignored items")
+
     def test_ignored_items_are_not_used(self):
         self.c.put(f"/api/episodes/{self.eid}/reference-plan", json={"ignored": ["0:seating", "0:shot", "0:reactors"]})
         self.c.post(f"/api/episodes/{self.eid}/reference-plan/accept")

@@ -289,6 +289,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     if r.returncode != 0 or not silent.exists():
         raise engine.EngineRunError("the acting renderer failed: " + (r.stderr or r.stdout)[-800:])
     report = json.loads(r.stdout.strip().splitlines()[-1])
+    for w in report.get("warnings", []):
+        ctx.log(f"renderer: {w}")
 
     if absolute:
         mp4 = AP.mux_original(silent, src_audio, total, folder / "acting.mp4")

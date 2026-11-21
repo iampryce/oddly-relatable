@@ -51,6 +51,7 @@ for (const k of KEYS) {
     : {x: spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated: false, seat: null, on: spec.cast[k].start !== 'off'};
 }
 const seatTaken = i => KEYS.some(o => state[o].seated && state[o].seat === i);
+const warnings = [];   // reported with the result (the studio logs them on the job)
 // the seat a move asks for ("seat:N"), else the nearest free one
 function pickSeat(k, to) {
   const m = /^seat:(\d+)$/.exec(to || '');
@@ -82,10 +83,12 @@ for (const ln of spec.lines) {
     if (mv.type === 'enter') { s.on = true; s.x = (mv.to === 'left' ? -160 : SET.width + 160); target = home[k]; }
     else if (mv.type === 'exit') target = (s.x < SET.width / 2 ? -200 : SET.width + 200);
     else if (mv.type === 'sit' && !s.seated && (si = pickSeat(k, mv.to)) !== null) target = SEATS[si].x + 40, kind = 'walk-sit';
+    else if (mv.type === 'sit' && !s.seated) warnings.push(`${k} at ${t.toFixed(1)} s: asked to sit, but ${SEATS.length ? 'every seat is taken' : 'the set has no seat'}: stays standing`);
     else if (mv.type === 'stand') kind = 'stand';
     else if (mv.type === 'jump') kind = 'jump';
     else if (mv.type === 'walk_to') {
       if (/^seat(:\d+)?$/.test(mv.to || '') && (si = pickSeat(k, mv.to)) !== null) target = SEATS[si].x + 40;
+      else if (/^seat(:\d+)?$/.test(mv.to || '')) warnings.push(`${k} at ${t.toFixed(1)} s: asked to walk to a seat, but ${SEATS.length ? 'every seat is taken' : 'the set has no seat'}: stays in place`);
       else if (KEYS.includes(mv.to)) { const o = state[mv.to]; target = o.x + (o.x > s.x ? -1 : 1) * (halfW(k) + halfW(mv.to)); }
       else if (mv.to === 'left') target = SET.stand_min_x + halfW(k); else if (mv.to === 'right') target = SET.stand_max_x - halfW(k);
       else target = (SET.stand_min_x + SET.stand_max_x) / 2;
@@ -434,4 +437,4 @@ function drawScene(ctx, t) {
 const t0 = Date.now();
 await renderVideo({width: W, height: H, fps: FPS, seconds: DUR, drawFrame: (ctx, t) => drawFrame(ctx, t), out: OUT,
   ffmpeg: process.env.FFMPEG || 'ffmpeg', font: spec.font});
-console.log(JSON.stringify({out: OUT, seconds: DUR, frames: Math.round(DUR * FPS), render_seconds: (Date.now() - t0) / 1000}));
+console.log(JSON.stringify({out: OUT, seconds: DUR, frames: Math.round(DUR * FPS), render_seconds: (Date.now() - t0) / 1000, warnings}));
