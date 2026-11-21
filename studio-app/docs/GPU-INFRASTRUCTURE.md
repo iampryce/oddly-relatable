@@ -1,6 +1,6 @@
 # GPU and on-demand worker infrastructure: research and recommendation
 
-**Status (2026-11-16; hard requirements added 2026-11-21, §11–§13): RESEARCH AND PROPOSAL ONLY.** Nothing has been signed up for, bought or provisioned. No paid resource may be created until the owner approves the decisions in §8. The Shorts workflow, the local CPU worker and the existing job queue stay as they are.
+**Status (2026-11-16; hard requirements added 2026-11-21, §11–§13; self-hosted video investigation added 2026-11-21, §14–§18): RESEARCH AND PROPOSAL ONLY.** Nothing has been signed up for, bought or provisioned. No paid resource may be created until the owner approves the decisions in §8. The Shorts workflow, the local CPU worker and the existing job queue stay as they are.
 
 **Prices checked on 2026-11-16.** Figures marked **(official)** come from the provider's own pricing page or documentation. Figures marked **(secondary)** come from third-party trackers or blogs and were not confirmed on the provider's page. Figures marked **(estimate)** are this document's own calculations. GPU prices change often, and spot prices change hourly, so check them again before any approval.
 
@@ -493,3 +493,231 @@ These are added to §8:
 - L40S prices: https://getdeploying.com/gpus/nvidia-l40s, https://www.newegg.com/p/N82E16888892001
 - RTX PRO 6000 Blackwell prices: https://tech-insider.org/nvidia-rtx-pro-6000-blackwell-price-2026/, https://www.tweaktown.com/news/113098/nvidias-rtx-pro-6000-blackwell-gpu-price-almost-doubles-reaching-16-000/index.html
 - Used RTX 4090 listings: https://www.ebay.com/shop/rtx-4090-gpu
+
+---
+
+# Part 2: Self-hosted video (investigation, 2026-11-21)
+
+**Status: READ-ONLY INVESTIGATION.** No code, accounts or paid calls. Licences, VRAM figures and prices below were read on the providers' and model publishers' own pages on 2026-11-21 **(official)**, unless marked **(secondary)** or **(estimate)**. "Clip" means a 5-second clip throughout.
+
+## 14. Models we could self-host
+
+### 14.1 Image-to-video (no audio input)
+
+| Model | Licence (official) | Size | VRAM (official) | Time per 5 s clip (official, Wan's efficiency table, 1 GPU, default steps) | Disk (estimate) |
+|---|---|---|---|---|---|
+| **Wan 2.2 I2V-A14B** | Apache 2.0. Commercial use allowed. The model card adds a use policy (nothing unlawful or harmful) | 27B total, 14B active per step (two experts) | "at least 80GB" for the single-GPU command. Peak measured **41.0 GB at 480p**, **59.7 GB at 720p** | H100: **328 s at 480p**, 1,056 s at 720p. A100: 810 s at 480p, 2,811 s at 720p | about 60–70 GB with the text encoder |
+| **Wan 2.2 TI2V-5B** | Apache 2.0 | 5B dense | "at least 24GB VRAM (e.g, RTX 4090)". Peak 22.8 GB | RTX 4090: **525 s at 720p, 24 fps** | about 20–25 GB |
+| **LTX-2** (Lightricks) | **LTX-2 Community License**, not open source. Free for any purpose, but "Entities with annual revenues of at least $10,000,000" need a paid commercial licence. Derivatives (LoRAs) must be distributed under the same licence. Lightricks claims no rights in outputs | 19B. The README now recommends LTX-2.5 (22B), which is under a **different licence file that was not read** | Not stated. FP8 and FP4 variants and CPU/disk offload exist | Not stated. A distilled variant uses 8 steps | LTX-2.5 bundle "roughly 66 GiB" (official) |
+
+LTX-2 generates its own audio and has an audio-to-video pipeline. That pipeline is conditioned on an input audio file, but lip-sync to supplied speech is **not claimed**.
+
+### 14.2 Audio-driven talking video (speech in, mouth follows it)
+
+| Model | Licence (official) | Built on | Mode | VRAM (official) | Speed | Cartoon claim |
+|---|---|---|---|---|---|---|
+| **Wan 2.2 S2V-14B** | Apache 2.0 | Wan 2.2 (16B params listed) | Image + speech (+ optional pose video) to video; length follows the audio | "at least 80GB" for the single-GPU command. FP8 and offload via DiffSynth-Studio **(listed on the card; not Wan's own)** | Not stated. **Estimate:** similar to I2V-A14B, about 330 s per 480p clip on an H100 | Not stated |
+| **InfiniteTalk** (MeiGen) | Apache 2.0 | Wan 2.1 I2V-14B-480P | Image + audio to video, **and** dubbing of an existing clip. "Unlimited" length in streaming mode; good results "for up to 1 minute" | No GB figure. Low-VRAM and FP8 modes | Not stated. Speed-ups through 4–8-step LoRAs **(third-party)** | Not stated |
+| **MultiTalk** (MeiGen) | Apache 2.0 | Wan 2.1 I2V-14B-480P | Image + audio to video; several speakers; up to 15 s | 480p "on a single RTX 4090" in low-VRAM mode | Not stated; TeaCache "2~3x" faster | **Yes:** "cartoon character" |
+| **OmniAvatar** | Apache 2.0 | Wan 2.1 T2V-14B or 1.3B, plus a LoRA | Image + audio + prompt to video; 480p only | 36 GB (full), 21 GB, or 8 GB (offloaded); measured on an A800 | 16.0–22.1 s per diffusion step on one A800 | Not stated |
+| **HunyuanVideo-Avatar** (Tencent) | **Tencent Hunyuan Community License.** The territory **excludes the EU, UK and South Korea**. Outputs may not be used "to improve any other AI model". Over 100M monthly users needs a licence | HunyuanVideo | Image + audio to video | Minimum 24 GB "but very slow"; 96 GB recommended | Not stated | **Yes:** "cartoon, 3D-rendered, and anthropomorphic" |
+| **LatentSync 1.6** (ByteDance) | Apache 2.0 | Stable Diffusion | **Video-to-video** lip-sync on an existing clip | 18 GB (8 GB for v1.5) | Not stated | Demo includes one anime clip; trained on real video |
+
+**Components to check before any use:** each pipeline also loads an audio encoder (for example `chinese-wav2vec2-base` or `wav2vec2-base-960h`), a text encoder and optional speed-up LoRAs. **Their licences were not read.**
+
+**Not on the list, worth checking before a test:** LongCat-Video-Avatar 1.5 (May 2026). The InfiniteTalk README says it "generalizes to stylized domains (anime, animals...)". Its licence and size were not read.
+
+**Shortlist for us (cartoon character, our own line audio):**
+1. **InfiniteTalk**: Apache, image + audio, long clips, and it can also dub an existing clip.
+2. **Wan 2.2 S2V-14B**: Apache, the newest Wan model with audio input.
+3. **MultiTalk**: Apache, and claims cartoon support.
+4. **LatentSync**: Apache. A cheap way to lip-sync a clip we already have (a Kling 2.6 Pro clip without audio, or a Wan I2V clip).
+
+HunyuanVideo-Avatar is excluded if the owner, the business or the audience is in the EU, UK or South Korea, and because of its ban on using outputs to improve other models. LTX-2 is excluded until the LTX-2.5 licence is read and lip-sync is shown.
+
+### 14.3 Hosted versions of the same models (for comparison; official, fal.ai)
+
+| Model | Price | Per 5 s clip |
+|---|---|---|
+| Wan 2.2 A14B image-to-video | $0.04/s at 480p, $0.06/s at 580p, $0.08/s at 720p | $0.20–0.40 |
+| Wan 2.2 S2V-14B speech-to-video | $0.10/s at 480p, $0.15/s at 580p, $0.20/s at 720p | $0.50–1.00 |
+| Kling AI Avatar v2 Standard (our current talking clip) | $0.0562/s | $0.28 |
+| Kling 2.6 Pro image-to-video (our current motion clip) | $0.07/s, or $0.14/s with native audio | $0.35–0.70 |
+
+fal states that both Wan 2.2 endpoints "will be removed on January 4, 2027".
+
+### 14.4 GPU prices used below (official, RunPod pricing page dated 2026-11-12, per second)
+
+| GPU | Secure Cloud | Community Cloud |
+|---|---|---|
+| RTX 4090 24 GB | $0.89/h | $0.34/h |
+| L40S 48 GB | $1.09/h | $0.79/h |
+| A100 80 GB PCIe | $2.09/h | $1.19/h |
+| RTX PRO 6000 96 GB | $2.69/h | $1.69/h |
+| H100 PCIe 80 GB | $2.89/h | $1.99/h |
+| H100 SXM 80 GB | $4.39/h | $2.69/h |
+
+**Billing rules (official):**
+- Pods are billed per second, with no ingress or egress fees.
+- A deploy needs "at least one hour's worth of credits".
+- At a $0 balance, pods "are automatically stopped". Without a network volume they are terminated. This confirms the prepaid backstop in §11.1.
+- Savings plans are discontinued.
+
+### 14.5 What a clip costs at default settings (estimate from the official times and prices)
+
+| Route | GPU | Time per clip | Cost per clip |
+|---|---|---|---|
+| Wan 2.2 I2V-A14B, 480p | H100 PCIe / SXM | 328 s | **$0.26 / $0.40** |
+| Wan 2.2 I2V-A14B, 480p | A100 80 GB | 810 s | $0.47 |
+| Wan 2.2 TI2V-5B, 720p (no audio) | RTX 4090 Secure | 525 s | $0.13 |
+| Audio-driven 14B, 480p (S2V or InfiniteTalk) | H100 PCIe | about 330 s **(estimate, same size as I2V-A14B)** | about $0.26 |
+
+**At the publishers' default step counts, self-hosting is not cheaper than Kling** ($0.28–0.35 per clip). It only becomes much cheaper with the third-party 4–8-step speed-up LoRAs, which cut 40–50 steps to 4–8 and give roughly 5–10× faster generation **(secondary; to be measured)**. That would mean about **$0.03–0.08 per clip**. Whether that holds for a cartoon character is the main question for the proof of concept (§16).
+
+---
+
+## 15. Training a small character/style add-on (LoRA) on our own art
+
+**Rule:** training data is **only our own approved art**: approved character poses and sheets, approved sets, and our own rig renders of them. Never third-party images, and never frames from reference videos ("reference, not copy"). The training manifest records every input file's SHA-256 and its approval record. The studio refuses an input that has no approval record or comes from the reference-analysis folders.
+
+**What it is:** a small add-on file (typically 100–600 MB, **estimate**) that teaches the video model what Mortimer, or our flat 2D style, looks like. It reduces drift away from the character. The **base must match the lip-sync model:** a LoRA trained on Wan 2.1 I2V-14B works with InfiniteTalk and MultiTalk (both built on it), but not with Wan 2.2 S2V, and the other way round.
+
+**Needs:**
+
+| Item | Amount |
+|---|---|
+| Data | 20–40 approved stills per character, plus 10–20 short clips of our own rig renders (2–5 s, 480p), with captions written by us |
+| GPU | 48–80 GB for a 14B LoRA (A100 80 GB or H100). 24 GB only with heavy offloading **(secondary)** |
+| Time | About 1–3 h per training run **(secondary; to be measured)** |
+| Cost | About $2–9 per run (A100 $2.09/h to H100 $2.89/h). Two or three runs per character: **about $5–25 per character**, once |
+| Tool | DiffSynth-Studio (listed on the Wan S2V card for LoRA training), or a pinned open-source trainer. It runs in the same worker image as a separate job kind, `lora-train` |
+
+**How it plugs in:**
+1. A `lora-train` job takes the approved inputs and returns the LoRA file plus a training manifest: base model revision, settings, input hashes and cost.
+2. The LoRA is stored as an asset in quarantine. It is **used only after the owner approves it** (a new approval gate, never self-approved), as with poses.
+3. Each video job names the LoRA version and its strength in the workflow. The clip's record keeps both, so every clip can be traced to the exact LoRA and inputs.
+4. **Licence:** Apache base models allow derivatives. Under HunyuanVideo-Avatar's licence, training on its outputs is barred. Under LTX-2's, a LoRA would have to be distributed under LTX's licence. Neither matters if we never distribute the LoRA.
+
+The image-model LoRA for poses (SDXL/FLUX/Qwen-Image-Edit) is a separate track, AP-84B3, and is unchanged.
+
+---
+
+## 16. Proof-of-concept plan (under $30)
+
+**Prerequisite, needs its own approval as a separate PR (local engineering, $0):**
+- the worker image and RunPod adapter from §11.2, with the cap, the idle timer, the maximum lifetime and the orphan sweep from §11.1;
+- one workflow each for InfiniteTalk, Wan 2.2 S2V and LatentSync;
+- a new column per self-hosted model in the shot comparison.
+
+It is tested locally with a fake worker. Nothing is launched.
+
+**What you do once:**
+1. Create a RunPod account and add **$25** of credit with auto-top-up **off**. The balance is the hard stop (§14.4).
+2. Create an API key in RunPod (restricted to pods if RunPod offers that; **not verified**).
+3. Store the key in Settings > Secrets as `runpod_api_key`. I never see or print it.
+4. In Settings > GPU worker: set `mode: rented`, the monthly cap to **$25**, the idle timer to 5 min and the maximum lifetime to 120 min.
+5. Approve the run in writing. Each session is listed with its expected cost.
+
+**Inputs (our own only):**
+- Six lines that already have Kling clips in the shot comparison: Kling 2.6 Pro and Kling Avatar v2 Standard.
+- For each line, the same start frame (our rig frame, medium framing), the same line audio and the same action text as the Kling runs.
+- Mortimer is in at least four of them.
+
+**Steps and budget (estimate, Secure Cloud):**
+
+| Step | What | GPU | Expected cost |
+|---|---|---|---|
+| 1 | Session A: InfiniteTalk at 480p. Two lines at default steps (reference quality), then all six with a 4–8-step speed-up | H100 PCIe $2.89/h, 120 min max | $4–6 |
+| 2 | Session B: Wan 2.2 S2V-14B at 480p, the same six lines, default steps and then sped up | H100 PCIe, 120 min max | $4–6 |
+| 3 | Session C: LatentSync over the existing Kling 2.6 Pro clips (motion without audio) of the six lines | RTX 4090 $0.89/h, 60 min max | $1 |
+| 4 | Optional, only if steps 1–2 pass the mouth test but drift off-model: one Mortimer LoRA (§15) and a rerun of the best model | A100 80 GB $2.09/h, 180 min max | $6–9 |
+| | **Total** | | **about $9–13 without step 4; $15–22 with it.** Studio cap $25, RunPod balance $25 |
+
+Each session's cost includes boot and weights download (about 10–20 min, **estimate**: the 14B models are 60–70 GB). A session the cap would refuse is not launched.
+
+**Pass/fail criteria (all must pass for a "go"):**
+
+| Criterion | How it is measured | Pass |
+|---|---|---|
+| **Mortimer stays on-model** | Blind review: the owner scores each clip 1–5 with the model names hidden and the order shuffled (face, outfit, proportions, flat 2D style, no photoreal shading). An automated check compares the share of the character's pixels inside the approved palette with the start frame | Average **≥ 4**, no clip below 3, and the palette share within 10% of the start frame |
+| **The mouth follows the audio** | Blind review score, plus an automated measure: change in the mouth area per frame (the mouth box comes from the rig's own start frame) against the loudness of the line audio, using correlation and lag. Calibrated first on the Kling Avatar clips | Owner score **≥ 4**; correlation **at least Kling Avatar's minus 0.1**; lag ≤ 2 frames |
+| **Length** | The existing check: our audio laid in, length within 1 frame at 30 fps | Every clip |
+| **Cost per clip** | From the ledger: GPU seconds × the launch price, including each clip's share of boot and idle time | **≤ $0.10 per 5 s clip** (Kling: $0.28 Avatar, $0.35–0.70 2.6 Pro) |
+| **Turnaround** | Wall time per clip, from the ledger | ≤ 10 min, so a 60 s Short fits in one working day |
+
+**How it is compared with the Kling clips we have:**
+- The shot comparison already shows the rig render, Kling 2.6 Pro and Kling Avatar side by side for each line, with our audio under each, the length check, and the cost per clip and per second.
+- Each self-hosted model becomes another column in the same grid, from the same plan record (same frame, audio and action), so everything is compared like for like.
+- The blind review uses the same clips with labels hidden.
+- The result is a short table per line (scores, correlation, cost, time), recorded in this document as §19 when the test is done.
+
+**Optional pre-check without a new account:** the existing fal key could run Wan 2.2 S2V on two lines at 480p, about $1 in total, to see cartoon quality before opening a RunPod account. It is a paid call, so it needs your approval, and that fal endpoint is being removed on January 4, 2027.
+
+---
+
+## 17. Monthly cost for video, and what it does to §12
+
+**Assumptions:**
+- A 60 s Short is fully talking/acting clips: 12 clips of 5 s each, at 480p, upscaled to 1080×1920.
+- On average 1.5 takes per clip.
+- One GPU session per Short, with about 12 min of boot and idle time.
+- Times come from Wan's official H100 table (§14.5). "Sped up" assumes the 4–8-step LoRAs give about 8× **(secondary; to be measured in §16)**.
+- The §5.4 figure of $10–20 a month covers image work only. These amounts come on top of it.
+
+**GPU-minutes per 60 s Short:**
+
+| Setting | Generation | Plus boot/idle | Total |
+|---|---|---|---|
+| H100, default steps | 12 × 5.5 min × 1.5 = 99 min | 12 min | **about 111 min** |
+| H100, sped up | about 12 min | 12 min | **about 24 min** |
+| L40S, default steps (assumed about A100 speed, 13.5 min per clip; **estimate**) | 243 min | 12 min | **about 255 min (4.3 h)** |
+
+**Per month:**
+
+| Cadence | H100, default (PCIe $2.89 to SXM $4.39) | H100, sped up | L40S, default ($1.09) | Kling Avatar Standard, same 1.5 takes |
+|---|---|---|---|---|
+| **1 Short a day (30)** | 56 h: **$160–245** | 12 h: **$35–53** | 128 h: **$139** | 30 × $5.06: **$152** |
+| **3 Shorts a week (13)** | 24 h: **$70–106** | 5.2 h: **$15–23** | 55 h: **$60** | 13 × $5.06: **$66** |
+
+At 720p, generation takes about 3.2× as long (official table), and the GPU costs rise by about the same factor.
+
+**What this does to the break-even in §12:**
+- **The card class changes.** The audio-driven 14B models peak at about 41 GB at 480p. A 24–32 GB card runs them only with heavy offloading and very slowly. The relevant line in §12 is therefore the **48 GB** one: an L40S build at about $11,000, break-even at about **310 GPU-hours, or $340, a month**. A 96 GB RTX PRO 6000 build (about $16,000 card + $3,000) is about $528 a month written off, with break-even at about **210 h, or $560, a month** against its $2.69/h rental.
+- **None of the video scenarios reaches it.** The heaviest case, one Short a day on an L40S at default steps, uses about 128 h a month, under half of the 310 h break-even. With the speed-up, the hours fall about 8×.
+- **The real choice for video is self-hosting versus Kling, not buying versus renting.** At default steps, self-hosting costs about the same as Kling Avatar. Only the speed-up makes it clearly cheaper: about $15–53 a month against $66–152. Buying would make sense only from about **2.5 Shorts a day at default steps on 48 GB**, and even then only once the models and quality have been settled.
+- **The $50 cap in §11.1** covers 3 Shorts a week with the speed-up ($15–23 plus $10–20 of image work). One Short a day needs about $75 a month with the speed-up ($35–53 plus image work), or $170–265 at default steps. That is a cap decision for you, after the proof of concept.
+
+---
+
+## 18. Risks, unknowns, and when I would recommend against it
+
+**Risks and unknowns:**
+1. **Cartoon fidelity.** Most of these models were trained on real people. Only MultiTalk and HunyuanVideo-Avatar claim cartoon support. Likely failures are 3D or photoreal shading, a drifting face or outfit, and realistic lips on a simple cartoon mouth. **Our rig already gives on-model, audio-synced mouths at $0**, so AI video has to beat that, not just work.
+2. **Speed-ups are third-party.** The 5–10× gain from 4–8-step LoRAs is not the publishers' claim, it may cost quality, and the LoRAs' licences were not read. Without them, self-hosting does not save money (§14.5).
+3. **Resolution.** The audio models are 480p (OmniAvatar is 480p only). Shorts are 1080×1920, so either a 2.25× upscale, with a quality risk, or 720p at about 3.2× the cost.
+4. **Continuity across clips.** Each 5 s clip is generated separately, so colour, lighting and identity can jump between clips. InfiniteTalk notes colour shift beyond about a minute.
+5. **Licences of the parts.** The main models are Apache 2.0, but the audio encoders, text encoders and speed-up LoRAs were not checked. HunyuanVideo-Avatar's territory exclusion and LTX-2.5's unread licence keep those two out.
+6. **Model churn.** fal is retiring the Wan 2.2 endpoints in January 2027, and new avatar models appear every few months. A pipeline built now may be outdated within a year, and the engineering time, not the GPU cost, is the main expense.
+7. **Unmeasured figures.** S2V and InfiniteTalk times per clip, VRAM in our workflow, L40S speed and weights download time are all estimates until the proof of concept.
+8. **Data handling.** Our frames and audio go to a RunPod Secure Cloud host. There are no secrets on the pod beyond the session token (§11.1).
+
+**I would recommend against it if:**
+- the proof of concept fails either the on-model or the mouth test against Kling Avatar on the same lines; or
+- the measured cost per clip with the speed-up is above about **$0.15**, when Kling Avatar costs $0.28 with no engineering; or
+- output stays at under about **3 Shorts a week**, where the saving over Kling (about $40–50 a month) does not pay for building and maintaining the pipeline; or
+- the owner's blind review cannot tell the AI clips from the rig renders in a way that matters for the Shorts. If AI motion does not visibly improve them, the free rig remains the better choice.
+
+**Sources (official, read 2026-11-21):**
+- Wan 2.2 I2V-A14B: https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B
+- Wan 2.2 TI2V-5B: https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B
+- Wan 2.2 S2V-14B: https://huggingface.co/Wan-AI/Wan2.2-S2V-14B
+- Wan 2.2 README, efficiency table and licence: https://github.com/Wan-Video/Wan2.2, https://github.com/Wan-Video/Wan2.2/blob/main/LICENSE.txt, https://raw.githubusercontent.com/Wan-Video/Wan2.2/main/assets/comp_effic.png
+- LTX-2 card, README and LTX-2 Community License: https://huggingface.co/Lightricks/LTX-2, https://github.com/Lightricks/LTX-2, https://github.com/Lightricks/LTX-2/blob/main/LICENSE-2
+- InfiniteTalk: https://github.com/MeiGen-AI/InfiniteTalk, https://huggingface.co/MeiGen-AI/InfiniteTalk
+- MultiTalk: https://github.com/MeiGen-AI/MultiTalk
+- OmniAvatar: https://github.com/Omni-Avatar/OmniAvatar
+- HunyuanVideo-Avatar and its licence: https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar
+- LatentSync: https://github.com/bytedance/LatentSync
+- RunPod pricing (dated 2026-11-12): https://www.runpod.io/pricing
+- RunPod billing: https://docs.runpod.io/pods/pricing
+- fal.ai pricing and model pages: https://fal.ai/pricing, https://fal.ai/models/fal-ai/wan/v2.2-a14b/image-to-video, https://fal.ai/models/fal-ai/wan/v2.2-14b/speech-to-video, https://fal.ai/models/fal-ai/kling-video/ai-avatar/v2/standard, https://fal.ai/models/fal-ai/kling-video/v2.6/pro/image-to-video
