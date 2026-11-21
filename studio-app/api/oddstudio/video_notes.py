@@ -24,7 +24,7 @@ MAX_ROLES = 6
 SHOTS = ("wide", "medium", "close")
 CAMERA = ("static", "pan", "tilt", "zoom in", "zoom out", "handheld", "tracking")
 POSITIONS = ("left", "center", "right", "background")
-POSES = ("standing", "seated", "walking", "leaning", "lying")
+POSES = ("standing", "seated", "walking", "leaning", "lying", "kneeling")
 FACING_FIXED = ("camera", "away", "left", "right")
 EMOTIONS = ("neutral", "calm", "happy", "amused", "laughing", "excited", "proud", "smug", "surprised", "shocked",
             "confused", "curious", "worried", "nervous", "anxious", "scared", "sad", "disappointed", "embarrassed",

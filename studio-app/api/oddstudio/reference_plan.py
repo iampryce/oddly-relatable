@@ -159,7 +159,7 @@ def view(db: Session, ep: Episode) -> dict:
         if seated and spec is None:
             seat_note.append("choose the episode's set to see how many seats it has")
         if any(ro.get("pose") not in (None, *POSE_OK) for ro in r.get("roles", [])):
-            seat_note.append("lying down is not supported: they stand")
+            seat_note.append("lying down or kneeling will be skipped: they stand")
         if any(ro.get("role", "").startswith("reactor") and ro["role"] not in roles for ro in r.get("roles", [])):
             seat_note.append("more people than characters: the extra roles are left out")
         items = {

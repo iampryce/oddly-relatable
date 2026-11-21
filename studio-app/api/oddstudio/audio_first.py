@@ -185,7 +185,8 @@ def _notes_view(tr: dict) -> dict | None:
     notes = tr.get("video_notes")
     if not notes:
         return None
-    return {**{k: v for k, v in notes.items() if k != "ranges"}, "ranges": VN.align(notes.get("ranges", []), tr.get("lines", []))}
+    # the per-person frames stay on the server (for the cast mapping); the view has the ranges and the quality readout
+    return {**{k: v for k, v in notes.items() if k not in ("ranges", "people_frames")}, "ranges": VN.align(notes.get("ranges", []), tr.get("lines", []))}
 
 
 def _full_audio(db: Session, ep: Episode) -> dict | None:
@@ -352,6 +353,13 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, start: f
             elif hints and ep.format == "short" and seconds is not None and seconds > MAX_SECONDS["short"] + 0.5:
                 raise HTTPException(422, f"the video runs {seconds:.0f} s: choose the Short's 60 s window with the upload, "
                                          "so only that part of the video is analysed for the notes")
+            if hints:
+                # the notes' estimated cost must fit under the cap (Settings > Video and visual analysis)
+                est = notes_estimate(db, (window["end"] - window["start"]) if window else float(seconds or 0), ep.format)
+                if est.get("configured") and not est["within_cap"]:
+                    raise HTTPException(409, f"the video notes would cost about ${est['usd']:.2f} ({est['frames']} frames), "
+                                             f"over the ${est['cap_usd']:.2f} cap: use a shorter part of the video or raise "
+                                             "the cap in Settings > Video and visual analysis")
             ep.audio_asset_id, ep.last_error = None, ""
             ep.audio_transcript = {"source_media": {"type": "video", "preparing": True, "hints_requested": bool(hints)}}
             set_stage(ep, "audio_preparing")
@@ -432,6 +440,9 @@ def apply_window(db: Session, ep: Episode, start: float, end: float) -> None:
                  "base": round(start, 3), "length": round(end - start, 3)}
         if notes.get("original"):
             notes["original"] = VN.shift(notes["original"], delta, end - start)
+        if notes.get("people_frames"):
+            notes["people_frames"] = [{**f, "t": round(f["t"] + delta, 2)} for f in notes["people_frames"]
+                                      if 0 <= f["t"] + delta <= end - start]
     ep.audio_transcript = {k: v for k, v in {**tr, "source_media": sm, "video_notes": notes,
                                              "trim": {"start": round(start, 3), "end": round(end, 3)}}.items()
                            if k in KEEP_KEYS and v is not None}
@@ -497,16 +508,24 @@ def clear_video_notes(eid: int, db: Session = Depends(get_db)):
     return state(db, ep)
 
 
-@router.get("/audio/video-notes/estimate")
-def video_notes_estimate(seconds: float, db: Session = Depends(get_db)):
-    """Before an upload: how many frames the notes would use for `seconds` of video and what the call should cost with
-    the configured vision provider (an estimate from list prices)."""
-    from . import video_notes as VN
+def notes_estimate(db: Session, seconds: float, fmt: str) -> dict:
+    """Frames, calls and estimated cost of the v2 notes for `seconds` of video, with the cap and whether it fits."""
+    from . import notes_v2 as NV
+    from .settings_store import get_section
+    cap = NV.clamp_cap(get_section(db, "vision").get("notes_cap_usd"))
+    seconds = max(0.0, min(seconds, MAX_SECONDS["long"]))
     try:
         cfg = hints_vision_config(db)
     except ValueError as e:
-        return {"configured": False, "frames": len(VN.frame_times(0.0, max(0.0, seconds))), "message": str(e)}
-    return VN.estimate(max(0.0, min(seconds, MAX_SECONDS["long"])), cfg["provider"], cfg.get("model", ""))
+        return {"configured": False, "frames": len(NV.frame_times(0.0, seconds, fmt)), "cap_usd": cap, "message": str(e)}
+    return NV.estimate(seconds, fmt, cfg["provider"], cfg.get("model", ""), cap)
+
+
+@router.get("/audio/video-notes/estimate")
+def video_notes_estimate(seconds: float, format: str = "short", db: Session = Depends(get_db)):
+    """Before an upload: how many frames the notes would use for `seconds` of video, the calls, the estimated cost
+    with the configured vision provider (list prices) and the episode cap."""
+    return notes_estimate(db, seconds, "long" if format == "long" else "short")
 
 
 @router.post("/episodes/{eid}/audio/transcribe")
@@ -886,7 +905,8 @@ def audio_media_prepare(ctx: Ctx) -> dict:
             if p.get("hints"):
                 from . import video_notes as VN
                 frames_dir = uploads_dir() / f"notes-{ep.id}-{uuid.uuid4().hex[:8]}"
-                frames = media.sample_frames_at(src, frames_dir, VN.frame_times(win["start"], win["end"]))
+                from . import notes_v2 as NV
+                frames = media.sample_frames_at(src, frames_dir, NV.frame_times(win["start"], win["end"], ep.format))
                 ctx.log(f"{len(frames)} frame(s) sampled in {win['start']:.1f}-{win['end']:.1f} s for the video notes "
                         "(deleted after use)")
         finally:
@@ -972,28 +992,52 @@ def audio_video_notes(ctx: Ctx) -> dict:
             db.add(Event(episode_id=ep.id, kind="episode", message=f"No video notes: {e}"))
             db.commit()
             return {"skipped": str(e)}
+        from . import notes_v2 as NV
         times = [float((p.get("times") or {}).get(f.name, 0.0)) for f in frames]
-        analysis.last_vision_usage.clear()
-        ans = analysis.analyse_images(cfg, frames, VN.prompt(times))
-        usage = dict(analysis.last_vision_usage)
-        length = float(p.get("length") or 0) or (max(times) + VN.FRAME_EVERY)
-        ranges, redacted = VN.clean_notes(ans, length)
+        length = float(p.get("length") or 0) or (max(times) + NV.EVERY.get(ep.format, 1.0))
+        est = notes_estimate(db, length, ep.format)
+        if est.get("configured") and not est["within_cap"]:
+            msg = f"video notes skipped: about ${est['usd']:.2f}, over the ${est['cap_usd']:.2f} cap"
+            db.add(Event(episode_id=ep.id, kind="episode", message=msg))
+            db.commit()
+            return {"skipped": msg}
+        step = (length / len(frames)) if frames else 1.0
+        kept, stripped, usages, mappings, sent = [], 0, [], [], 0
+        for idx in NV.batches(len(frames)):
+            carried = kept[-1]["people"] if kept else None   # the overlap frame, described in words
+            analysis.last_vision_usage.clear()
+            ans = analysis.analyse_images(cfg, [frames[i] for i in idx], NV.prompt([times[i] for i in idx], carried))
+            usages.append(dict(analysis.last_vision_usage))
+            sent += len(idx)
+            got, s = NV.clean_frames(ans, [times[i] for i in idx])
+            stripped += s
+            if kept:
+                got, m = NV.renumber(kept[-1], got)
+                mappings.append(NV.summarize_mapping(m))
+            kept += got
+        ranges, redacted = NV.to_ranges(kept, length, step)
+        usage = {"provider": (usages[0] if usages else {}).get("provider"), "model": (usages[0] if usages else {}).get("model"),
+                 "input_tokens": sum(u.get("input_tokens") or 0 for u in usages),
+                 "output_tokens": sum(u.get("output_tokens") or 0 for u in usages), "calls": len(usages)}
+        quality = NV.quality(kept, sent, stripped + redacted, usages, est.get("usd"), mappings)
         db.refresh(ep)
         tr = dict(ep.audio_transcript or {})
-        tr["video_notes"] = {"ranges": ranges, "base": float(p.get("base") or 0.0), "length": round(length, 3),
-                             "frames": len(frames), "redacted": redacted, "usage": usage, "job_id": job.id,
-                             "edited": False, "source": "video frames (deleted)"}
+        tr["video_notes"] = {"version": NV.VERSION, "ranges": ranges, "people_frames": kept, "quality": quality,
+                             "base": float(p.get("base") or 0.0), "length": round(length, 3), "frames": len(frames),
+                             "redacted": stripped + redacted, "usage": usage, "job_id": job.id, "edited": False,
+                             "source": "video frames (deleted)"}
         tr["media_hints"] = {**VN.summary(ranges), "frames": len(frames), "job_id": job.id, "usage": usage,
                              "from": "video notes"}
         ep.audio_transcript = tr
-        db.add(Event(episode_id=ep.id, kind="episode", message=f"Video notes: {len(ranges)} range(s) from {len(frames)} "
-                                                              f"frame(s); {redacted} value(s) outside the notes' schema "
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"Video notes: {quality['people']} people, {len(ranges)} "
+                                                              f"range(s) from {len(frames)} frame(s) in {len(usages)} call(s); "
+                                                              f"{stripped + redacted} value(s) outside the notes' schema "
                                                               "removed; frames deleted"))
         db.commit()
         if usage:
             ctx.log(f"Vision call: {usage.get('provider')} {usage.get('model')}, {usage.get('input_tokens')} input / "
                     f"{usage.get('output_tokens')} output tokens")
-        return {"ranges": len(ranges), "frames": len(frames), "redacted": redacted, "usage": usage}
+        return {"ranges": len(ranges), "frames": len(frames), "redacted": stripped + redacted, "usage": usage, "quality": quality}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 

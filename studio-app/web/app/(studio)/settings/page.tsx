@@ -114,6 +114,8 @@ function CapabilityCard({id, cap, sections, data, reload}: {id: string; cap: any
         <div style={{gridColumn: '1 / -1'}}><label htmlFor="voice-library">Fish voice library (auto-casting). One voice per line: voice id or fish.audio link | label | him/her/neutral | how it sounds. New characters get the best match; each can be changed.</label>
           <textarea id="voice-library" rows={6} value={s.v.library ?? ''} onChange={e => s.set('library', e.target.value)} placeholder={'e3cd384158934cc9a01029cd7d278634 | Warm advisor | her | calm, warm, reassuring'} /></div></div>}
       {id === 'voice' && <VoiceCompare />}
+      {id === 'vision' && <div><label htmlFor="vision-notes-cap">Video notes: most one episode may cost (USD; shown before every upload)</label>
+        <input id="vision-notes-cap" type="number" min={0.01} max={10} step={0.05} value={s.v.notes_cap_usd ?? 0.5} onChange={e => s.set('notes_cap_usd', Number(e.target.value))} /></div>}
       {id === 'transcription' && <div><label htmlFor="tr-lang">Language (empty: detect)</label><input id="tr-lang" value={s.v.language} onChange={e => s.set('language', e.target.value)} placeholder="en" /></div>}
       {id === 'motion' && <>
         <p className="muted small">The studio 2D rig animator performs the script&apos;s acting on the CPU and keeps the approved characters exact. Hosted video models (fal.ai) are paid per clip and capped by the budget below.</p>

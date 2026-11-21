@@ -8,7 +8,7 @@ export const NOTE_SETTINGS = ['office', 'meeting room', 'kitchen', 'living room'
 export const NOTE_FURNITURE = ['long table', 'round table', 'desk', 'sofa', 'counter', 'bed', 'bench', 'none'];
 export const NOTE_TIME = ['daytime', 'evening', 'night'];
 export const NOTE_POSITIONS = ['left', 'center', 'right', 'background'];
-export const NOTE_POSES = ['standing', 'seated', 'walking', 'leaning', 'lying'];
+export const NOTE_POSES = ['standing', 'seated', 'walking', 'leaning', 'lying', 'kneeling'];
 export const NOTE_FACING = ['camera', 'away', 'left', 'right', 'speaker', ...Array.from({length: 9}, (_, i) => `reactor ${i + 1}`)];
 export const NOTE_EMOTIONS = ['neutral', 'calm', 'happy', 'amused', 'laughing', 'excited', 'proud', 'smug', 'surprised', 'shocked',
   'confused', 'curious', 'worried', 'nervous', 'anxious', 'scared', 'sad', 'disappointed', 'embarrassed', 'awkward', 'annoyed',
