@@ -13,13 +13,16 @@ Nothing in this change is installed or run automatically. The owner installs it 
 - **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). It is a **dry run** by default: it only lists what it would remove, with sizes. With `--apply` it removes:
   - every release folder except the current one, any release a running container uses, and the 5 newest. The `oddstudio-api`/`oddstudio-web` images of removed releases go too, so `rollback.sh` keeps working for every kept release.
   - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
-  - dangling images, and build cache older than 7 days.
+  - dangling images, build cache older than 7 days, and any build cache above 10 GB (`BUILD_CACHE_MAX`; the least recently used goes first).
   - backups beyond the newest 7 nightly and 5 deploy-time, counted separately. The newest backup is never removed.
   - database dumps older than 30 days. The newest dump is never removed.
   - deploy logs older than 30 days, and the systemd journal above 100 MB.
 - **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; the weekly sweep catches anything a crash left behind. Backups also leave `work/uploads` out.
 - **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media, apart from `work/uploads`) and running containers.
-- **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS` and `JOURNAL_MAX` are environment variables.
+- **Build cache cap** (owner decision 2026-11-20): every deploy builds images and refreshes the Docker build cache, so with frequent deploys nothing in it is ever older than 7 days and the age rule frees nothing; the cache had grown to 45 GB. `--apply` therefore also caps it with `docker builder prune --max-used-space $BUILD_CACHE_MAX` (default 10GB). The 10 GB kept covers the recent layers, so normal deploys stay fast; a deploy after a large dependency change rebuilds those layers and takes a few minutes longer.
+- **Deploy lock:** `--apply` holds the deploy lock (`/srv/stickman/.ci-deploy.lock`, the one `ci-deploy.sh` takes). If a deploy is running, the releases, images and build-cache steps are skipped and the rest still runs; a deploy that starts while maintenance holds the lock fails with "another deploy is running" and can be re-run.
+- **Projected free space:** the dry run ends with `projected free after --apply`, in the same units as `df -h`, counting the releases it would remove, the images no container uses, and the build cache above the cap.
+- **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS`, `BUILD_CACHE_MAX` and `JOURNAL_MAX` are environment variables.
 - **The 30-day database-dump folder** (`/srv/stickman/db-dumps/`):
   - Each nightly backup also writes `<stamp>-nightly.dump` with a `.sha256` file there.
   - Dumps are kept for 30 days (`DUMP_DAYS`), pruned by age by the nightly job and by `maintenance.sh`. The newest dump is never removed, however old it is.
