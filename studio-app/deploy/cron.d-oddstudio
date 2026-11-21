@@ -6,5 +6,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Nightly backup (database dump + media), keeping the newest 7 nightly backups (deploy-time backups are counted apart).
 30 3 * * * root BACKUP_KIND=nightly KEEP_NIGHTLY=7 /srv/stickman/current/studio-app/deploy/backup.sh >> /var/log/oddstudio-backup.log 2>&1
 
-# Weekly housekeeping, Sunday 04:30. A DRY RUN (report only) until the owner adds --apply to this line.
-30 4 * * 0 root /srv/stickman/current/studio-app/deploy/maintenance.sh >> /var/log/oddstudio-maintenance.log 2>&1
+# Weekly housekeeping, Sunday 04:30, applied (owner decision 2026-11-21, after one verified manual --apply): removes
+# old releases and their images, unused images, the build cache above 10GB, and old backups and dumps (the newest of
+# each is always kept). For a report only, run maintenance.sh without --apply.
+30 4 * * 0 root /srv/stickman/current/studio-app/deploy/maintenance.sh --apply >> /var/log/oddstudio-maintenance.log 2>&1
