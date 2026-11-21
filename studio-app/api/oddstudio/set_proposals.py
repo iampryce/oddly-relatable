@@ -111,7 +111,8 @@ def propose(eid: int, db: Session = Depends(get_db)):
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
     if ep.source == "audio":
-        ranges = ((ep.audio_transcript or {}).get("video_notes") or {}).get("ranges") or []
+        from .reference_plan import effective
+        ranges = effective(ep.audio_transcript or {})   # your edits, without the items you ignored in the plan
         if not ranges:
             raise HTTPException(409, "this episode has no video notes to propose a set from: write the description yourself")
         _save(db, ep, VN.proposal_text(ranges), "video notes")

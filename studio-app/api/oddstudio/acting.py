@@ -113,6 +113,22 @@ def rig_for(ctx, c) -> Path:
     return d
 
 
+def seat_starts(staging: dict, cast: list[str], seats: int) -> tuple[dict[str, str], list[str]]:
+    """How the first scene starts: seated characters take seats 0, 1, ... in staging order (speaker first); standing
+    ones start on stage. Returns ({key: "seat:N" | "on"}, [seated characters left standing for want of a seat])."""
+    out, left, n = {}, [], 0
+    for k, pos in staging.items():
+        if k not in cast:
+            continue
+        if pos == "seated" and n < seats:
+            out[k], n = f"seat:{n}", n + 1
+        else:
+            out[k] = "on"
+            if pos == "seated":
+                left.append(k)
+    return out, left
+
+
 def face_for(rig_faces: set[str], c, expression: str) -> str:
     """The rig face for a line's expression, matched like the pose engine (exact, then loose), else neutral."""
     e = (expression or "").lower()
@@ -199,6 +215,14 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         # react or are looked at, so they have no line of their own to walk in on)
         on = k in first_scene_cast or not first_scene_cast or k not in speaking
         cast[k] = {"rig": str(rd), "height": 530, "lips": lips, "start": "on" if on else "off"}
+    # how the first scene starts (feat/seating): its seated characters take the set's seats in staging order (speaker
+    # first); more seated characters than seats stand, and the log says so
+    first = scenes[refs[0][0][0]] if refs and refs[0] else None
+    starts, standing = seat_starts(getattr(first, "staging", None) or {}, list(cast), len(studio_sets.seats_of(st)))
+    for k, v in starts.items():
+        cast[k]["start"] = v
+    for k in standing:
+        ctx.log(f"{k}: seated in the scene's staging, but the set has no free seat: standing")
 
     lines, t, entered = [], 0.5, {k for k in keys if cast[k]["start"] == "on"}
     line_ids = []

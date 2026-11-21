@@ -48,7 +48,15 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 - **What is kept:** per time range, only: shot (wide, medium, close), camera movement, setting type, and anonymous roles (`speaker`, `reactor 1`..`reactor 9`) with position, pose, who they face, and an emotion word. Every field is a fixed list. Anything else in the model's answer (names of people, actors or characters, faces, appearance, clothing, brands, logos, on-screen text, dialogue, free text) is removed and counted (`redacted`). The notes' times are the audio's, so each range shows the recorded lines it covers; moving the Short's window moves the notes, and notes outside the new window are dropped.
 - **What is deleted:** the frames, right after the notes are made (whatever happens), and the video, right after its audio is extracted. Nothing visual is stored or backed up (`work/uploads` is temporary and left out of backups).
 - **"Inspired by video notes"** in the Audio tab: read the notes, change a range's shot, camera or setting, remove a range, or clear them all, before the scenes are built.
-- **How the scenes use them:** as soft suggestions only. The AI writer gets each line's note (shot, who reacts, positions) and is told never to change the dialogue; the simple split takes the note's shot and adds reaction cutaways of the silent characters for its reactors. The dialogue is copied from the transcript in both cases, and the characters and sets stay the studio's own.
+- **How the scenes use them:** as strong suggestions (dialogue and timing stay locked). The AI writer gets each line's note (shot, who reacts, positions) and is told never to change the dialogue; the simple split takes the note's shot and adds reaction cutaways of the silent characters for its reactors. The dialogue is copied from the transcript in both cases, and the characters and sets stay the studio's own.
+- **Every field is editable** (shot, camera, setting, furniture, time of day, and each role's position, pose, facing and emotion). The first edit keeps the vision model's unedited notes, so the plan can show both values.
+- **Reference plan (accept before building).** The Audio tab lists, per time range, what the notes will drive:
+  - **Set:** the set proposal.
+  - **Seating:** who is seated or standing and whom they face. Each scene starts that way, speaker first.
+  - **Shot:** a strong suggestion to the scene writer.
+  - **Reactors:** silent reaction cutaways.
+
+  Each item shows the value it will use, the unedited value when you changed it ("was"), a used/ignored toggle, and a note on anything the renderer cannot do yet (camera moves, lying down, more seated people than seats). The scenes cannot be built until you accept the plan, and editing the notes or a toggle withdraws the acceptance. Roles are mapped to the cast: "speaker" is the range's first speaker; "reactor N" is the N-th other character (silent characters first). Only fixed-list values are ever used.
 - **Existing episodes** have no notes: re-upload the video with the box ticked to get them.
 
 ## Scenes and production (Stages 2 and 3)

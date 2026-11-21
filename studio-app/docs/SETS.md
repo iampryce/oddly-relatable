@@ -29,3 +29,15 @@ The **Proposed set for this story** box sits on the same card. The studio propos
   - A second request never overwrites a queued one; each gets its own ID.
 - Nothing is generated or approved by itself.
 - Data: `episodes.set_proposal` (migration `0009`, holding the text, its source and when it was saved).
+
+## Seats and the table front
+
+On the set approval screen (Settings › Sets) you mark the set's staging before approving it.
+
+- **Seats:** "Add a seat", then click where the seated feet rest. A set can have several seats. You can adjust each seat's hip height and feet height. A set that already has the older single `seat` keeps working.
+- **Table front:** "Mark the table front", then click two corners. That part of the picture is drawn again after the seated characters, so they sit behind the table. Standing characters are drawn after it, in front.
+
+How seats are used in a render:
+- A scene can start with characters seated (`start: "seat:N"`). Its seated characters take the seats in the scene's staging order, speaker first.
+- If there are more seated characters than seats, the extras stand, and the job log says so.
+- A character told to sit on a taken seat goes to the nearest free seat. If no seat is free, they stay standing.
