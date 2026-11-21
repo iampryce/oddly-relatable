@@ -201,7 +201,8 @@ function pose(k, t) {
   if (cur) target = cur.speaker === k ? (cur.look_at || nearestOtherAt(k, t)) : cur.speaker;
   let look = {x: 0, y: 0.1};
   if (L.walking) look = {x: 0.8 * L.dir, y: 0};
-  else if (target && target !== k) look = {x: clamp((locomotion(target, t).x - x) / 160, -1, 1), y: 0.05};
+  // a target outside this render's cast (the spec builder adds everyone a line references; this guards older specs)
+  else if (target && target !== k && C[target]) look = {x: clamp((locomotion(target, t).x - x) / 160, -1, 1), y: 0.05};
   const lk = looks[k]; lk.x += (look.x - lk.x) * 0.35; lk.y += (look.y - lk.y) * 0.35; p.look = {...lk};
   // arms
   for (const side of [-1, 1]) {

@@ -155,10 +155,8 @@ def generate_storyboard(ctx: Ctx) -> dict:
         db.delete(old)
     db.flush()
     for i, s in enumerate(sv.content["scenes"], 1):
-        cast = []
-        for ln in s["lines"]:
-            if ln["speaker"] not in cast:
-                cast.append(ln["speaker"])
+        from .acting import referenced
+        cast = list(dict.fromkeys(k for ln in s["lines"] for k in referenced(ln)))   # speakers, look-at targets, reactors
         db.add(StoryboardScene(episode_id=ep.id, position=i, scene_key=s["id"], heading=s["heading"], location=s.get("location", ""),
                                description=s.get("description", ""), action=s.get("action", ""), camera=s.get("camera", ""),
                                characters=cast, lines=s["lines"], status="draft"))
@@ -191,7 +189,8 @@ def regenerate_scene(ctx: Ctx) -> dict:
     checked = validate_script(trial, known)["scenes"][0]
     for k in ("heading", "location", "description", "action", "camera", "lines"):
         setattr(sc, k, checked[k])
-    sc.characters = list(dict.fromkeys(ln["speaker"] for ln in checked["lines"]))
+    from .acting import referenced
+    sc.characters = list(dict.fromkeys(k for ln in checked["lines"] for k in referenced(ln)))
     sc.status, sc.revision_note = "draft", ""
     event(db, ep.id, "storyboard", f"Scene {sc.position} regenerated")
     db.commit()
