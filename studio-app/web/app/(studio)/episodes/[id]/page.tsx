@@ -8,6 +8,7 @@ import CastPanel from '@/components/CastPanel';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
 import AudioPanel from '@/components/AudioPanel';
+import EpisodeSetPicker from '@/components/EpisodeSetPicker';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
 
 const TABS = ['Audio', 'Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
@@ -50,6 +51,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <DialogueDisplay ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
+      <EpisodeSetPicker ep={ep} act={act} />
       <div className="tabs" role="tablist">
         {tabsFor(ep).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
       </div>
@@ -333,13 +335,14 @@ function JobRow({job, act}: {job: any; act: Ctx['act']}) {
 }
 
 function ProductionTab({ep, can, act}: Ctx) {
-  const prodJobs = ep.jobs.filter((j: any) => ['scene_prepare', 'scene_voice', 'render_episode', 'plan_segments', 'render_segment', 'join_segments'].includes(j.kind) && j.revision === ep.revision);
+  const prodJobs = ep.jobs.filter((j: any) => ['scene_prepare', 'scene_voice', 'audio_slice', 'render_episode', 'plan_segments', 'render_segment', 'join_segments'].includes(j.kind) && j.revision === ep.revision);
   const done = prodJobs.filter((j: any) => j.status === 'succeeded').length;
   return (
     <div className="stack">
-      {can('start_production') && (
+      {can('start_production') && (<>
         <div className="card spread"><div><h2 style={{marginBottom: 2}}>Start production</h2><span className="muted">Scene preparation, voice, then the full render with QA.</span></div>
-          <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('start', () => api(`/episodes/${ep.id}/production/start`, {method: 'POST'}))}>Start production</button></div>)}
+          <button className="btn primary" disabled={!!act.busy || !ep.set_id} title={ep.set_id ? '' : 'Choose the episode\'s set first'} onClick={() => act.run('start', () => api(`/episodes/${ep.id}/production/start`, {method: 'POST'}))}>Start production</button></div>
+        {!ep.set_id && <div className="alert warn small">Choose this episode's set first (Set, above): there is no default set.</div>}</>)}
       {ep.stage === 'production_failed' && <div className="alert bad">A production job failed. Fix the cause (see the error and log), then retry only that job.</div>}
       {ep.format === 'long' && <SegmentsPanel ep={ep} act={act} />}
       {ep.scenes.length > 0 && (

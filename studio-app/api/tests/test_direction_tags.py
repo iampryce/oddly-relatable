@@ -83,6 +83,7 @@ class DirectionTagsInProductionTest(unittest.TestCase):
         eid = self.approved_storyboard()
         self.ok(self.c.put("/api/settings/voice", json={"provider": "openai", "default_voice": "alloy"}))
         self.ok(self.c.post(f"/api/episodes/{eid}/storyboard/approve", json={}))
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         self.ok(self.c.post(f"/api/episodes/{eid}/production/start"))
         ran = self.env.run_jobs(["scene_voice"])
         self.assertEqual({x[1] for x in ran}, {"succeeded"}, ran)
