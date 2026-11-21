@@ -29,7 +29,10 @@ export default function Bin() {
             <td>{b.label}</td><td>{b.kind}</td><td>{formatBytes(b.size_bytes)} ({b.files} file(s))</td>
             <td className="small">{when(b.deleted_at)} by {b.deleted_by}</td><td className="small">{b.days_left} day(s)</td>
             <td className="row" style={{gap: 4}}>
-              <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('restore', () => api(`/bin/${b.id}/restore`, {method: 'POST'}))}>Restore</button>
+              <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('restore', async () => {
+                const r: any = await api(`/bin/${b.id}/restore`, {method: 'POST'});
+                if (r.warning) window.alert(`Restored ${r.restored}. Note: ${r.warning}.`);
+              })}>Restore</button>
               <button className="btn sm danger" disabled={!!act.busy} onClick={() => forever([b.id])}>Delete forever</button></td>
           </tr>))}</tbody></table></div>}
     </>);

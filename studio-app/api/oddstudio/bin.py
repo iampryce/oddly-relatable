@@ -274,6 +274,8 @@ def forever(db: Session, item: BinItem, user: str) -> int:
     elif item.kind == "episode":
         e = db.get(Episode, int(item.ref))
         if e is not None:
+            for a in db.query(Asset).filter_by(episode_id=e.id):
+                db.delete(a)
             db.delete(e)
     elif item.kind == "clip":
         a = db.get(Asset, int(item.ref))
@@ -361,9 +363,31 @@ def restore_one(bid: int, db: Session = Depends(get_db), user: str = Depends(cur
     b = db.get(BinItem, bid)
     if b is None:
         raise HTTPException(404, "not in the Bin")
+    warning = missing_for(db, b) if b.kind == "episode" else ""
     restore(db, b, user)
     db.commit()
-    return {"restored": b.label}
+    return {"restored": b.label, "warning": warning}
+
+
+def missing_for(db: Session, b: BinItem) -> str:
+    """An episode restored after some of its characters or sets were deleted: name them (production will refuse until
+    they are replaced)."""
+    from . import sets
+    from .character_admin import usage
+    eid = int(b.ref)
+    e = db.get(Episode, eid)
+    if e is None:
+        return ""
+    gone_chars = hidden_ids(db, "character")
+    chars = {c.key: c for c in db.query(Character).all()}
+    used = [k for k, eps in usage(db).items() if any(x["id"] == eid for x in eps)]
+    missing = [k for k in used if k not in chars or chars[k].id in gone_chars]
+    want = {e.set_id, *(e.scene_set_ids or [])} - {None}
+    usable = sets.usable(db)
+    missing_sets = [s for s in want if s not in usable]
+    parts = ([f"characters no longer available: {', '.join(sorted(missing))}"] if missing else []) + \
+            ([f"sets no longer available: {', '.join(sorted(missing_sets))}"] if missing_sets else [])
+    return "; ".join(parts) + ("; production will ask for replacements" if parts else "")
 
 
 class ForeverIn(BaseModel):

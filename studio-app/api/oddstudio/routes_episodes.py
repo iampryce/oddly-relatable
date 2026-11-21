@@ -555,6 +555,9 @@ def retry_job(jid: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "job not found")
     if job.status != "failed":
         raise HTTPException(409, f"only failed jobs can be retried (this one is {job.status})")
+    from .bin import hidden_ids
+    if job.episode_id and job.episode_id in hidden_ids(db, "episode"):
+        raise HTTPException(409, "this job's episode is in the Bin: restore the episode first")
     if job.episode_id and job.kind not in ("character_sheet", "character_pose", "voice_preview"):   # character jobs are not tied to a revision
         ep = get_episode(db, job.episode_id)
         if job.revision != ep.revision:

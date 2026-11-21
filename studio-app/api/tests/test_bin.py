@@ -95,6 +95,9 @@ class BinRulesTest(unittest.TestCase):
         self.assertNotIn("spare", [c["key"] for c in self.c.get("/api/characters").json()])
         self.assertEqual(self.move("episode", self.ids["failed"]).status_code, 200)
         self.assertNotIn(self.ids["failed"], [e["id"] for e in self.c.get("/api/episodes").json()])
+        r = self.c.post(f"/api/jobs/{self.ids['render']}/retry")
+        self.assertEqual(r.status_code, 409, "a binned episode's job cannot be retried")
+        self.assertIn("in the Bin", r.text)
         self.assertEqual(self.c.get(f"/api/episodes/{self.ids['failed']}").status_code, 404)
         self.assertEqual(self.move("set", "garage").status_code, 200)
         self.assertNotIn("garage", [s["id"] for s in self.c.get("/api/sets").json()["sets"]])
@@ -124,9 +127,10 @@ class BinRulesTest(unittest.TestCase):
         self.assertGreater(r["freed_bytes"], 4000)
         self.assertFalse(self.work_folder.exists())
         from oddstudio.db import new_session
-        from oddstudio.models import Episode
+        from oddstudio.models import Asset, Episode
         with new_session() as s:
             self.assertIsNone(s.get(Episode, self.ids["failed"]))
+            self.assertEqual(s.query(Asset).filter_by(episode_id=self.ids["failed"]).count(), 0, "its asset rows are gone too")
         self.assertIn("kitchen", [s["id"] for s in self.c.get("/api/sets").json()["sets"]], "its set stays")
         self.move("pose", self.ids["spare:sad"])
         from oddstudio.storage import storage
@@ -135,6 +139,13 @@ class BinRulesTest(unittest.TestCase):
         self.c.post("/api/bin/forever", json={"all": True, "confirm": True})
         self.assertFalse(path.exists(), "Empty Bin removes the files")
         self.assertEqual(self.c.get("/api/bin").json()["items"], [])
+
+    def test_restoring_an_episode_names_what_is_gone(self):
+        self.move("episode", self.ids["used"])
+        self.assertEqual(self.move("character", self.ids["ralph"]).status_code, 200, "its episode is deleted: the character may go")
+        b = next(x for x in self.c.get("/api/bin").json()["items"] if x["kind"] == "episode")
+        r = self.c.post(f"/api/bin/{b['id']}/restore").json()
+        self.assertIn("characters no longer available: ralph", r["warning"])
 
     def test_purge_after_30_days_by_maintenance(self):
         self.move("pose", self.ids["spare:sad"])
