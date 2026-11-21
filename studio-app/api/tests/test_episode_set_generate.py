@@ -109,9 +109,9 @@ class EpisodeProposalTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         g = r.json()
         self.assertEqual(g["prompt"], shown)
-        self.assertEqual(g["set_id"], f"dinner-party-ep{eid}")
+        self.assertTrue(g["set_id"].startswith(f"dinner-party-ep{eid}-"), g)
         again = self.c.post(f"/api/episodes/{eid}/set-proposal/generate", json={"text": text}).json()
-        self.assertEqual(again["set_id"], f"dinner-party-ep{eid}-2", "a second candidate never overwrites a queued one")
+        self.assertNotEqual(again["set_id"], g["set_id"], "a second candidate never overwrites a queued one")
         ran = self.env.run_jobs(["set_candidate"])
         self.assertEqual([s for _, s, *_ in ran], ["succeeded", "succeeded"], ran)
         self.assertEqual(self.prompts, [shown, shown], "the image API gets exactly the text the episode showed")
@@ -136,6 +136,9 @@ class EpisodeProposalTest(unittest.TestCase):
         self.assertEqual(self.c.put(f"/api/episodes/{busy}/set-proposal", json=text).status_code, 409)
         self.assertEqual(self.c.post(f"/api/episodes/{busy}/set-proposal/generate", json=text).status_code, 409)
         self.assertEqual(self.c.put(f"/api/episodes/{eid}/set-proposal", json={"text": "short"}).status_code, 422)
+        padded = {"text": "   a    b        "}
+        self.assertEqual(self.c.put(f"/api/episodes/{eid}/set-proposal", json=padded).status_code, 422, "checked after trimming")
+        self.assertEqual(self.c.post(f"/api/episodes/{eid}/set-proposal/generate", json=padded).status_code, 422)
 
     def test_script_first_the_writer_proposes_from_the_story(self):
         seen = []

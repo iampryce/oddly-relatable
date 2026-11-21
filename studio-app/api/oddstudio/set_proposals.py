@@ -69,6 +69,14 @@ def view(db: Session, ep: Episode) -> dict:
             if ep.source == "audio" else bool(ep.script_version)}
 
 
+def normalized(text: str) -> str:
+    """Collapsed spaces; refused when the result is shorter than MIN_TEXT (the schema only sees the raw input)."""
+    t = re.sub(r"\s+", " ", text or "").strip()
+    if len(t) < MIN_TEXT:
+        raise HTTPException(422, f"the description needs at least {MIN_TEXT} characters")
+    return t
+
+
 def _save(db: Session, ep: Episode, text: str, source: str) -> None:
     ep.set_proposal = {"text": text, "source": source, "updated": time.time()}
 
@@ -88,7 +96,7 @@ def edit_proposal(eid: int, body: ProposalIn, db: Session = Depends(get_db)):
     ep = _episode(db, eid)
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
-    _save(db, ep, re.sub(r"\s+", " ", body.text).strip(), "edited")
+    _save(db, ep, normalized(body.text), "edited")
     db.add(Event(episode_id=ep.id, kind="episode", message="Proposed set edited"))
     db.commit()
     return view(db, ep)
@@ -126,19 +134,21 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     ep = _episode(db, eid)
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
-    text = re.sub(r"\s+", " ", body.text).strip()
+    text = normalized(body.text)
     p = ep.set_proposal or {}
     if p.get("text") != text:
         _save(db, ep, text, "edited")
+    # the job's own id makes the set id unique, even for two requests at the same moment
+    # (the job is created, given its set id and committed in one transaction, so a worker never sees it without one)
     from .models import Job
-    taken = set(sets.records(db)) | {(j.payload or {}).get("set_id") for j in
-                                     db.query(Job).filter(Job.kind == "set_candidate", Job.status.in_(("queued", "running"))).all()}
-    base = f"{sets.slug(ep.title)[:30]}-ep{ep.id}"
-    set_id, n = base, 2
-    while set_id in taken:
-        set_id, n = f"{base}-{n}", n + 1
     label = f"{ep.title[:44]} (episode {ep.id})"
-    job = enqueue(db, "set_candidate", payload={"set_id": set_id, "label": label, "description": text, "episode_id": ep.id})
+    job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
+              payload={"label": label, "description": text, "episode_id": ep.id})
+    db.add(job)
+    db.flush()
+    set_id = f"{sets.slug(ep.title)[:30]}-ep{ep.id}-{job.id}"
+    job.payload = {**job.payload, "set_id": set_id}
+    db.add(Event(episode_id=ep.id, kind="job", message=f"Queued set_candidate (job {job.id})"))
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Set candidate requested ({set_id}, {IMAGE_COST}); approve it in Settings > Sets"))
     db.commit()
     return {"set_id": set_id, "job": S.job(job), "prompt": sets.prompt_for(db, text)}
