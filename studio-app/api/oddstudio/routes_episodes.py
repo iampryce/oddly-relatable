@@ -196,6 +196,46 @@ class DialogueDisplayIn(BaseModel):
     value: Literal["bubbles", "none", "captions"]
 
 
+@router.get("/episodes/{eid}/set-options")
+def set_options(eid: int, db: Session = Depends(get_db)):
+    """The sets this episode may use (approved only), each with a thumbnail and the other episodes that already use it,
+    the current choice, the video notes' setting word as a suggestion (never applied by itself), and set candidates
+    still waiting for approval in Settings > Sets."""
+    from . import sets as studio_sets
+    ep = get_episode(db, eid)
+    used = studio_sets.usage(db, exclude_episode=ep.id)
+    options = [{**s, "thumbnail": studio_sets.thumbnail_url(db, k), "used_in": used.get(k, [])}
+               for k, s in studio_sets.usable(db).items()]
+    tr = ep.audio_transcript or {}
+    word = ((tr.get("media_hints") or {}).get("setting") or "").strip() if ep.source == "audio" else ""
+    pending = [{"id": k, "label": r.get("label", k)} for k, r in studio_sets.records(db).items() if r.get("status") == "candidate"]
+    return {"current": ep.set_id, "options": options, "candidates": pending,
+            "suggestion": {"word": word, "set_id": studio_sets.suggest(db, word)} if word else None}
+
+
+class SetChoiceIn(BaseModel):
+    set_id: str = Field(min_length=1, max_length=80)
+
+
+@router.put("/episodes/{eid}/set")
+def choose_set(eid: int, body: SetChoiceIn, db: Session = Depends(get_db)):
+    """The owner's deliberate choice of this episode's set: approved sets only. Not while a render is running."""
+    from . import sets as studio_sets
+    ep = get_episode(db, eid)
+    if ep.stage in ("producing", "publishing"):
+        raise HTTPException(409, f"not while the episode is {ep.stage}: change the set before or after the render")
+    usable = studio_sets.usable(db)
+    if body.set_id not in usable:
+        raise HTTPException(422, "choose an approved set (candidates must be approved in Settings > Sets first)")
+    if ep.set_id != body.set_id:
+        n = len(studio_sets.usage(db, exclude_episode=ep.id).get(body.set_id, []))
+        log_event(db, ep.id, "episode", f"Set chosen: {usable[body.set_id]['label']} ({body.set_id})"
+                                        + (f"; reused, already in {n} other episode(s)" if n else "; new to this episode"))
+        ep.set_id = body.set_id
+        db.commit()
+    return S.episode_summary(ep)
+
+
 @router.put("/episodes/{eid}/dialogue-display")
 def set_dialogue_display(eid: int, body: DialogueDisplayIn, db: Session = Depends(get_db)):
     """What the viewer sees of the dialogue in this episode's next render: speech bubbles, nothing (the audio carries
@@ -439,7 +479,12 @@ def enqueue_scene_jobs(db: Session, ep: Episode, scenes: list[StoryboardScene]) 
 
 
 def preflight(db: Session, ep: Episode) -> None:
-    """Refuse to start production that cannot succeed (no fake runs): characters without art, or too long."""
+    """Refuse to start production that cannot succeed (no fake runs): no chosen set, characters without art, too long."""
+    from . import sets as studio_sets
+    if not ep.set_id:
+        raise HTTPException(409, "choose this episode's set first (Storyboard tab, Set): there is no default set")
+    if ep.set_id not in studio_sets.usable(db):
+        raise HTTPException(409, f"the episode's set {ep.set_id!r} is not an approved set any more: choose another one")
     chars = by_key(db)
     keys = {k for s in ep.scenes for k in s.characters}
     try:

@@ -168,6 +168,7 @@ class CastAndVoiceTest(unittest.TestCase):
         ran = run(["generate_storyboard", "scene_reference"])
         self.assertEqual([x for x in ran if x[1] != "succeeded"], [])
         self.ok(c.post(f"/api/episodes/{eid}/storyboard/approve", json={}))
+        c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         self.ok(c.post(f"/api/episodes/{eid}/production/start"))
         ran = run()
         self.assertEqual([x for x in ran if x[1] != "succeeded"], [], ran)

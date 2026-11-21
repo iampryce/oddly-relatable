@@ -171,6 +171,7 @@ class LongFormWorkflowTest(unittest.TestCase):
         self.ok(c.post(f"/api/episodes/{eid}/storyboard/generate"))
         run(["generate_storyboard"])
         self.ok(c.post(f"/api/episodes/{eid}/storyboard/approve", json={}))
+        c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         self.ok(c.post(f"/api/episodes/{eid}/production/start"))
         ran = run(["scene_prepare", "scene_voice", "plan_segments", "render_segment", "join_segments"], max_rounds=50)
         self.assertEqual([x for x in ran if x[1] != "succeeded"], [], ran)

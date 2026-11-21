@@ -40,6 +40,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(c.get(d["scenes"][0]["reference"]["url"]).headers["content-type"], "image/png")
         self.ok(c.post(f"/api/episodes/{eid}/storyboard/approve", json={}))
 
+        c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         jobs = self.ok(c.post(f"/api/episodes/{eid}/production/start"))
         self.assertEqual(sorted(j["kind"] for j in jobs), ["scene_prepare", "scene_prepare", "scene_voice", "scene_voice"])
         ran = run()

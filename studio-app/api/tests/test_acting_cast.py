@@ -84,6 +84,7 @@ class ScriptFirstTest(unittest.TestCase):
         self.assertIn("ralph", first["characters"], "the storyboard lists the non-speaker on screen")
         self.assertEqual(self.c.post(f"/api/episodes/{eid}/storyboard/approve", json={}).status_code, 200)   # test only
         self.c.put("/api/settings/motion", json={"provider": "procedural-rig"})
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         r = self.c.post(f"/api/episodes/{eid}/production/start")
         self.assertEqual(r.status_code, 409, r.text)
         self.assertIn("Ralph", r.text)
