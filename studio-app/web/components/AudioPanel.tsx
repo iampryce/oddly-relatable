@@ -1,6 +1,8 @@
 'use client';
 import {useEffect, useRef, useState} from 'react';
-import {api, isVideoFile, uploadAudio} from '@/lib/api';
+import {api, uploadAudio} from '@/lib/api';
+import VideoNotesOptions, {type NotesChoice} from './VideoNotesOptions';
+import {NOTE_CAMERA, NOTE_SETTINGS, NOTE_SHOTS, describeRoles, forServer, setField, type NoteRange} from '@/lib/videoNotes';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
@@ -30,7 +32,8 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   const [bulkSpeaker, setBulkSpeaker] = useState('');
-  const [hints, setHints] = useState(false);
+  const [pending, setPending] = useState<File | null>(null);
+  const [notesChoice, setNotesChoice] = useState<NotesChoice>({notes: false, window: null, ready: true});
   const player = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number | null>(null);
 
@@ -91,12 +94,10 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
           : <p className="muted">No audio uploaded yet.</p>}
         {st.allowed_actions.includes('upload_audio') && <div className="field">
           <label htmlFor="audio-file">{st.audio || st.full_audio ? 'Replace the recording (the lines are transcribed again)' : 'Upload the recording'} (audio up to {st.limits?.audio_mb} MB, or a video up to {st.limits?.video_mb} MB: only its sound is used, the video file is deleted)</label>
-          <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
-            <input type="checkbox" style={{width: 'auto'}} checked={hints} onChange={e => setHints(e.target.checked)} />
-            For a video: use it for casting and setting hints (how many people, the kind of place, the mood; nobody is described; the frames are deleted after)
-          </label>
-          <input id="audio-file" type="file" accept="audio/*,video/*" disabled={!!act.busy}
-                 onChange={e => { const f = e.target.files?.[0]; if (f) act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, f, {hints: hints && isVideoFile(f)}); setDirty(false); setSelected(new Set()); }); }} />
+          <input id="audio-file" type="file" accept="audio/*,video/*" disabled={!!act.busy} onChange={e => setPending(e.target.files?.[0] || null)} />
+          <VideoNotesOptions file={pending} format={st.format} onChange={setNotesChoice} />
+          {pending && <div className="row"><button className="btn primary" disabled={!!act.busy || !notesChoice.ready}
+            onClick={() => act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, pending, {hints: notesChoice.notes, window: notesChoice.window}); setPending(null); setDirty(false); setSelected(new Set()); })}>Upload</button></div>}
         </div>}
         {!st.transcript && st.audio && st.allowed_actions.includes('transcribe_audio') && st.stage !== 'audio_transcribing' &&
           <p className="small">The audio is ready but not transcribed{st.last_error ? ' (the last attempt failed)' : ''}. <button className="btn sm" disabled={!!act.busy}
@@ -107,8 +108,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
           Source: {st.source_media.type === 'video' ? 'the audio track of a video (the video file was deleted; its picture is never used)' : 'an audio file'}
           {st.source_media.duration ? ` · ${round1(st.source_media.duration)} s recorded` : ''}
           {st.trim ? ` · Short window ${round1(st.trim.start)}-${round1(st.trim.end)} s` : ''}</p>}
-        {st.media_hints && <p className="small"><b>Hints from the video</b> (frames deleted): {st.media_hints.people_count ?? '?'} people · {st.media_hints.setting || 'place unknown'} · {st.media_hints.mood || 'mood unknown'}</p>}
-        {st.source_media?.hints_requested && !st.media_hints && !st.source_media?.preparing && <p className="muted small">Hints from the video: being made…</p>}
+        {st.source_media?.hints_requested && !st.video_notes && !st.source_media?.preparing && <p className="muted small">Video notes: being made…</p>}
         {st.transcript && <p className="muted small">Transcribed by {st.transcript.provider}{st.transcript.model ? ` (${st.transcript.model})` : ''} · {st.transcript.duration?.toFixed(1)} s ·
           {st.transcript.words_available ? ' word timings' : ' segment timings only (no word-level split)'}
           {st.allowed_actions.includes('transcribe_audio') && st.audio && <> · <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe again</button></>}</p>}
@@ -151,6 +151,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
         {!dirty && st.unlabelled_lines > 0 && <p className="muted small">{st.unlabelled_lines} line(s) have no speaker yet.</p>}
       </div>}
 
+      {st.video_notes && <VideoNotesPanel st={st} episodeId={episodeId} act={act} />}
       {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
         <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
       {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
@@ -188,6 +189,40 @@ function TrimCard({st, episodeId, act, hasLines, onApplied}: {st: any; episodeId
         <button className="btn primary" disabled={!!err || !!act.busy} onClick={apply}>Use this window</button>
       </div>
       {err && <p className="small" style={{color: 'var(--bad, #b00)'}}>{err}</p>}
+    </div>
+  );
+}
+
+// "Reference, not copy": the text-only notes from the video, aligned to the recorded lines. The scene writer reads them
+// as soft suggestions; the owner can read, edit (shot, camera, setting; remove a range) or clear them before building.
+function VideoNotesPanel({st, episodeId, act}: {st: any; episodeId: number; act: ReturnType<typeof useAction>}) {
+  const notes = st.video_notes;
+  const [draft, setDraft] = useState<NoteRange[] | null>(null);
+  const ranges: NoteRange[] = draft || notes.ranges || [];
+  const editable = st.allowed_actions.includes('edit_video_notes');
+  const sel = (i: number, key: 'shot' | 'camera' | 'setting', opts: string[]) => (
+    <select aria-label={key} style={{width: 'auto'}} disabled={!editable} value={(ranges[i] as any)[key] || ''}
+            onChange={e => setDraft(setField(ranges, i, key, e.target.value))}>
+      <option value="">{key}: –</option>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>);
+  return (
+    <div className="card stack">
+      <div className="spread"><h2 style={{margin: 0}}>Inspired by video notes</h2>
+        <span className="muted small">{notes.frames} frame(s), deleted · {notes.redacted} value(s) outside the notes removed{notes.edited ? ' · edited' : ''}</span></div>
+      <p className="muted small">Text only, from the reference video. When the scenes are built they are suggestions for shots, reaction cutaways and positions: the dialogue never changes, and the characters and sets stay your own. Roles are anonymous ("speaker" is whoever says the line).</p>
+      {ranges.length === 0 && <p className="muted small">No notes.</p>}
+      {ranges.map((r, i) => (
+        <div key={i} className="row small" style={{flexWrap: 'wrap', alignItems: 'center'}}>
+          <strong>{r.start.toFixed(1)}-{r.end.toFixed(1)} s</strong>
+          <span className="muted">{(r.line_ids || []).join(', ') || 'no line'}</span>
+          {sel(i, 'shot', NOTE_SHOTS)}{sel(i, 'camera', NOTE_CAMERA)}{sel(i, 'setting', NOTE_SETTINGS)}
+          <span>{describeRoles(r.roles)}</span>
+          {editable && <button className="btn sm" onClick={() => setDraft(ranges.filter((_, k) => k !== i))}>Remove</button>}
+        </div>))}
+      {editable && <div className="row">
+        <button className="btn primary" disabled={!draft || !!act.busy} onClick={() => act.run('notes', async () => { await api(`/episodes/${episodeId}/audio/video-notes`, {method: 'PUT', body: {ranges: forServer(ranges)}}); setDraft(null); })}>Save notes</button>
+        {draft && <button className="btn" onClick={() => setDraft(null)}>Undo changes</button>}
+        <button className="btn danger" disabled={!!act.busy} onClick={() => { if (window.confirm('Clear the video notes? The scenes are then built without them.')) act.run('notes', () => api(`/episodes/${episodeId}/audio/video-notes`, {method: 'DELETE'})); }}>Clear notes</button>
+      </div>}
     </div>
   );
 }

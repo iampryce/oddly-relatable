@@ -30,6 +30,7 @@ ALLOWED: dict[str, set[str]] = {
     "upload_audio": {"audio_upload", "audio_labelling"},
     "transcribe_audio": {"audio_upload", "audio_labelling"},
     "trim_audio": {"audio_upload", "audio_labelling"},
+    "edit_video_notes": {"audio_upload", "audio_labelling", "script_review"},
     "build_audio_scenes": {"audio_labelling", "script_review"},
     "reopen_audio_labels": {"script_review"},
     "label_audio": {"audio_labelling"},
