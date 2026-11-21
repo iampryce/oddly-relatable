@@ -10,7 +10,7 @@ Nothing in this change is installed or run automatically. The owner installs it 
   - **Nightly: the newest 7** (`KEEP_NIGHTLY`).
   - **Deploy-time** (`deploy.sh`, `restore.sh`): **the newest 5** (`KEEP_DEPLOY`).
   - The old `KEEP` variable still works and sets the count for the kind being written. The currently installed `ci-deploy.sh` passes `KEEP=15` until it is reinstalled (step 3); the new one passes `KEEP_DEPLOY=5`.
-- **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). It is a **dry run** by default: it only lists what it would remove, with sizes. With `--apply` it removes:
+- **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). Run by hand without options it is a **dry run**: it only lists what it would remove, with sizes. The weekly job runs it with `--apply` (owner decision 2026-11-21, after one verified manual run), which removes:
   - every release folder except the current one, any release a running container uses, and the 5 newest. The `oddstudio-api`/`oddstudio-web` images of removed releases go too, so `rollback.sh` keeps working for every kept release.
   - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
   - dangling images, build cache older than 7 days, and any build cache above 10 GB (`BUILD_CACHE_MAX`; the least recently used goes first).
@@ -38,15 +38,16 @@ Nothing in this change is installed or run automatically. The owner installs it 
 # 1. Look at the dry run first: nothing is removed.
 /srv/stickman/current/studio-app/deploy/maintenance.sh
 
-# 2. Install the scheduled jobs (nightly backup; weekly housekeeping still as a dry run).
+# 2. Install the scheduled jobs (nightly backup; weekly housekeeping with --apply).
 install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-oddstudio /etc/cron.d/oddstudio
 
 # 3. The CI deploy wrapper lives outside the repo: reinstall it so deploys keep 5 deploy-time backups (check the hash first).
 sha256sum /srv/stickman/current/studio-app/deploy/ci-deploy.sh
 install -o root -g root -m 755 /srv/stickman/current/studio-app/deploy/ci-deploy.sh /srv/stickman/ci-deploy.sh
 
-# 4. Once the weekly reports in /var/log/oddstudio-maintenance.log look right, make it act:
+# 4. An installed cron file from before 2026-11-21 still runs the dry run: make it act (undo: the reverse sed)
 sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.d/oddstudio
+# sed -i 's#deploy/maintenance.sh --apply >>#deploy/maintenance.sh >>#' /etc/cron.d/oddstudio   (back to the dry run)
 ```
 
 - **Logs:** `/var/log/oddstudio-backup.log` and `/var/log/oddstudio-maintenance.log`.
