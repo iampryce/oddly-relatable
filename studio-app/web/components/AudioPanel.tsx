@@ -215,6 +215,7 @@ function VideoNotesPanel({st, episodeId, act}: {st: any; episodeId: number; act:
     <div className="card stack">
       <div className="spread"><h2 style={{margin: 0}}>Inspired by video notes</h2>
         <span className="muted small">{notes.frames} frame(s), deleted · {notes.redacted} value(s) outside the notes removed{notes.edited ? ' · edited' : ''}</span></div>
+      {notes.quality && <NotesQuality q={notes.quality} />}
       <p className="muted small">Text only, from the reference video. When the scenes are built they are suggestions for shots, reaction cutaways and positions: the dialogue never changes, and the characters and sets stay your own. Roles are anonymous ("speaker" is whoever says the line).</p>
       {ranges.length === 0 && <p className="muted small">No notes.</p>}
       {ranges.map((r, i) => (
@@ -233,6 +234,19 @@ function VideoNotesPanel({st, episodeId, act}: {st: any; episodeId: number; act:
       </div>}
     </div>
   );
+}
+
+// Notes quality (notes v2): how well the people were tracked, to judge the identity tracking before relying on it.
+function NotesQuality({q}: {q: any}) {
+  const total = q.frames_used || 0;
+  return (
+    <div className="small" style={{border: '1px solid var(--line, #ddd)', borderRadius: 6, padding: 8}}>
+      <strong>Notes quality</strong>
+      <div>People found: {q.people} · {Object.entries(q.appearances || {}).map(([p, n]: any) => `person ${p} in ${n} of ${total} frame(s)`).join(' · ') || 'nobody'}</div>
+      <div>Frames: {q.frames_used} used of {q.frames_sent} sent ({q.calls} call(s)) · with people: {q.frames_with_people} · someone talking: {q.talking_frames}</div>
+      <div>Cost: {q.actual_usd != null ? `$${q.actual_usd.toFixed(4)} actual` : 'not reported'}{q.estimated_usd != null ? ` (estimated $${q.estimated_usd.toFixed(4)})` : ''} · items stripped (outside the lists): {q.stripped}</div>
+      {q.renumbered?.length > 0 && <div className="muted">Renumbered between batches (from the overlap frame): {q.renumbered.map((m: any) => Object.entries(m).map(([a, b]) => `${a}→${b}`).join(', ')).join(' · ')}</div>}
+    </div>);
 }
 
 // Stage 2: the scenes are built around the recorded lines (runs of consecutive lines; cuts only between lines).

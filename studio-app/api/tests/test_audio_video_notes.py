@@ -28,6 +28,21 @@ JUNK = {"summary": "a scene from a famous sitcom",
 FORBIDDEN = ("Rachel", "Joey", "red", "dress", "Central", "Perk", "doin", "sitcom", "logo", "seductive")
 
 
+def junk_v2(n: int) -> dict:
+    """A v2 answer (notes v2, per frame and per person) with the same kinds of junk as JUNK: frames 1-5 one staging,
+    the rest another; names, clothing, dialogue and values off the lists must all be stripped."""
+    first = {"shot": "medium", "camera": "pan", "setting": "Central Perk cafe", "dialogue": "How you doin?",
+             "people": [{"person": 1, "position": "left", "pose": "standing", "facing": "person 2", "emotion": "annoyed",
+                         "talking": True, "name": "Rachel", "clothing": "red dress"},
+                        {"person": "Joey", "position": "right"},
+                        {"person": 2, "emotion": "seductive", "facing": "person 2", "pose": "seated", "talking": "yes"}]}
+    later = {"shot": "close", "setting": "office", "camera": "static",
+             "people": [{"person": 1, "position": "left", "pose": "standing", "talking": True},
+                        {"person": 2, "position": "right", "emotion": "shocked", "facing": "person 1", "gesture": "facepalm"}]}
+    frames = [{"frame": k, **(first if k <= 5 else later)} for k in range(1, n + 1)]
+    return {"summary": "a scene from a famous sitcom", "frames": frames + [{"frame": "soon"}, "a frame with a logo"]}
+
+
 def leaks(text: str) -> list[str]:
     return [w for w in FORBIDDEN if re.search(rf"\b{w}\b", text, re.IGNORECASE)]
 
@@ -124,7 +139,7 @@ class VideoNotesFlowTest(Base):
             self.calls.append({"provider": cfg["provider"], "images": [Path(i).name for i in images], "question": question})
             if fail:
                 raise providers.ProviderError("model down")
-            return answer if answer is not None else JUNK
+            return answer if answer is not None else junk_v2(len(images))
         analysis.set_test_analysis(transcriber=lambda cfg, audio: {
             "provider": "openai", "model": "whisper-1", "language": "en", "duration": 30.0, "text": "Hello there.",
             "segments": [], "words": [{"start": 0.2, "end": 0.5, "word": "Hello"}, {"start": 6.0, "end": 8.0, "word": "there."}]},
@@ -165,24 +180,32 @@ class VideoNotesFlowTest(Base):
         self.assertTrue(all(x[1] == "succeeded" for x in ran), ran)
         call = self.calls[0]
         self.assertEqual(call["provider"], "openai")
-        self.assertEqual(len(call["images"]), 7, "one frame every ~4.5 s of the 30 s window")
-        self.assertIn("frame 1 at 2.1 s", call["question"], "times are the window's (the audio's)")
+        self.assertEqual(len(call["images"]), 30, "notes v2: one frame per second of the 30 s window")
+        self.assertIn("frame 1 at 0.5 s", call["question"], "times are the window's (the audio's)")
+        self.assertIn("SAME number in every frame", call["question"])
         st = self.state(eid)
         self.assertEqual((st["trim"], st["stage"]), ({"start": 10.0, "end": 40.0}, "audio_labelling"))
         notes = st["video_notes"]
-        self.assertEqual((notes["base"], notes["length"], notes["frames"]), (10.0, 30.0, 7))
+        self.assertEqual((notes["base"], notes["length"], notes["frames"], notes["version"]), (10.0, 30.0, 30, 2))
+        q = notes["quality"]
+        self.assertEqual((q["people"], q["appearances"], q["frames_sent"], q["frames_used"], q["calls"]),
+                         (2, {"1": 30, "2": 30}, 30, 30, 1), "the quality readout")
+        self.assertGreaterEqual(q["stripped"], 10)
+        self.assertNotIn("people_frames", notes, "the per-person frames stay on the server")
         self.assertGreaterEqual(notes["redacted"], 10)
         self.assertEqual([r["line_ids"] for r in notes["ranges"]], [["l1"], ["l2"]], "aligned to the recorded lines")
         self.assertFalse(leaks(json.dumps(notes)))
         self.assertEqual(st["media_hints"]["people_count"], 2)
         self.no_media_left()
 
-    def test_long_episodes_use_the_whole_clip_capped_at_24_frames(self):
-        self.vision(answer={"ranges": []})
+    def test_long_episodes_use_the_whole_clip_in_batches(self):
+        self.vision()
         eid = self.create(fmt="long")
         self.assertEqual(self.notes_upload(eid, make_media(self.media, "long.mp4", 120)).status_code, 200)
         self.env.run_jobs(["audio_media_prepare", "audio_video_notes"])
-        self.assertEqual(len(self.calls[0]["images"]), 24)
+        self.assertEqual([len(c["images"]) for c in self.calls], [50, 11], "1 frame every 2 s; batches of 50, one frame of overlap")
+        self.assertIn("Frame 1 repeats the last frame of the previous batch", self.calls[1]["question"])
+        self.assertNotIn("Frame 1 repeats", self.calls[0]["question"])
         self.no_media_left()
 
     def test_frames_are_deleted_when_the_call_fails_and_no_vision_means_no_upload(self):

@@ -27,7 +27,8 @@ DEFAULTS: dict[str, dict] = {
     "comfyui": {"url": ""},
     # Reference analysis (Create from Reference): speech-to-text with word timestamps, and frame analysis.
     "transcription": {"provider": "none", "model": "", "fallback": "none", "language": ""},
-    "vision": {"provider": "none", "model": "", "fallback": "none"},
+    # notes_cap_usd: the most one episode's video notes may cost (checked before the upload; owner default $0.50)
+    "vision": {"provider": "none", "model": "", "fallback": "none", "notes_cap_usd": 0.5},
     # Character animation. Only the procedural rig is planned for production use; generative motion is evaluated
     # per provider before it is enabled (see capabilities.py).
     "motion": {"provider": "none", "model": "", "fallback": "none", "budget_usd": 25.0},

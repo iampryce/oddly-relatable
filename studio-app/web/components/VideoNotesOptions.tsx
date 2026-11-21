@@ -38,9 +38,9 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
   useEffect(() => {
     if (!notes || !video) { setEst(null); return; }
     let live = true;
-    api(`/audio/video-notes/estimate?seconds=${round1(seconds)}`).then(e => { if (live) setEst(e); }).catch(() => live && setEst(null));
+    api(`/audio/video-notes/estimate?seconds=${round1(seconds)}&format=${format}`).then(e => { if (live) setEst(e); }).catch(() => live && setEst(null));
     return () => { live = false; };
-  }, [notes, video, seconds]);
+  }, [notes, video, seconds, format]);
   const ready = !notes || (!!est?.configured && !err);
   useEffect(() => { onChange({notes: notes && video, window: needsWindow && !err ? {start, end} : null, ready}); },
             [notes, video, needsWindow, err, start, end, ready]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,7 +59,7 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
       </div>}
       {err && <p className="small" style={{color: 'var(--bad, #b00)'}}>{err}</p>}
       {notes && est && (est.configured
-        ? <p className="muted small">Notes from {est.frames} frame(s) · estimated cost about ${est.usd < 0.01 ? est.usd.toFixed(4) : est.usd.toFixed(3)} ({est.provider} {est.model}){est.note ? ` · ${est.note}` : ''}. The actual token use is recorded with the notes.</p>
+        ? <p className={`small ${est.within_cap === false ? 'alert bad' : 'muted'}`}>Notes from {est.frames} frame(s) in {est.calls} call(s) · estimated cost about ${est.usd < 0.01 ? est.usd.toFixed(4) : est.usd.toFixed(3)} ({est.provider} {est.model}){est.note ? ` · ${est.note}` : ''} · cap ${Number(est.cap_usd ?? 0.5).toFixed(2)} per episode{est.within_cap === false ? ': over the cap, so the upload with notes will be refused (use a shorter part, or raise the cap in Settings › Video and visual analysis)' : ''}. The actual token use is recorded with the notes.</p>
         : <p className="small" style={{color: 'var(--bad, #b00)'}}>{est.message}</p>)}
     </div>
   );
