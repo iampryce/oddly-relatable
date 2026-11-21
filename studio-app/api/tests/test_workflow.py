@@ -106,6 +106,7 @@ class WorkflowTest(unittest.TestCase):
         self.c.post(f"/api/episodes/{eid}/storyboard/generate")
         self.env.run_jobs(["generate_storyboard"])
         self.c.post(f"/api/episodes/{eid}/storyboard/approve", json={})
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         r = self.c.post(f"/api/episodes/{eid}/production/start")
         self.assertEqual(r.status_code, 409)
         self.assertIn("Dad", r.text)

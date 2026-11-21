@@ -180,7 +180,7 @@ function SetsCard() {
   const {busy, error, run} = useAction(reload);
   const active = (data?.jobs || []).filter((j: any) => ['queued', 'running'].includes(j.status));
   return (
-    <div className="card stack">
+    <div className="card stack" id="sets">
       <h2>Sets (background environments)</h2>
       <p className="muted small">New sets are generated as candidates in the approved house style (the living room is the style reference) and are used in production only after you approve them. They appear to the writer when the studio rig animator is the motion provider.</p>
       <ErrorBox error={error} />

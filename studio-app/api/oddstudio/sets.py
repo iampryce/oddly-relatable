@@ -73,6 +73,87 @@ def writer_environments(db) -> list[str]:
     return envs
 
 
+REPO_SETS = REPO_ROOT / "production" / "animation" / "sets"
+_thumbs: dict[str, str] = {}      # set id -> storage key of its thumbnail (made once per process)
+
+
+def usable(db) -> dict[str, dict]:
+    """Every set an episode may use: approved studio sets and the repository plates that have blocking (both are
+    approved sets the acting renderer can stage). Candidates and rejected sets are not usable."""
+    out = {}
+    for p in sorted(REPO_SETS.glob("*.json")):
+        spec = json.loads(p.read_text())
+        out[p.stem] = {"id": p.stem, "label": p.stem.replace("-", " ").capitalize(), "source": "repository",
+                       "description": spec.get("note", ""), "style_version": "v1", "width": spec.get("width"),
+                       "height": spec.get("height"), "seat": bool(spec.get("seat"))}
+    for k, r in approved(db).items():
+        out[k] = {"id": k, "label": r.get("label", k), "source": "studio", "description": r.get("description", ""),
+                  "style_version": r.get("style_version") or "v1", "width": r.get("width"), "height": r.get("height"),
+                  "seat": bool((r.get("blocking") or {}).get("seat"))}
+    return out
+
+
+def spec_for(db, set_id: str, folder: Path) -> dict | None:
+    """The acting renderer's set spec (plate path + blocking) for a usable set, or None."""
+    if set_id in approved(db):
+        return plate_for(db, set_id, folder)
+    p = REPO_SETS / f"{set_id}.json"
+    if p.exists():
+        spec = json.loads(p.read_text())
+        spec["plate"] = str(REPO_ROOT / spec["plate"])
+        return spec
+    return None
+
+
+def thumbnail_url(db, set_id: str) -> str | None:
+    """A small picture of the set for the picker (studio sets: their approved image; repository plates: a copy
+    stored once)."""
+    from .models import Asset
+    from .storage import sha256_file, storage
+    rec = approved(db).get(set_id)
+    if rec:
+        a = db.get(Asset, rec["asset_id"])
+        return storage().url(a.storage_key) if a else None
+    if set_id not in _thumbs:
+        p = REPO_SETS / f"{set_id}.json"
+        if not p.exists():
+            return None
+        plate = REPO_ROOT / json.loads(p.read_text())["plate"]
+        if not plate.exists():
+            return None
+        folder = get_settings().work_dir / "set-thumbs"
+        folder.mkdir(parents=True, exist_ok=True)
+        thumb = folder / f"{set_id}.jpg"
+        im = Image.open(plate).convert("RGB")
+        im.thumbnail((360, 640))
+        im.save(thumb, quality=85)
+        key = f"sets/thumbs/{set_id}-{sha256_file(thumb)[:12]}.jpg"
+        storage().put_file(key, thumb, "image/jpeg")
+        _thumbs[set_id] = key
+    return storage().url(_thumbs[set_id])
+
+
+def usage(db, exclude_episode: int | None = None) -> dict[str, list[dict]]:
+    """Which episodes use each set (so repeats are visible in the picker)."""
+    from .models import Episode
+    out: dict[str, list[dict]] = {}
+    for e in db.query(Episode).filter(Episode.set_id.isnot(None)).order_by(Episode.id):
+        if e.id != exclude_episode:
+            out.setdefault(e.set_id, []).append({"id": e.id, "title": e.title})
+    return out
+
+
+def suggest(db, word: str | None) -> str | None:
+    """A usable set whose id, label or description mentions the video notes' setting word (shown, never applied)."""
+    w = (word or "").strip().lower()
+    if not w or w in ("other", "indoors", "outdoors"):
+        return None
+    for k, s in usable(db).items():
+        if w in f"{k} {s['label']} {s['description']}".lower().replace("-", " "):
+            return k
+    return None
+
+
 def proposed_blocking(width: int, height: int) -> dict:
     """Default staging for a generated plate: feet on the open lower floor, a wide standing area. The owner sees it
     marked on the candidate and can adjust before approving."""

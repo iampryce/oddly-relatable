@@ -168,6 +168,13 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     from .models import StoryboardScene
     db = ctx.db
     folder.mkdir(parents=True, exist_ok=True)
+    # The episode's own set, chosen explicitly by the owner (no silent default, owner decision 2026-11-21)
+    from . import sets as studio_sets
+    if not getattr(ep, "set_id", None):
+        raise engine.EngineInputError("this episode has no set: choose an approved set for it (Storyboard tab, Set)")
+    st = studio_sets.spec_for(db, ep.set_id, folder / "set")
+    if st is None:
+        raise engine.EngineInputError(f"the episode's set {ep.set_id!r} is not an approved set: choose another one")
     absolute = getattr(ep, "source", "") == "audio"
     if absolute:
         from . import audio_production as AP
@@ -178,15 +185,6 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     keys, speaking = render_cast(lines_in, {sid: scenes[sid].characters for sid in scenes}, chars_by_key)
     first_scene_cast = set(scenes[refs[0][0][0]].characters) if refs and refs[0] else set()
     prod = get_section(db, "production")
-    env_id = (scenes[refs[0][0][0]].location if refs and refs[0] else "") or prod.get("environment") or "living-room-empty-03"
-    from . import sets as studio_sets
-    st = studio_sets.plate_for(db, env_id, folder / "set")   # an approved studio set (Settings > Sets)
-    if st is None:
-        set_file = ANIM / "sets" / f"{env_id}.json"
-        if not set_file.exists():
-            set_file = ANIM / "sets" / "living-room-empty-03.json"
-        st = json.loads(set_file.read_text())
-        st["plate"] = str(REPO_ROOT / st["plate"])
 
     cast, faces = {}, {}
     for k in keys:

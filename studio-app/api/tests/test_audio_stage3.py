@@ -112,6 +112,7 @@ class ProductionStartTest(Flow):
     def test_audio_episodes_slice_their_recording_instead_of_voicing(self):
         eid = self.storyboard()
         self.rig_motion(False)
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         r = self.c.post(f"/api/episodes/{eid}/production/start")
         self.assertEqual(r.status_code, 409, r.text)
         self.assertIn("rig animator", r.text)
@@ -127,6 +128,7 @@ class ProductionStartTest(Flow):
         from oddstudio.tasks import after_job
         eid = self.storyboard(fmt="long")
         self.rig_motion(True)
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         self.assertEqual(self.c.post(f"/api/episodes/{eid}/production/start").status_code, 200)
         with new_session() as s:
             jobs = s.query(Job).filter(Job.episode_id == eid, Job.kind.in_(["scene_prepare", "audio_slice"])).all()
@@ -148,6 +150,7 @@ class MediaTest(Flow):
     def test_slices_follow_the_recorded_lines(self):
         eid = self.storyboard()
         self.rig_motion(True)
+        self.c.put(f"/api/episodes/{eid}/set", json={"set_id": "living-room-empty-03"})   # a deliberate set choice (PR 1)
         self.c.post(f"/api/episodes/{eid}/production/start")
         ran = self.env.run_jobs(["audio_slice"])
         self.assertTrue(ran and all(r[1] == "succeeded" for r in ran), ran)
