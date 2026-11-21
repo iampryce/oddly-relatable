@@ -77,6 +77,23 @@ class RigToleranceTest(unittest.TestCase):
         self.assertLess(abs(body["hand_l"][1] - 630), 20)
         self.assertGreater(body["hip_y"], 600, "the legs are still found below the hands")
 
+    def test_an_arm_that_merges_into_the_body_is_not_a_hand(self):
+        tmp = Path(tempfile.mkdtemp())
+        f = v2_figure(tmp / "m.png")
+        im = Image.open(f).convert("RGBA")
+        d = ImageDraw.Draw(im)
+        for hx in (196, 404):
+            d.ellipse((hx - 24, 628, hx + 24, 684), fill=GREY)
+            d.rectangle((hx - 30, 600, hx + 30, 640), fill=(15, 15, 15))   # a wide sleeve end, not a clean line end
+        im.save(f)
+        self.assertTrue(engine.make_cutout(f))
+        r = subprocess.run([sys.executable, str(RIG), str(f), str(tmp / "rig")], capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            body = json.loads((tmp / "rig" / "rig.json").read_text())["body"]
+            self.assertNotIn("hands_inferred", body, "a wide end is read as a drawn hand blob, never inferred")
+        else:
+            self.assertEqual(r.returncode, 2)
+
     def test_hidden_arms_are_still_a_clear_error(self):
         tmp = Path(tempfile.mkdtemp())
         f = hidden_hands_figure(tmp / "h.png")
@@ -177,6 +194,7 @@ class CharacterFlowTest(unittest.TestCase):
         ran = self.env.run_jobs(["body_candidates"])
         self.assertEqual(ran[0][1], "succeeded", ran)
         self.assertEqual(len(self.drawn), 3)
+        self.assertTrue(all("both hands clearly visible" in p for p in self.drawn))
         poses = [a for a in self.chars()["nia"]["assets"] if a["kind"] == "pose"]
         self.assertEqual(sorted(a["status"] for a in poses), ["review", "review", "rig_failed"],
                          "only passing candidates go to review")

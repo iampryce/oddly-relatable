@@ -224,7 +224,9 @@ def body_candidates(ctx: Ctx) -> dict:  # noqa: F811 (the job kind; the route ab
     folder = ctx.folder("rig-checks", c.key)
     passed, failed = [], []
     for i in range(int(job.payload.get("n", 3))):
-        a, f = _generate_pose(ctx, c, "neutral", ref, cfg, version=version, tag=f"-c{i + 1}")
+        # the current design is the identity reference, but the body is redrawn with both hands visible (a candidate
+        # exists to replace a neutral that cannot be rigged, so it must not copy that pose)
+        a, f = _generate_pose(ctx, c, "neutral", ref, cfg, version=version, tag=f"-c{i + 1}", body_fix=True)
         trimmed, _ = engine.trim_pose(f, folder / f"cand-{a.id}-trim.png", a.feet or {"x": 0, "y": 0})
         res = rig_check.check(c, [(a.id, "neutral", trimmed)], a.id, folder)[str(a.id)]
         recs = rig_check.records(db)
