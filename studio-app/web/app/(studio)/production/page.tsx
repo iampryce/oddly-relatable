@@ -4,6 +4,7 @@ import {api, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {EpisodeTable, ErrorBox, JobStatus} from '@/components/ui';
 import {MotionComparison} from '@/components/MotionComparison';
+import {ShotComparison} from '@/components/ShotComparison';
 
 export default function Production() {
   const {data: eps} = useApi<any[]>('/episodes?stage=producing,production_failed,storyboard_approved', 5000);
@@ -28,6 +29,7 @@ export default function Production() {
     <>
       <h1>Production</h1><p className="sub">Image generation, scene preparation, voice and rendering. Failed jobs can be retried on their own.</p>
       <ErrorBox error={error || act.error} />
+      <ShotComparison />
       <MotionComparison />
       <h2>Episodes in production</h2>
       {eps && <EpisodeTable episodes={eps} empty="No episode is in production." />}

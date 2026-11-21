@@ -120,31 +120,43 @@ def _key() -> str:
     return k
 
 
-def generate(db, model: str, image_url: str, prompt: str, params: dict, out: Path, log, progress=None, timeout: int = 1800) -> dict:
-    """Submit one image-to-video request, poll it to completion and download the clip. Returns metadata."""
-    key = _key()
-    m = MODELS[model]
-    body = {**m["defaults"], **params, "image_url": image_url, "prompt": prompt}
-    cost = estimate(model, params)
+_test_run = None   # tests only: fn(endpoint, body, out) -> response JSON (the video already written to `out`)
+
+
+def set_test_run(fn) -> None:
+    """Tests only: replace the network call (submit, poll, download) with fn(endpoint, body, out)."""
+    global _test_run
+    _test_run = fn
+
+
+def run(db, endpoint: str, label: str, body: dict, cost: float, note: str, out: Path, log, progress=None,
+        timeout: int = 1800) -> tuple[dict, dict]:
+    """Submit one queue request, poll it to completion and download the video to `out`. The estimated cost is checked
+    against the cap before submitting and recorded once fal accepts the request. Returns (response JSON, timing)."""
     check_budget(db, cost)
-    h = {"Authorization": f"Key {key}"}
     t0 = time.time()
-    r = httpx.post(f"{QUEUE}/{m['endpoint']}", json=body, headers=h, timeout=60)
+    if _test_run is not None:
+        reserve(db, endpoint, cost, f"test: {note}")
+        data = _test_run(endpoint, body, out)
+        return data, {"request_id": "test", "seconds": round(time.time() - t0, 1), "inference_seconds": None}
+    key = _key()
+    h = {"Authorization": f"Key {key}"}
+    r = httpx.post(f"{QUEUE}/{endpoint}", json=body, headers=h, timeout=60)
     if r.status_code >= 400:
         raise http_error("fal.ai submit", r)   # refused requests are not billed and not recorded
     sub = r.json()
-    reserve(db, model, cost, f"{sub.get('request_id')}: {prompt}")   # accepted by fal: counts against the cap
+    reserve(db, endpoint, cost, f"{sub.get('request_id')}: {note}")   # accepted by fal: counts against the cap
     status_url, response_url, cancel_url = sub["status_url"], sub["response_url"], sub.get("cancel_url")
-    log(f"fal.ai {m['label']}: queued (request {sub['request_id']}), estimated ${cost:.2f}")
-    last = None
+    log(f"fal.ai {label}: queued (request {sub['request_id']}), estimated ${cost:.2f}")
+    last, st = None, {}
     try:
         while True:
             if time.time() - t0 > timeout:
                 raise ProviderError(f"fal.ai: no result after {timeout} s", transient=False)
-            s = httpx.get(status_url, headers=h, timeout=60)
-            if s.status_code >= 400:
-                raise http_error("fal.ai status", s)
-            st = s.json()
+            s_ = httpx.get(status_url, headers=h, timeout=60)
+            if s_.status_code >= 400:
+                raise http_error("fal.ai status", s_)
+            st = s_.json()
             state = st.get("status")
             if state != last:
                 log(f"fal.ai: {state}" + (f" (queue position {st.get('queue_position')})" if state == "IN_QUEUE" else ""))
@@ -173,11 +185,21 @@ def generate(db, model: str, image_url: str, prompt: str, params: dict, out: Pat
     v = httpx.get(url, timeout=300, follow_redirects=True)
     v.raise_for_status()
     out.write_bytes(v.content)
+    return data, {"request_id": sub["request_id"], "seconds": round(time.time() - t0, 1),
+                  "inference_seconds": (st.get("metrics") or {}).get("inference_time")}
+
+
+def generate(db, model: str, image_url: str, prompt: str, params: dict, out: Path, log, progress=None, timeout: int = 1800) -> dict:
+    """Submit one image-to-video request, poll it to completion and download the clip. Returns metadata."""
+    m = MODELS[model]
+    body = {**m["defaults"], **params, "image_url": image_url, "prompt": prompt}
+    cost = estimate(model, params)
+    data, tm = run(db, m["endpoint"], m["label"], body, cost, prompt, out, log, progress, timeout)
     meta = data.get("video") or {}
     actual = actual_cost(model, meta, body)
     if actual is not None and abs(actual - cost) > 0.0001:
         correct_spend(db, cost, actual)
-    return {"actual_usd": actual if actual is not None else cost, "model": model, "endpoint": m["endpoint"], "request_id": sub["request_id"], "estimated_usd": cost,
-            "seconds": round(time.time() - t0, 1), "inference_seconds": (st.get("metrics") or {}).get("inference_time"),
-            "width": meta.get("width"), "height": meta.get("height"), "fps": meta.get("fps"), "frames": meta.get("num_frames"),
-            "seed": data.get("seed"), "licence": m["licence"]}
+    return {"actual_usd": actual if actual is not None else cost, "model": model, "endpoint": m["endpoint"],
+            "request_id": tm["request_id"], "estimated_usd": cost, "seconds": tm["seconds"],
+            "inference_seconds": tm["inference_seconds"], "width": meta.get("width"), "height": meta.get("height"),
+            "fps": meta.get("fps"), "frames": meta.get("num_frames"), "seed": data.get("seed"), "licence": m["licence"]}
