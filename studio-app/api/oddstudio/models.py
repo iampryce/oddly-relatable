@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -205,6 +205,8 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # a failed job the owner cleared from Production (hidden from the job lists; never deleted)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
 
 class Asset(Base):
@@ -273,3 +275,18 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class BinItem(Base):
+    """The Bin (soft delete): an item hidden everywhere and restorable for 30 days; purged with its files after."""
+    __tablename__ = "bin_items"
+    __table_args__ = (UniqueConstraint("kind", "ref", name="uq_bin_kind_ref"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))                    # character | pose | set | episode | clip
+    ref: Mapped[str] = mapped_column(String(80))                     # the item's id (a set's id is a string)
+    label: Mapped[str] = mapped_column(String(300), default="")
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    deleted_by: Mapped[str] = mapped_column(String(120), default="")
+    files: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)    # storage keys removed for good
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)    # what restore needs

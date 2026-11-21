@@ -1,6 +1,7 @@
 'use client';
 import {useEffect, useState} from 'react';
 import SetStaging from '@/components/SetStaging';
+import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
@@ -175,6 +176,7 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>
           <button className="btn" disabled={!!busy} onClick={() => run('no', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'reject'}}))}>Reject</button></div></>}
+      <div><DeleteButton kind="set" id={x.id} label={`the set ${x.label} (${x.status})`} onDone={reload} /></div>
     </div>);
 }
 
@@ -185,7 +187,7 @@ function SetsCard() {
   const active = (data?.jobs || []).filter((j: any) => ['queued', 'running'].includes(j.status));
   return (
     <div className="card stack" id="sets">
-      <h2>Sets (background environments)</h2>
+      <div className="spread"><h2>Sets (background environments)</h2><BulkDelete what="sets" label="Delete unused candidates" onDone={reload} /></div>
       <p className="muted small">New sets are generated as candidates in the approved house style (the living room is the style reference) and are used in production only after you approve them. They appear to the writer when the studio rig animator is the motion provider.</p>
       <ErrorBox error={error} />
       {(data?.sets || []).map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} />)}

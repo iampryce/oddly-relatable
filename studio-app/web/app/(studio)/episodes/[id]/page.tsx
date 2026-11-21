@@ -5,6 +5,7 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox, JobStatus, Pipeline, Stage} from '@/components/ui';
 import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import SceneSetSelect from '@/components/SceneSetSelect';
+import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import CastPanel from '@/components/CastPanel';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
@@ -48,7 +49,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   return (
     <>
       <div className="spread">
-        <div><h1>{ep.title}</h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
+        <div><h1>{ep.title} <DeleteButton kind="episode" id={ep.id} label={`episode ${ep.id} "${ep.title}"`} onDone={() => { window.location.href = '/bin'; }} /></h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
         <DialogueDisplay ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />

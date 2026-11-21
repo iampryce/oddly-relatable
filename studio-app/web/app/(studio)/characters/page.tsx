@@ -1,6 +1,7 @@
 'use client';
 import {useEffect, useState} from 'react';
 import {api} from '@/lib/api';
+import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
 import {groupCharacters, imageCost, removable, rigStatus, visiblePoses} from '@/lib/characterView';
@@ -131,7 +132,8 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
         <div><h2 style={{marginBottom: 2}}>{c.name} <span className="muted small mono">{c.key}</span></h2>
           <div className="row small"><span className={`badge ${c.art_status === 'approved' ? 'good' : c.art_status === 'none' ? 'bad' : 'warn'}`}>art: {c.art_status}</span>
             <span className="badge">{c.scope === 'episode' ? `from episode ${c.episode_id}` : 'recurring cast'}</span>{c.locked && <span className="badge">approved artwork · locked</span>}</div></div>
-        <button className="btn sm" onClick={() => setEditing(true)}>{c.locked ? 'Set voice' : 'Edit'}</button>
+        <span className="row" style={{gap: 4}}><button className="btn sm" onClick={() => setEditing(true)}>{c.locked ? 'Set voice' : 'Edit'}</button>
+          {!c.locked && <DeleteButton kind="character" id={c.id} label={c.name} onDone={reload} />}</span>
       </div>
       <ErrorBox error={act.error} />
       <p className="small">{c.description || <span className="muted">No description.</span>}</p>
@@ -159,6 +161,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
                   : (p.rig_check.ok === true ? 'Head-only pose: face OK (no body check; never blocks production)'
                     : p.rig_check.ok === false ? `Head-only pose: face not rigged, the neutral face is used instead (no body check; never blocks production)` : `Head-only pose: ${p.rig_check.message}`)}</div>
             : <div className="small muted" style={{marginTop: 4}}>Rig check: waiting for the worker</div>)}
+          {!c.locked && <div style={{marginTop: 4}}><DeleteButton kind="pose" id={p.id} label={`${c.name}'s ${p.expression} pose (${p.status})`} onDone={reload} /></div>}
           {!c.locked && p.status === 'review' && <div className="row" style={{justifyContent: 'center', marginTop: 4}}>
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
@@ -219,8 +222,9 @@ export default function Characters() {
   };
   const remove = () => {
     const names = chosen.map(c => c.name);
-    if (!window.confirm(`Delete for good ${names.length} character(s): ${names.join(', ')}? Their poses are removed too. This cannot be undone.`)) return;
-    act.run('delete', async () => { await api('/characters/delete', {body: {ids: picked, confirm_names: names}}); setPicked([]); });
+    if (!window.confirm(`Move ${names.length} character(s) to the Bin: ${names.join(', ')}? They are hidden everywhere and can be restored for 30 days.`)) return;
+    // through the Bin like every other delete (restorable; removed for good only from the Bin)
+    act.run('delete', async () => { for (const id of picked) await api('/bin/move', {body: {kind: 'character', ref: String(id)}}); setPicked([]); });
   };
   const card = (c: any) => {
     const can = cleanup && removable(c, usage);
@@ -244,10 +248,11 @@ export default function Characters() {
           <option value="">This story: choose an episode</option>
           {live.map((e: any) => <option key={e.id} value={e.id}>{e.title}</option>)}
         </select>
+        <BulkDelete what="poses" label="Delete all rejected / never-approved poses" onDone={reload} />
         <button className={`btn ${cleanup ? 'primary' : ''}`} onClick={() => { setCleanup(!cleanup); setPicked([]); }}>{cleanup ? 'Done cleaning up' : 'Clean up'}</button>
       </div>
       {cleanup && <div className="alert row" style={{justifyContent: 'space-between'}}>
-        <span className="small">Tick characters that no live episode uses (the others have no box). {picked.length} selected.</span>
+        <span className="small">Tick characters that no live episode uses (the others have no box). {picked.length} selected. Archive only hides a character on this page and keeps everything; Delete (on a card, or below) moves it to the Bin, where it is hidden everywhere and removed for good after 30 days.</span>
         <span className="row"><button className="btn sm" disabled={!picked.length || !!act.busy} onClick={archive}>Archive selected</button>
           <button className="btn sm danger" disabled={!picked.length || !!act.busy} onClick={remove}>Delete selected</button></span></div>}
       {data && !data.length && <Empty>No characters.</Empty>}

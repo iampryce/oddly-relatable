@@ -67,7 +67,7 @@ def character(c: Character, assets: list[CharacterAsset], rig_checks: dict | Non
             "assets": [{"id": a.id, "kind": a.kind, "expression": a.expression, "status": a.status, "width": a.width, "height": a.height,
                         "style_version": a.style_version or "v1",
                         "rig_check": (rig_checks or {}).get(str(a.id)) if a.kind == "pose" and a.status == "approved" else None,
-                        "url": storage().url(a.storage_key), "created_at": ts(a.created_at)} for a in assets]}
+                        "url": storage().url(a.storage_key), "created_at": ts(a.created_at)} for a in assets if a.status != "binned"]}
 
 
 def publish(p: PublishRecord | None) -> dict | None:

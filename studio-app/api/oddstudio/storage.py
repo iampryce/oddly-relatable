@@ -53,6 +53,13 @@ class LocalStorage:
     def local_path(self, key: str) -> Path:
         return self.root / check_key(key)
 
+    def delete(self, key: str) -> None:
+        """Remove one stored file (only ever inside the storage folder)."""
+        p = (self.root / check_key(key)).resolve()
+        if not p.is_relative_to(self.root.resolve()):
+            raise ValueError(f"refusing to delete outside storage: {key!r}")
+        p.unlink(missing_ok=True)
+
     def url(self, key: str, seconds: int | None = None) -> str:
         s = get_settings()
         exp = int(time.time()) + (seconds or s.presign_seconds)
@@ -103,6 +110,10 @@ class S3Storage:
     def local_path(self, key: str) -> Path | None:
         p = self.local.local_path(key)
         return p if p.exists() else None
+
+    def delete(self, key: str) -> None:
+        self.local.delete(key)
+        self.client.delete_object(Bucket=self.bucket, Key=self._k(key))
 
     def url(self, key: str, seconds: int | None = None) -> str:
         if self.local.local_path(key).exists():

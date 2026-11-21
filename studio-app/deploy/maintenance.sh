@@ -33,6 +33,7 @@ DEPLOY_LOCK=${DEPLOY_LOCK:-$ROOT/.ci-deploy.lock}
 JOURNAL_MAX=${JOURNAL_MAX:-100M}
 UPLOAD_HOURS=${UPLOAD_HOURS:-24}
 MEDIA_VOLUME=${MEDIA_VOLUME:-oddstudio_work_data}
+BIN_DAYS=${BIN_DAYS:-30}
 APPLY=0
 case "${1:-}" in
   --apply) APPLY=1 ;;
@@ -166,6 +167,19 @@ if docker volume inspect "$MEDIA_VOLUME" >/dev/null 2>&1; then
              find /data/work/uploads -mindepth 1 -maxdepth 1 -mmin +$(( UPLOAD_HOURS * 60 )) -exec basename {} \; 2>/dev/null | sort)
 else
   echo "  media volume $MEDIA_VOLUME not found; skipped"
+fi
+
+# ---------------------------------------------------------------- the Bin (items deleted in the studio > BIN_DAYS ago)
+# Runs inside the API container (it has the database): rows and files of items in the Bin for more than BIN_DAYS days
+# are removed for good with --apply and each one is logged; the dry run lists them. Files are only ever removed from
+# the studio's storage and work folders (the API refuses any other path).
+echo "bin: items deleted in the studio more than $BIN_DAYS days ago"
+api=$(docker ps --format '{{.Names}}' | grep -E '(^|[-_])api([-_][0-9]+)?$' | head -n 1)
+if [[ -n "$api" ]]; then
+  if [[ $APPLY == 1 ]]; then docker exec "$api" python -m oddstudio.bin purge --days "$BIN_DAYS" | sed 's/^/  /' || echo "  FAILED bin purge" >&2
+  else docker exec "$api" python -m oddstudio.bin purge --days "$BIN_DAYS" --dry-run | sed 's/^/  /' || true; fi
+else
+  echo "  the API container is not running; skipped"
 fi
 
 # ---------------------------------------------------------------- logs
