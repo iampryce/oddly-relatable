@@ -5,6 +5,8 @@
 //    set: {plate, width, height, floor_y, stand_min_x, stand_max_x, seat?: {x, hip_y, feet_y},
 //          seats?: [{x, hip_y, feet_y}], table_front?: {x0, y0, x1, y1}},
 //    cast: {key: {rig, height, lips, start: "on" | "off" | "seat:N"}},
+//    scenes?: [{t0, set: {...as set}, starts: {key: "on" | "off" | "seat:N"}}]   (later scenes: at t0 the set changes
+//      and everyone is placed as the scene starts; without it, one set for the whole render, as before)
 //    (seats: several seats; the older single `seat` is seat 0. table_front: the part of the plate in front of the
 //     seated characters (a table top), drawn again after them so they sit behind it.)
 //    lines: [{speaker, text, start, end, expression, gesture?, move?: {type, to?}, look_at?, reactions?: [...],
@@ -18,9 +20,14 @@ import {registerBannerFonts, layoutBanner, drawBanner} from './banner.mjs';
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const OUT = process.argv[3];
 const {width: W, height: H, fps: FPS, duration: DUR} = spec;
-const SET = spec.set;
+let SET = spec.set;
 const KEYS = Object.keys(spec.cast);
-const SEATS = SET.seats?.length ? SET.seats : SET.seat ? [SET.seat] : [];
+const seatsOf = s => s.seats?.length ? s.seats : s.seat ? [s.seat] : [];
+let SEATS = seatsOf(SET);
+// scene 0 is spec.set with the cast's starts; later scenes switch set at their t0
+const SCENES = [{t0: -Infinity, set: spec.set}, ...(spec.scenes || []).slice().sort((a, b) => a.t0 - b.t0)];
+const useScene = i => { SET = SCENES[i].set; SEATS = seatsOf(SET); home = homes[i]; };
+const sceneAt = t => { let i = 0; while (i + 1 < SCENES.length && SCENES[i + 1].t0 <= t) i++; return i; };
 const startSeat = k => { const m = /^seat:(\d+)$/.exec(spec.cast[k].start || ''); return m && SEATS[+m[1]] ? +m[1] : null; };
 
 // ---------------------------------------------------------------- cast and blocking
@@ -43,7 +50,8 @@ function marks(keys) {
 // Per character: a list of locomotion segments {t0, t1, from, to, kind: walk|sit|stand|jump} and a timeline of states.
 const onStart = KEYS.filter(k => spec.cast[k].start !== 'off');
 // every cast member gets a reserved mark (characters who enter later walk to theirs, so nobody overlaps)
-const home = marks(KEYS);
+const homes = SCENES.map(sc => { const keep = SET; SET = sc.set; const h = marks(KEYS); SET = keep; return h; });
+let home = homes[0];
 const state = {};                       // per character: x, seated, seat (index while seated)
 for (const k of KEYS) {
   const si = startSeat(k);
@@ -71,8 +79,22 @@ const GEST = {   // script gesture -> [arm, animator gesture, hand kind]
 };
 const nearestOther = (k, x) => KEYS.filter(o => o !== k && state[o].on).sort((a, b) => Math.abs(state[a].x - x) - Math.abs(state[b].x - x))[0];
 
+let sceneNow = 0;
 for (const ln of spec.lines) {
   const k = ln.speaker, t = ln.start, len = ln.end - ln.start;
+  // a cut to the next scene: its set, and everyone placed as that scene starts (cuts reset staging)
+  while (sceneNow + 1 < SCENES.length && SCENES[sceneNow + 1].t0 <= t) {
+    sceneNow++;
+    const sc = SCENES[sceneNow];
+    useScene(sceneNow);
+    for (const c of KEYS) {
+      for (const m of moves[c]) if (m.t1 > sc.t0) m.t1 = Math.max(m.t0, sc.t0 - 0.001);
+      const v = (sc.starts || {})[c] || 'off', mm = /^seat:(\d+)$/.exec(v), si = mm && SEATS[+mm[1]] ? +mm[1] : null;
+      state[c] = si !== null ? {x: SEATS[si].x, seated: true, seat: si, on: true}
+        : {x: v === 'on' ? home[c] : SET.width + 160, seated: false, seat: null, on: v === 'on'};
+      moves[c].push({t0: sc.t0, t1: sc.t0, kind: 'place', x: state[c].x, seated: state[c].seated, seat: state[c].seat});
+    }
+  }
   exprs[k].push([t, ln.expression || 'neutral']);
   exprs[k].push([ln.end + 0.5, 'neutral']);
   // movement first: it starts with the line (characters talk while they move)
@@ -153,9 +175,10 @@ function blink(k, t) {
 function locomotion(k, t) {
   const c = C[k], stand = FLOOR() - hipHeight(c);
   const s0 = startSeat(k);
-  let x = s0 !== null ? SEATS[s0].x : spec.cast[k].start === 'off' ? SET.width + 160 : home[k], seated = s0 !== null, seat = s0, out = null;
+  let x = s0 !== null ? SEATS[s0].x : spec.cast[k].start === 'off' ? SET.width + 160 : homes[0][k], seated = s0 !== null, seat = s0, out = null;
   for (const m of moves[k]) {
     if (t < m.t0) break;
+    if (m.kind === 'place') { x = m.x; seated = m.seated; seat = m.seat; continue; }
     const u = clamp((t - m.t0) / (m.t1 - m.t0));
     if (m.kind === 'walk') {
       if (t <= m.t1) out = walkPose(c, m, t); else x = m.to;
@@ -306,7 +329,8 @@ function camera(poses, t) {
 }
 
 // ---------------------------------------------------------------- frame
-const plate = await loadImage(SET.plate);
+const plates = await Promise.all(SCENES.map(sc => loadImage(sc.set.plate)));
+let plate = plates[0];
 function wrapText(ctx, text, maxW) {
   const rows = []; let cur = '';
   for (const w of text.split(/\s+/)) { const nx = cur ? cur + ' ' + w : w; if (ctx.measureText(nx).width > maxW && cur) { rows.push(cur); cur = w; } else cur = nx; }
@@ -403,6 +427,8 @@ function drawFrame(ctx, t) {
 }
 
 function drawScene(ctx, t) {
+  const si = sceneAt(t);
+  useScene(si); plate = plates[si];
   const poses = Object.fromEntries(KEYS.map(k => [k, pose(k, t)]));
   const v = camera(poses, t), s = W / v.w;
   if (![v.x0, v.y0, v.w].every(Number.isFinite)) throw new Error(`invalid camera at t=${t.toFixed(2)}`);

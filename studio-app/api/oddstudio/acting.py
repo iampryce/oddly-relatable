@@ -218,13 +218,30 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     # how the first scene starts (feat/seating): its seated characters take the set's seats in staging order (speaker
     # first); more seated characters than seats stand, and the log says so
     first = scenes[refs[0][0][0]] if refs and refs[0] else None
+    # per-scene sets (feat/scene-sets): the render starts on its first scene's set; a scene's set that cannot be
+    # staged stops the render with the scene named (never a silent default)
+    from . import scene_sets
+    bad = scene_sets.problems(db, ep, list(scenes.values()))
+    if bad:
+        raise engine.EngineInputError("; ".join(bad))
+    set_specs = {ep.set_id: st}
+
+    def set_spec(sid: str) -> dict:
+        if sid not in set_specs:
+            set_specs[sid] = studio_sets.spec_for(db, sid, folder / f"set-{sid}")
+            if set_specs[sid] is None:
+                raise engine.EngineInputError(f"the set {sid!r} is not an approved set any more")
+        return set_specs[sid]
+    if first is not None:
+        st = set_spec(scene_sets.scene_set(ep, first))
     starts, standing = seat_starts(getattr(first, "staging", None) or {}, list(cast), len(studio_sets.seats_of(st)))
     for k, v in starts.items():
         cast[k]["start"] = v
     for k in standing:
         ctx.log(f"{k}: seated in the scene's staging, but the set has no free seat: standing")
 
-    lines, t, entered = [], 0.5, {k for k in keys if cast[k]["start"] == "on"}
+    lines, t, entered = [], 0.5, {k for k in keys if cast[k]["start"] != "off"}
+    cuts = []   # (scene id, index of its first line) for every scene after the first
     line_ids = []
     gain = float(get_section(db, "voice").get("gain", 1.0))
     audio = []
@@ -233,6 +250,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         for sid, li in rs:
             if prev_scene is not None and sid != prev_scene:
                 t += SCENE_GAP
+                cuts.append((sid, len(lines)))
             prev_scene = sid
             ln = scenes[sid].lines[li]
             k = ln["speaker"]
@@ -262,12 +280,37 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
                 if r.get("expression") and r["character"] in faces:
                     r["expression"] = face_for(faces[r["character"]], chars_by_key[r["character"]], r["expression"])
             if k not in entered and "move" not in entry:
-                entry["move"] = {"type": "enter"}       # a character not on stage walks in for their first line
+                entry["move"] = {"type": "enter", "auto": True}   # a character not on stage walks in for their first line
             entered.add(k)
             lines.append(entry)
             line_ids.append(ln.get("line_id"))
             t = entry["end"] + GAP
     duration = total if absolute else round(t + TAIL + (END_CARD if end_card else 0), 3)
+
+    # later scenes: at the cut (halfway between the two lines) the set changes when it differs, and everyone is placed
+    # as the scene starts (its staging on its set's seats; the scene's characters on stage, the others off). Only
+    # emitted when a later scene changes set or has staging, so a one-set render without staging is exactly as before.
+    scene_specs = []
+    for sid, i in cuts:
+        sc = scenes[sid]
+        sspec = set_spec(scene_sets.scene_set(ep, sc))
+        on_stage = set(sc.characters or []) | {r for ln in sc.lines for r in referenced(ln)}
+        sstarts, left = seat_starts(sc.staging or {}, list(cast), len(studio_sets.seats_of(sspec)))
+        for k in left:
+            ctx.log(f"scene {sc.position}: {k} is seated in the staging, but the set has no free seat: standing")
+        scene_specs.append({"t0": round((lines[i - 1]["end"] + lines[i]["start"]) / 2, 3), "set": sspec, "id": sid,
+                            "starts": {k: sstarts.get(k) or ("on" if k in on_stage else "off") for k in cast},
+                            "_changes": sspec is not st or bool(sc.staging)})
+    changes = any([x.pop("_changes") for x in scene_specs])   # (a list: every entry loses the key)
+    scene_specs = scene_specs if changes else []
+    # a character the scene start already places on stage does not also walk in (only the automatic entrances)
+    bounds = [x["t0"] for x in scene_specs] + [float("inf")]
+    for x, t_end in zip(scene_specs, bounds[1:]):
+        for ln in lines:
+            if x["t0"] <= ln["start"] < t_end and (ln.get("move") or {}).get("auto") and x["starts"].get(ln["speaker"]) != "off":
+                ln.pop("move")
+    for ln in lines:   # the marker is internal: the spec stays as before for renders without scene changes
+        (ln.get("move") or {}).pop("auto", None)
 
     s = get_settings()
     from .tasks import current_script
@@ -276,6 +319,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration,
             **presentation(ep, hook),
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
+            **({"scenes": scene_specs} if scene_specs else {}),
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
             "timeline": "absolute" if absolute else "sequential"}
     spec_file = folder / "acting.json"
