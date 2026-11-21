@@ -77,29 +77,12 @@ REPO_SETS = REPO_ROOT / "production" / "animation" / "sets"
 _thumbs: dict[str, str] = {}      # set id -> storage key of its thumbnail (made once per process)
 
 
-STAGING_KEYS = ("plate", "width", "height", "floor_y", "stand_min_x", "stand_max_x")
-
-
-def repo_spec(set_id: str) -> dict | None:
-    """A repository plate the acting renderer can stage (its JSON has the plate and the blocking), else None."""
-    p = REPO_SETS / f"{set_id}.json"
-    if not p.exists():
-        return None
-    try:
-        spec = json.loads(p.read_text())
-    except ValueError:
-        return None
-    return spec if all(spec.get(k) is not None for k in STAGING_KEYS) else None
-
-
 def usable(db) -> dict[str, dict]:
     """Every set an episode may use: approved studio sets and the repository plates that have blocking (both are
     approved sets the acting renderer can stage). Candidates and rejected sets are not usable."""
     out = {}
     for p in sorted(REPO_SETS.glob("*.json")):
-        spec = repo_spec(p.stem)
-        if spec is None:
-            continue
+        spec = json.loads(p.read_text())
         out[p.stem] = {"id": p.stem, "label": p.stem.replace("-", " ").capitalize(), "source": "repository",
                        "description": spec.get("note", ""), "style_version": "v1", "width": spec.get("width"),
                        "height": spec.get("height"), "seat": bool(spec.get("seat"))}
@@ -114,11 +97,12 @@ def spec_for(db, set_id: str, folder: Path) -> dict | None:
     """The acting renderer's set spec (plate path + blocking) for a usable set, or None."""
     if set_id in approved(db):
         return plate_for(db, set_id, folder)
-    spec = repo_spec(set_id)
-    if spec is not None:
-        spec = dict(spec)
+    p = REPO_SETS / f"{set_id}.json"
+    if p.exists():
+        spec = json.loads(p.read_text())
         spec["plate"] = str(REPO_ROOT / spec["plate"])
-    return spec
+        return spec
+    return None
 
 
 def thumbnail_url(db, set_id: str) -> str | None:
@@ -168,13 +152,6 @@ def suggest(db, word: str | None) -> str | None:
         if w in f"{k} {s['label']} {s['description']}".lower().replace("-", " "):
             return k
     return None
-
-
-def prompt_for(db, description: str) -> str:
-    """The exact prompt a set candidate is generated from: the locked house style, then the owner's description.
-    The episode shows this same text before anything is sent."""
-    from .tasks import style_version
-    return f"{set_style(style_version(db))}\nSetting: {description}"
 
 
 def proposed_blocking(width: int, height: int) -> dict:

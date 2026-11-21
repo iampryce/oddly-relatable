@@ -208,15 +208,7 @@ def set_options(eid: int, db: Session = Depends(get_db)):
                for k, s in studio_sets.usable(db).items()]
     tr = ep.audio_transcript or {}
     word = ((tr.get("media_hints") or {}).get("setting") or "").strip() if ep.source == "audio" else ""
-    from .models import Asset
-    from .storage import storage
-    pending = []
-    for k, r in studio_sets.records(db).items():
-        if r.get("status") != "candidate":
-            continue
-        a = db.get(Asset, r.get("preview_asset_id") or r.get("asset_id")) if (r.get("preview_asset_id") or r.get("asset_id")) else None
-        pending.append({"id": k, "label": r.get("label", k), "for_this_episode": r.get("episode_id") == ep.id,
-                        "thumbnail": storage().url(a.storage_key) if a else None})
+    pending = [{"id": k, "label": r.get("label", k)} for k, r in studio_sets.records(db).items() if r.get("status") == "candidate"]
     return {"current": ep.set_id, "options": options, "candidates": pending,
             "suggestion": {"word": word, "set_id": studio_sets.suggest(db, word)} if word else None}
 

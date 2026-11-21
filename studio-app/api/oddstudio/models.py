@@ -62,8 +62,6 @@ class Episode(Timestamps, Base):
     dialogue_display: Mapped[str] = mapped_column(String(10), default="bubbles")
     # The episode's own set (background), chosen explicitly by the owner (migration 0008; no silent default)
     set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
-    # The proposed set description (migration 0009): {text, source: video notes | writer | edited, updated}
-    set_proposal: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 

@@ -7,7 +7,6 @@ import Link from 'next/link';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
-import SetProposal from './SetProposal';
 
 export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
   const {data, error, reload} = useApi<any>(`/episodes/${ep.id}/set-options`);
@@ -26,14 +25,14 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
           {current ? <span className="small">{current.label}{current.used_in.length ? ` · also in ${current.used_in.length} other episode(s)` : ' · only in this episode'}</span>
             : <span className="small" style={{color: 'var(--bad, #b00)'}}>No set chosen yet: production cannot start until you choose one (there is no default).</span>}</div>
         <div className="row">
+          <Link className="btn primary" href="/settings#sets">Generate a new set for this story</Link>
           <button className="btn" disabled={locked} onClick={() => setOpen(!open)}>{open ? 'Close' : current ? 'Change set' : 'Choose an approved set'}</button>
         </div>
       </div>
       {data.suggestion && <p className="small">The video notes describe the place as <b>{data.suggestion.word}</b>{data.suggestion.set_id
         ? <>; the approved set <b>{data.options.find((o: any) => o.id === data.suggestion.set_id)?.label}</b> matches (a suggestion: nothing is applied until you choose it).</>
         : '; no approved set matches yet. Generate one for this story.'}</p>}
-      {data.candidates.length > 0 && <p className="muted small">Waiting for approval in Settings › <Link href="/settings#sets">Sets</Link>: {data.candidates.map((c: any) => c.label).join(', ')}.</p>}
-      <SetProposal ep={ep} candidates={data.candidates} onChange={reload} />
+      {data.candidates.length > 0 && <p className="muted small">Waiting for approval in Settings › Sets: {data.candidates.map((c: any) => c.label).join(', ')}.</p>}
       {open && <div className="grid cols-3">
         {data.options.map((o: any) => (
           <div key={o.id} className="card stack" style={{padding: 10, outline: o.id === data.current ? '2px solid var(--accent, #36c)' : undefined}}>

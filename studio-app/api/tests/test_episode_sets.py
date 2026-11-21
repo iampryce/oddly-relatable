@@ -81,7 +81,7 @@ class EpisodeSetTest(unittest.TestCase):
         opts = self.c.get(f"/api/episodes/{eid}/set-options").json()
         self.assertEqual(opts["current"], "office")
         self.assertEqual(sorted(o["id"] for o in opts["options"]), [LIVING, "office"])
-        self.assertEqual([(c["id"], c["label"], c["for_this_episode"]) for c in opts["candidates"]], [("kitchen", "Kitchen", False)])
+        self.assertEqual(opts["candidates"], [{"id": "kitchen", "label": "Kitchen"}])
         self.assertTrue(all(o["thumbnail"] for o in opts["options"]), "every option has a thumbnail")
 
     def test_reuse_is_visible_and_deliberate(self):
@@ -128,19 +128,6 @@ class EpisodeSetTest(unittest.TestCase):
         opts = self.c.get(f"/api/episodes/{eid}/set-options").json()
         self.assertEqual(opts["suggestion"], {"word": "office", "set_id": "office"})
         self.assertIsNone(opts["current"], "never applied by itself")
-
-    def test_a_repository_plate_without_staging_is_not_offered(self):
-        from oddstudio import sets
-        from oddstudio.db import new_session
-        bad = sets.REPO_SETS / "no-blocking-test.json"
-        bad.write_text(json.dumps({"plate": "x.png", "width": 10, "height": 10}))
-        try:
-            with new_session() as db:
-                self.assertNotIn("no-blocking-test", sets.usable(db))
-                self.assertIsNone(sets.spec_for(db, "no-blocking-test", self.env.tmp))
-                self.assertIsNotNone(sets.spec_for(db, LIVING, self.env.tmp))
-        finally:
-            bad.unlink()
 
     def test_the_renderer_refuses_without_a_set(self):
         from oddstudio import acting
