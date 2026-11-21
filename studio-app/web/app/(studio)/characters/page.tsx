@@ -135,10 +135,18 @@ function CharacterCard({c, reload}: {c: any; reload: () => unknown}) {
 export default function Characters() {
   const {data, error, reload} = useApi<any[]>('/characters', 8000);
   const [creating, setCreating] = useState(false);
+  const [checkNote, setCheckNote] = useState('');
+  const checkAll = async () => {
+    const r = await api('/characters/rig-check-all', {method: 'POST'});
+    setCheckNote(`Rig check queued for ${r.queued.length} character(s)${r.already_running ? ` (${r.already_running} already running)` : ''}. Results appear on the pose cards; approvals are not changed.`);
+    reload();
+  };
   return (
     <>
       <div className="spread"><div><h1>Characters</h1><p className="sub">No fixed cast: stories introduce the characters they need. Approve their expression sheets, then keep the ones you want for future stories.</p></div>
-        {!creating && <button className="btn primary" onClick={() => setCreating(true)}>New character</button>}</div>
+        <div className="row"><button className="btn" title="Checks that the acting rig can be built from every approved pose (informational: approvals are never changed)" onClick={() => checkAll().catch(e => setCheckNote(e.message))}>Run rig check on all approved poses</button>
+          {!creating && <button className="btn primary" onClick={() => setCreating(true)}>New character</button>}</div></div>
+      {checkNote && <p className="small muted">{checkNote}</p>}
       <ErrorBox error={error} />
       {creating && <div style={{marginBottom: 16}}><CharacterForm initial={{}} onDone={() => { setCreating(false); reload(); }} /></div>}
       {data && !data.length && <Empty>No characters.</Empty>}
