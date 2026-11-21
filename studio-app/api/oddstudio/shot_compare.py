@@ -107,33 +107,51 @@ def _episode_line(db: Session, eid: int, scene_id: int, line: int):
     return ep, sc, sc.lines[line]
 
 
-# Tone cues read from the line's own words (our transcript of our recording): a fixed list, so the action always says
-# HOW the line is delivered (owner request 2026-11-21: never a flat "talks (neutral)").
+# The tones an action may use (a fixed list: the writer must pick from it, the phrase matcher uses it too).
+TONES = ("pompous", "insulting", "pleading", "shocked", "sarcastic", "smug", "deadpan", "matter-of-fact", "nervous",
+         "cheerful", "angry", "irritated", "sad", "puzzled", "excited", "mocking", "proud", "defensive", "tender",
+         "exasperated", "whispering", "triumphant")
+# Phrase matcher (the fallback when no text provider is set or it fails). Whole words and phrases only; a cue that
+# starts with "^" counts only at the start of the line or of a sentence ("Sure, ..." is sarcastic; "not sure, ..." is
+# not; "I, Mortimer" is pompous; "hi, " is not).
 TONE_CUES = (
-    ("pompous", ("hereby", "bequeath", "magnificent", "as you all know", "henceforth", "my dear", "indeed", "allow me",
-                 "it is my", "i, ", "esteemed", "distinguished")),
-    ("insulting", ("idiot", "fool", "useless", "pathetic", "stupid", "loser", "moron", "disgrace", "you never", "worthless",
-                   "nothing for", "not a penny", "gets nothing", "nothing.")),
+    ("pompous", ("hereby", "bequeath", "magnificent", "as you all know", "henceforth", "my dear", "allow me",
+                 "esteemed", "distinguished", "^i,", "^indeed")),
+    ("insulting", ("idiot", "fool", "useless", "pathetic", "stupid", "loser", "moron", "disgrace", "worthless",
+                   "not a penny", "gets nothing", "nothing.")),
     ("pleading", ("please", "i beg", "just this once", "you have to", "can't you")),
-    ("shocked", ("what?!", "no way", "you're joking", "are you serious", "excuse me?")),
-    ("sarcastic", ("oh great", "how lovely", "wonderful.", "of course you did", "sure,", "brilliant.")),
-    ("smug", ("i told you", "obviously", "naturally", "as expected")),
-    ("deadpan", ("fine.", "okay.", "right.", "cool.")),
+    ("shocked", ("no way", "you're joking", "are you serious", "^what?!", "^excuse me?")),
+    ("sarcastic", ("oh great", "how lovely", "of course you did", "^sure,", "^brilliant.", "^wonderful.")),
+    ("smug", ("i told you", "as expected", "^obviously", "^naturally")),
+    ("deadpan", ("^fine.", "^okay.", "^right.", "^cool.")),
 )
 EXPRESSION_TONE = {"smug": "smug", "deadpan": "deadpan", "angry": "angry", "annoyed": "irritated", "shocked": "shocked",
-                   "worried": "nervous", "sad": "sad", "happy": "cheerful", "laughing": "laughing", "confused": "puzzled"}
+                   "worried": "nervous", "sad": "sad", "happy": "cheerful", "laughing": "cheerful", "confused": "puzzled",
+                   "proud": "proud", "excited": "excited", "pleading": "pleading", "nervous": "nervous", "irritated": "irritated"}
+
+
+def _cue_regex(cue: str):
+    import re
+    if cue.startswith("^"):
+        return re.compile(r"(?:^|[.!?]\s+)" + re.escape(cue[1:]) + (r"(?!\w)" if cue[-1].isalnum() else ""))
+    return re.compile(r"(?<!\w)" + re.escape(cue) + (r"(?!\w)" if cue[-1].isalnum() else ""))
+
+
+_CUES = [(name, [_cue_regex(c) for c in cues]) for name, cues in TONE_CUES]
 
 
 def tone_of(text: str, expression: str | None, emotion: str | None) -> str:
-    t = f" {(text or '').lower()} "
-    tones = [name for name, cues in TONE_CUES if any(c in t for c in cues)]
+    """The phrase matcher: tones from whole-word cues in the line, then from its mood; a sensible tone when nothing
+    matches (exclaiming, puzzled for a question, matter-of-fact otherwise)."""
+    t = (text or "").strip().lower()
+    tones = [name for name, rx in _CUES if any(r.search(t) for r in rx)]
     for e in (expression, emotion):
         x = EXPRESSION_TONE.get((e or "").lower())
         if x and x not in tones:
             tones.append(x)
     if not tones:
         s = (text or "").strip()
-        tones = ["exclaiming"] if s.endswith("!") else ["asking, puzzled"] if s.endswith("?") else ["matter-of-fact, dry"]
+        tones = ["excited"] if s.endswith("!") else ["puzzled"] if s.endswith("?") else ["matter-of-fact"]
     return ", ".join(tones[:3])
 
 
@@ -159,6 +177,82 @@ def action_from_notes(db: Session, ep: Episode, ln: dict) -> str:
     where = f"{sp['pose']}, " if sp.get("pose") else ""
     return (f"is {where}delivering the line in a {tone} way (\"{quote}\")" + (f"; {', '.join(acts)}" if acts else "")
             + ", with matching facial expression and natural head and hand movements")
+
+
+WRITER_SYSTEM = ("You direct the acting of ONE line in an original adult 2D cartoon. Reply with one JSON object only.")
+WRITER_PROMPT = ("The line: {speaker}: \"{text}\"\nBefore it: {before}\nAfter it: {after}\nStaging from the reference notes "
+                 "(fixed words): {notes}\nRecorded mood: {mood}\n\nChoose 1 to 3 tones for how the line is delivered, ONLY "
+                 "from: {tones}. Then write ONE sentence (at most 35 words) of what the character physically does while "
+                 "saying it (face, head, hands, posture). No names of real people, no camera moves, no on-screen text. "
+                 'JSON: {{"tone": ["..."], "action": ""}}')
+TEXT_PRICES = {"anthropic": (2.00, 10.00), "openai": (0.40, 1.60)}     # USD per million tokens (list prices, estimate)
+
+
+def writer_configured(db: Session) -> bool:
+    from .settings_store import get_section
+    return get_section(db, "text").get("provider", "none") not in ("none", "")
+
+
+def writer_cost(db: Session, prompt: str) -> dict:
+    """An estimate of one writer call (text providers do not report usage here): about 4 characters per token. With a
+    fallback provider set, the higher of the two prices (either may write it), and both are named."""
+    from .settings_store import get_section
+    cfg = get_section(db, "text")
+    prov, fb = cfg.get("provider", "none"), cfg.get("fallback", "none")
+    tin, tout = (len(WRITER_SYSTEM) + len(prompt)) / 4, 120
+    price = lambda p: round((tin * TEXT_PRICES[p][0] + tout * TEXT_PRICES[p][1]) / 1e6, 5) if p in TEXT_PRICES else 0.0
+    usd = max(price(prov), price(fb) if fb not in ("none", "", prov) else 0.0)
+    note = "" if prov in TEXT_PRICES else "no per-call API cost for this provider"
+    if fb not in ("none", "", prov):
+        note = f"estimate covers {prov} or its fallback {fb}"
+    return {"provider": prov, "usd": usd, "note": note}
+
+
+def write_action(db: Session, pid: str, ep: Episode, sc: StoryboardScene, log=print) -> None:
+    """With a text provider in Settings: the line's tone and action written from its text, its neighbours and the
+    video notes; the tone only from TONES. Falls back to the phrase matcher (with a note) if the call fails or gives
+    nothing usable. Never overwrites the owner's own edit."""
+    from . import video_notes as VN
+    from .providers import ProviderError, ProviderNotConfigured, text_provider
+    from .reference_plan import effective
+    from .settings_store import get_section
+    recs = records(db)
+    p = recs[pid]
+    if p.get("action_source") == "your edit" or not writer_configured(db):
+        return
+    lines = sc.lines or []
+    i = p["line"]
+    near = lambda j: f"{lines[j].get('speaker')}: {lines[j].get('text')}" if 0 <= j < len(lines) else "(none)"
+    ln = lines[i]
+    tr = ep.audio_transcript or {}
+    r = VN.for_line(effective(tr), ln) if (tr.get("video_notes") or {}).get("ranges") else None
+    prompt = WRITER_PROMPT.format(speaker=ln.get("speaker"), text=ln.get("text", "")[:400], before=near(i - 1)[:300],
+                                  after=near(i + 1)[:300], notes=VN.describe(r) if r else "none",
+                                  mood=ln.get("expression") or "unknown", tones=", ".join(TONES))
+    cost = writer_cost(db, prompt)
+    try:
+        ans = text_provider(get_section(db, "text")).complete_json(WRITER_SYSTEM, prompt)
+        tones = [t for t in (ans.get("tone") if isinstance(ans, dict) and isinstance(ans.get("tone"), list) else [])
+                 if isinstance(t, str) and t.strip().lower() in TONES][:3]
+        act = str((ans or {}).get("action") or "").strip().replace("\n", " ")[:300] if isinstance(ans, dict) else ""
+        if not tones or len(act) < 8:
+            raise ValueError("no tone from the list or no action")
+        tone = ", ".join(t.strip().lower() for t in tones)
+        quote = (ln.get("text") or "")[:90]
+        update = {"tone": tone, "action": f"delivers the line in a {tone} way (\"{quote}\"): {act}",
+                  "action_source": "writer", "action_cost": cost, "action_note": ""}
+    except (ProviderError, ProviderNotConfigured, ValueError, TypeError, KeyError) as e:
+        update = {"action_source": "phrase matcher", "action_cost": cost,
+                  "action_note": f"the writer could not be used ({str(e)[:120]}): the phrase matcher's tone is used"}
+        log(update["action_note"])
+    # re-read just before saving: an edit the owner made while the writer was working is kept
+    db.expire_all()
+    recs = records(db)
+    if recs[pid].get("action_source") == "your edit":
+        return
+    recs[pid].update(update)
+    save(db, recs)
+    db.commit()
 
 
 @router.get("/motion/shot/options")
@@ -348,6 +442,7 @@ def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int) -> t
     recs[pid] = {"id": pid, "episode_id": ep.id, "scene_id": sc.id, "line": line, "speaker": ln.get("speaker"),
                  "text": ln.get("text"), "start": float(ln["start"]), "end": float(ln["end"]),
                  "seconds": round(float(ln["end"]) - float(ln["start"]), 3), "action": action_from_notes(db, ep, ln),
+                 "tone": tone_of(ln.get("text", ""), ln.get("expression"), None), "action_source": "phrase matcher",
                  "status": "preparing", "created": time.time(), "results": {}}
     save(db, recs)
     enqueue(db, "shot_prepare", episode_id=ep.id, payload={"pid": pid})
@@ -413,6 +508,7 @@ def set_action(pid: str, body: ActionIn, db: Session = Depends(get_db)):
     if any((r or {}).get("status") in ("queued", "running") for r in p["results"].values()):
         raise HTTPException(409, "not while a clip of this line is running")
     p["action"] = body.action.strip()
+    p["action_source"] = "your edit"          # never overwritten by the writer
     save(db, recs)
     db.commit()
     return view(db, p)
@@ -598,6 +694,7 @@ def shot_prepare(ctx: Ctx) -> dict:
         wav = media.cut_audio(src, folder / "line.wav", p["start"], p["end"])
         aa = store_asset(db, ep_id=ep.id, src=wav, key=f"episodes/{ep.id}/shot-compare/{pid}/line.wav", kind="audio",
                          label="Shot comparison: the line's recorded audio", content_type="audio/wav", job_id=job.id)
+        write_action(db, pid, ep, sc, ctx.log)
         recs = records(db)
         recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
                           "audio_seconds": round(media.probe(wav)["duration"] or p["seconds"], 3)})

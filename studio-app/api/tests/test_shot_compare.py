@@ -12,13 +12,36 @@ from PIL import Image
 from test_audio_stage1b import Base
 from test_rig_v2 import v2_figure
 
-from oddstudio import engine, fal
+import unittest
+
+from oddstudio import engine, fal, providers
 from oddstudio import shot_compare as SC
 
 LINE = {"line_id": "l1", "speaker": "mortimer", "text": "I leave everything to the cat.", "start": 1.0, "end": 4.0,
         "expression": "smug", "shot": "medium"}
 LINE2 = {"line_id": "l2", "speaker": "mortimer", "text": "I, Mortimer the Magnificent, hereby leave Winifred nothing.",
          "start": 4.2, "end": 5.8, "expression": "neutral", "shot": "close"}
+
+
+class ToneTest(unittest.TestCase):
+    """The phrase matcher: whole words and phrases; sentence-start cues only at the start of a sentence."""
+
+    def test_whole_words_and_sentence_starts(self):
+        self.assertIn("pompous", SC.tone_of("I, Mortimer the Magnificent, hereby leave you this.", None, None))
+        self.assertNotIn("pompous", SC.tone_of("Oh hi, Mortimer.", None, None), '"hi, " is not "I, "')
+        self.assertIn("sarcastic", SC.tone_of("Sure, a lovely day for it.", None, None))
+        self.assertNotIn("sarcastic", SC.tone_of("I'm not sure, honestly.", None, None), '"not sure," is not "Sure,"')
+        self.assertIn("sarcastic", SC.tone_of("Lovely. Sure, why not.", None, None), "at the start of a later sentence")
+        self.assertNotIn("insulting", SC.tone_of("He is a foolish man's foolproof friend.", None, None), "no part-word matches")
+        self.assertIn("insulting", SC.tone_of("You fool.", None, None))
+
+    def test_a_line_with_no_cue_gets_a_sensible_tone(self):
+        self.assertEqual(SC.tone_of("The keys are on the table.", None, None), "matter-of-fact")
+        self.assertEqual(SC.tone_of("Where did you put the keys?", None, None), "puzzled")
+        self.assertEqual(SC.tone_of("We won the lottery!", None, None), "excited")
+        self.assertEqual(SC.tone_of("The keys are on the table.", "worried", None), "nervous", "the line's mood when no cue")
+        for t in SC.tone_of("The keys are on the table.", None, None).split(", "):
+            self.assertIn(t, SC.TONES)
 
 
 class ShotCompareTest(Base):
@@ -61,6 +84,7 @@ class ShotCompareTest(Base):
 
     def tearDown(self):
         fal.set_test_run(None)
+        providers.set_test_text_responder(None)
         os.environ.pop("PUBLIC_URL", None)
         super().tearDown()
 
@@ -108,6 +132,64 @@ class ShotCompareTest(Base):
         self.assertIn("hereby leave Winifred nothing", a1)
         r = self.c.put(f"/api/motion/shot/{plans[1]['id']}/action", json={"action": "glares and says it slowly"})
         self.assertEqual(r.json()["action"], "glares and says it slowly")
+
+    def test_the_writer_writes_tone_and_action_from_the_line_its_neighbours_and_the_notes(self):
+        self.c.put("/api/settings/text", json={"provider": "anthropic"})
+        seen = []
+
+        def writer(system, prompt):
+            seen.append(prompt)
+            if "hereby" in prompt.split("Before it:")[0]:
+                return {"tone": ["pompous", "mocking", "galactic"], "action": "lifts his chin, taps the will twice and smirks at the room"}
+            raise providers.ProviderError("model down (test)")
+        providers.set_test_text_responder(writer)
+        plans = {p["line"]: p for p in self.batch_ready()}
+        self.assertEqual(len(seen), 2, "one writer call per line, in the free preparation")
+        self.assertIn("After it: mortimer: I, Mortimer the Magnificent", seen[0], "the line's neighbours")
+        self.assertIn("Choose 1 to 3 tones", seen[0])
+        p1 = plans[1]
+        self.assertEqual((p1["tone"], p1["action_source"]), ("pompous, mocking", "writer"), "only tones from the list")
+        self.assertIn("taps the will twice", p1["action"])
+        self.assertGreater(p1["action_cost"]["usd"], 0)
+        self.assertEqual(p1["action_cost"]["provider"], "anthropic")
+        p0 = plans[0]
+        self.assertEqual(p0["action_source"], "phrase matcher", "the writer failed: the phrase matcher is used")
+        self.assertIn("could not be used", p0["action_note"])
+        self.assertIn("smug", p0["action"])
+        # the owner's edit is never overwritten by the writer
+        self.c.put(f"/api/motion/shot/{p1['id']}/action", json={"action": "glares at the family"})
+        from oddstudio.db import new_session
+        from oddstudio.models import Episode, StoryboardScene
+        with new_session() as s:
+            SC.write_action(s, p1["id"], s.get(Episode, self.eid), s.get(StoryboardScene, self.sid))
+        p1 = next(p for p in self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()["plans"] if p["id"] == p1["id"])
+        self.assertEqual((p1["action"], p1["action_source"]), ("glares at the family", "your edit"))
+
+    def test_an_edit_made_while_the_writer_works_is_kept_and_fallback_prices_are_covered(self):
+        self.c.put("/api/settings/text", json={"provider": "openai", "fallback": "anthropic"})
+        plans = self.batch_ready()          # no responder: the writer fails, the phrase matcher stays
+        pid = plans[0]["id"]
+        from oddstudio.db import new_session
+        from oddstudio.models import Episode, StoryboardScene
+
+        def writer(system, prompt):
+            # the owner saves an edit while the writer is working
+            self.c.put(f"/api/motion/shot/{pid}/action", json={"action": "sighs and looks away"})
+            return {"tone": ["deadpan"], "action": "shrugs and speaks without looking up"}
+        providers.set_test_text_responder(writer)
+        with new_session() as s:
+            SC.write_action(s, pid, s.get(Episode, self.eid), s.get(StoryboardScene, self.sid))
+        p = next(x for x in self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()["plans"] if x["id"] == pid)
+        self.assertEqual((p["action"], p["action_source"]), ("sighs and looks away", "your edit"))
+        with new_session() as s:
+            c = SC.writer_cost(s, "x" * 4000)
+        self.assertIn("fallback anthropic", c["note"])
+        self.assertGreater(c["usd"], 0.002, "the higher (fallback) price is used for the estimate")
+
+    def test_no_writer_without_a_text_provider(self):
+        providers.set_test_text_responder(lambda s, p: self.fail("no text call without a provider in Settings"))
+        plans = self.batch_ready()
+        self.assertTrue(all(p["action_source"] == "phrase matcher" and not p.get("action_cost") for p in plans))
 
     def test_one_summary_one_confirm_and_the_cap(self):
         plans = self.batch_ready()

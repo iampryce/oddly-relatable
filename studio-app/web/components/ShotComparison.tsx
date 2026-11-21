@@ -98,6 +98,7 @@ export function ShotComparison() {
                 {!l.ready && <span className="muted">({l.why_not})</span>}
                 {picked.has(lineKey(l)) && <span className="muted">{p ? p.status : 'planning…'}{p?.error ? `: ${p.error}` : ''}</span>}</label>
               {picked.has(lineKey(l)) && p && <details><summary>show/edit action and requests</summary>
+                <div className="muted">Tone: {p.tone || '—'} · from {p.action_source || 'phrase matcher'}{p.action_cost ? ` · writer cost about ${usd(p.action_cost.usd, 4)}${p.action_cost.note ? ` (${p.action_cost.note})` : ''}` : ''}{p.action_note ? ` · ${p.action_note}` : ''}</div>
                 <textarea rows={2} defaultValue={p.action} onBlur={e => saveAction(p, e.target.value)} aria-label="action" />
                 {(p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
                   <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}, {r.framing} frame)</summary>
