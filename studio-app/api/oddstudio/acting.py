@@ -101,12 +101,14 @@ def rig_for(ctx, c) -> Path:
     r = subprocess.run([py, str(ANIM / "rig_extract.py"), str(sources[0][1]), str(d)], capture_output=True, text=True,
                        timeout=600, stdin=subprocess.DEVNULL)
     if r.returncode != 0:
-        raise engine.EngineRunError(f"could not rig {c.name} from the approved neutral pose: {(r.stderr or r.stdout)[-400:]}")
+        from .rig_check import rig_error
+        raise engine.EngineRunError(f"could not rig {c.name} from the approved neutral pose: {rig_error(r.stderr or r.stdout)}")
     for name, f in sources[1:]:
         r = subprocess.run([py, str(ANIM / "rig_extract.py"), str(f), str(d), "--head-only", name], capture_output=True,
                            text=True, timeout=600, stdin=subprocess.DEVNULL)
         if r.returncode != 0:
-            ctx.log(f"{c.name}: expression '{name}' not rigged ({(r.stderr or r.stdout).strip()[-160:]}); neutral face used")
+            from .rig_check import rig_error
+            ctx.log(f"{c.name}: expression '{name}' not rigged ({rig_error(r.stderr or r.stdout)}); neutral face used")
     ctx.log(f"{c.name}: rig built from {len(sources)} approved pose(s)")
     return d
 

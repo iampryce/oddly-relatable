@@ -21,6 +21,22 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 
+HANDS_ADVICE = "arms visible at the sides, hands not in pockets, no sleeves covering the hands"
+FEET_ADVICE = "both legs and feet visible below the body, nothing (a long coat, a dress, a bag) covering them"
+FACE_ADVICE = "a clear front-facing face with both eyes and the mouth visible, nothing covering them"
+
+
+class RigError(ValueError):
+    """A pose the rig cannot be built from, with what to change in the art (never a NaN or index error)."""
+
+    def __init__(self, part: str, what: str, advice: str):
+        self.part, self.what, self.advice = part, what, advice
+        super().__init__(f"{what}; redraw the pose with {advice}")
+
+    def as_dict(self) -> dict:
+        return {"part": self.part, "message": str(self)}
+
+
 def runs(row: np.ndarray) -> list[tuple[int, int]]:
     out, s = [], None
     for x, v in enumerate(row):
@@ -87,10 +103,14 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
         w = sum(e - s + 1 for s, e in r)
         if r and (best is None or w < best[1]):
             best = (y, w, r)
+    if best is None:
+        raise RigError("body", "the neck could not be found", "the whole figure standing upright with the head on top")
     neck_y = best[0]
     neck_x = (best[2][0][0] + best[2][-1][1]) / 2
     # arms separate from the torso: first row below the neck with >= 3 runs (arm, torso, arm)
-    split = next(y for y in range(neck_y + 10, bot) if len(runs(a[y])) >= 3)
+    split = next((y for y in range(neck_y + 10, bot) if len(runs(a[y])) >= 3), None)
+    if split is None or split + 40 >= bot or len(runs(a[split + 4])) < 3 or len(runs(a[split + 40])) < 2:
+        raise RigError("hands", "the arms and hands could not be found apart from the body", HANDS_ADVICE)
     r = runs(a[split + 4])
     arm_l, arm_r = r[0], r[-1]
     # line width: arm run width just below the split
@@ -100,6 +120,8 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
         y, last = split + 4, None
         while y < bot:
             rr = runs(a[y])
+            if not rr:
+                break
             run = rr[0] if side == "l" else rr[-1]
             if run[1] - run[0] + 1 > 2.2 * lw and y > split + 60:
                 break
@@ -116,6 +138,8 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
                 break
             for x in range(run[0], run[1] + 1):
                 ys.append(yy); xs.append(x)
+        if last is None or not xs or y >= bot:
+            raise RigError("hands", f"the {'left' if side == 'l' else 'right'} hand could not be found", HANDS_ADVICE)
         return last, (float(np.mean(xs)), float(np.mean(ys)))
     (wl_y, wl_x), hand_l = trace("l")
     (wr_y, wr_x), hand_r = trace("r")
@@ -131,9 +155,13 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
         if len(inner) == 2 and all(x[1] - x[0] + 1 < 2.0 * lw for x in inner):
             hip_y, legs = y, inner
             break
+    if legs is None:
+        raise RigError("feet", "the legs could not be found", FEET_ADVICE)
     leg_l_x, leg_r_x = (legs[0][0] + legs[0][1]) / 2, (legs[1][0] + legs[1][1]) / 2
     # ankles: first row below the hips where a leg run gets wide (the shoe)
-    ankle_y = next(y for y in range(hip_y + 40, bot) if any(x[1] - x[0] + 1 > 2.5 * lw for x in runs(a[y])))
+    ankle_y = next((y for y in range(hip_y + 40, bot) if any(x[1] - x[0] + 1 > 2.5 * lw for x in runs(a[y]))), None)
+    if ankle_y is None or len(runs(a[ankle_y - 3])) < 2:
+        raise RigError("feet", "the feet could not be found", FEET_ADVICE)
     # leg x at the ankle row - 2 (legs can slant)
     rr = runs(a[ankle_y - 3])
     ank_l_x, ank_r_x = (rr[0][0] + rr[0][1]) / 2, (rr[-1][0] + rr[-1][1]) / 2
@@ -440,7 +468,41 @@ def debug_image(rgba: np.ndarray, rig: dict, out: Path) -> None:
     bg.save(out / "rig-debug.png")
 
 
+def checked_body(rgba: np.ndarray, style: str) -> dict:
+    """measure_body, but any failure is a RigError saying what to change, and no joint may be NaN."""
+    try:
+        body = measure_body(rgba, style)
+    except RigError:
+        raise
+    except Exception as e:   # an unusual figure: still a clear message, never a raw NaN/index error
+        raise RigError("body", f"the body could not be measured ({type(e).__name__})", f"{HANDS_ADVICE}, and {FEET_ADVICE}") from e
+    for k in ("hand_l", "hand_r"):
+        if not all(np.isfinite(body[k])):
+            raise RigError("hands", "the hands could not be found", HANDS_ADVICE)
+    for k in ("ankle_l", "ankle_r", "hip_l", "hip_r"):
+        if not all(np.isfinite(body[k])):
+            raise RigError("feet", "the feet could not be found", FEET_ADVICE)
+    return body
+
+
+def checked_features(rgba, top, neck_y, neck_x, style) -> dict:
+    try:
+        return features(rgba, top, neck_y, neck_x, style)
+    except Exception as e:
+        raise RigError("face", f"the face could not be found ({e})" if isinstance(e, ValueError) and str(e) else
+                       "the face could not be found", FACE_ADVICE) from e
+
+
 def main():
+    try:
+        _main()
+    except RigError as e:
+        # one line the studio reads (acting.rig_error): no traceback
+        print("RIG-ERROR " + json.dumps(e.as_dict()), file=sys.stderr)
+        sys.exit(2)
+
+
+def _main():
     src, out = Path(sys.argv[1]), Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
     rgba = np.array(Image.open(src).convert("RGBA"))
@@ -449,11 +511,11 @@ def main():
         rig = json.loads((out / "rig.json").read_text())
         style = rig.get("style", "v1")
         b = find_neck(rgba, style)   # expression poses can raise arms: only the head is needed
-        face = features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
+        face = checked_features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
         chin = chin_row(rgba, b["top"], b["neck"][1], face)
         if chin + 4 < b["neck"][1]:
             b["neck"][1] = chin + 4
-            face = features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
+            face = checked_features(rgba, b["top"], b["neck"][1], b["neck"][0], style)
         head = cut_head(rgba, b, face, out, head_only, expression=True)
         # express the extra head relative to its own neck so it can be swapped onto the rig's neck; its eyes are kept
         # as drawn (the expression lives in them), only the mouth is live
@@ -462,13 +524,13 @@ def main():
         print("added head", head_only, "mouth", face["mouth"]["w"], "x", face["mouth"]["h"])
         return
     style = detect_style(rgba)
-    body = measure_body(rgba, style)
-    face = features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
+    body = checked_body(rgba, style)
+    face = checked_features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
     chin = chin_row(rgba, body["top"], body["neck"][1], face)
     if chin + 4 < body["neck"][1]:
         # a collar hides the neck: cut the head at the chin and look for the mouth above it
         body["neck"][1] = chin + 4
-        face = features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
+        face = checked_features(rgba, body["top"], body["neck"][1], body["neck"][0], style)
     head = cut_head(rgba, body, face, out, "neutral")
     parts = cut_body(rgba, body, out)
     rig = {"source": src.name, "image_size": [rgba.shape[1], rgba.shape[0]], "body": body, "parts": parts,

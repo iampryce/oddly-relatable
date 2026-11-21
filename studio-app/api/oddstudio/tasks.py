@@ -276,7 +276,7 @@ def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_styl
                     "character): match its drawing style exactly (line weight, eye, brow and mouth style, head-to-body "
                     "proportions, flat colours) but do NOT copy that character's cap, hair, garment or colours.")
     return (f"Full-body 2D character for an animated comedy for grown-ups: an ADULT, standing upright and facing the viewer "
-            f"in a relaxed neutral stance with the arms hanging at the sides, whole body visible with space around it, on a "
+            f"in a relaxed neutral stance with the arms hanging at the sides with both hands visible (hands never in pockets or covered by sleeves), whole body visible with space around it, on a "
             f"plain flat mid-grey (#808080) background; no scenery, no floor, no shadow, no text. "
             f"{house_style.character_rules('v2', c.skin_tone or '')} Character: {c.name}. Appearance: {c.visual_description}. "
             f"Expression: {expression}, shown with restraint through the brows, the eyes and a small mouth change; the body "
@@ -302,7 +302,8 @@ def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: 
                     "proportions of an adult, flat colours with the same simple shading, eye and brow style), but do NOT copy "
                     "that character's face, head, hair, clothes or colours.")
     return (f"Full-body 2D cartoon character for an animated comedy show about adults: an ADULT (not a child), standing, "
-            f"facing the viewer, whole body visible with space around it, plain transparent (or flat white) background, no "
+            f"facing the viewer, {'arms hanging at the sides with both hands visible' if expression.strip().lower() == 'neutral' else 'both hands visible'} "
+            f"(hands never in pockets or covered by sleeves), whole body visible with space around it, plain transparent (or flat white) background, no "
             f"scenery, no text. {house_style.CHARACTER_RULES} Clothing covers the torso only (no trousers, sleeves or "
             f"skin-coloured limbs). Character: {c.name}. "
             f"Appearance: {c.visual_description}. Expression and body language: {expression}, exaggerated and readable. "
@@ -772,3 +773,4 @@ from . import sets  # noqa: E402,F401
 from . import audio_first  # noqa: E402,F401
 from . import audio_scenes  # noqa: E402,F401
 from . import audio_production  # noqa: E402,F401
+from . import rig_check  # noqa: E402,F401

@@ -446,6 +446,11 @@ def preflight(db: Session, ep: Episode) -> None:
         engine.check_cast_ready([chars[k] for k in keys if k in chars])
     except engine.EngineInputError as e:
         raise HTTPException(409, str(e))
+    from . import acting, rig_check
+    if acting.enabled(db):
+        bad = rig_check.blocking_problems(db, [chars[k] for k in sorted(keys) if k in chars])
+        if bad:
+            raise HTTPException(409, " ".join(bad) + " Approve a new pose for them under Characters.")
     if ep.source == "audio":
         # the recording sets the length (its format cap was checked at upload); it is performed by the rig animator
         from . import acting
