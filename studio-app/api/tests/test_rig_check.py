@@ -107,6 +107,12 @@ class ApprovalCheckTest(unittest.TestCase):
         aid = self.pose(cid, "neutral", hidden_hands_figure)
         self.assertEqual(self.c.post(f"/api/character-assets/{aid}/decision", json={"decision": "approve"}).status_code, 200)
         self.assertIsNone(self.card(cid, aid)["rig_check"], "queued: the card says it is waiting for the worker")
+        from oddstudio import rig_check
+        from oddstudio.db import new_session
+        from oddstudio.models import Character
+        with new_session() as s:
+            waiting = rig_check.blocking_problems(s, [s.get(Character, cid)])
+        self.assertIn("still running", waiting[0], "production waits for the check instead of failing in the render")
         ran = self.env.run_jobs(["rig_check"])
         self.assertEqual(ran[0][1], "succeeded", ran)
         chk = self.card(cid, aid)["rig_check"]
@@ -136,6 +142,30 @@ class ApprovalCheckTest(unittest.TestCase):
         from oddstudio.models import Character
         with new_session() as s:
             self.assertEqual(rig_check.blocking_problems(s, [s.get(Character, cid)]), [])
+
+    def test_rig_check_on_all_existing_approved_poses_is_informational(self):
+        """Poses approved before the check existed: one action checks them all and changes no approval."""
+        from oddstudio.db import new_session
+        from oddstudio.models import CharacterAsset
+        from oddstudio.routes_characters import refresh_art
+        from oddstudio.models import Character
+        ralph, nia = self.character("ralph", "Ralph"), self.character("nia", "Nia")
+        r_id, n_id = self.pose(ralph, "neutral", hidden_hands_figure), self.pose(nia, "neutral", v2_figure)
+        with new_session() as s:   # approved the old way: no check was queued
+            for aid in (r_id, n_id):
+                s.get(CharacterAsset, aid).status = "approved"
+            s.flush()
+            for cid in (ralph, nia):
+                refresh_art(s, s.get(Character, cid))
+            s.commit()
+        self.assertIsNone(self.card(ralph, r_id)["rig_check"])
+        r = self.c.post("/api/characters/rig-check-all").json()
+        self.assertEqual(sorted(r["queued"]), ["Nia", "Ralph"])
+        self.assertEqual(self.c.post("/api/characters/rig-check-all").json()["already_running"], 2, "no duplicate jobs")
+        self.env.run_jobs(["rig_check"])
+        self.assertIs(self.card(ralph, r_id)["rig_check"]["ok"], False)
+        self.assertIs(self.card(nia, n_id)["rig_check"]["ok"], True)
+        self.assertEqual((self.card(ralph, r_id)["status"], self.card(nia, n_id)["status"]), ("approved", "approved"))
 
     def test_new_pose_prompts_ask_for_visible_hands(self):
         from types import SimpleNamespace

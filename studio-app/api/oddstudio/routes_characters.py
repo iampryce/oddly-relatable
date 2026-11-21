@@ -61,6 +61,23 @@ def list_characters(db: Session = Depends(get_db)):
     return [out(db, c) for c in db.query(Character).order_by(Character.id)]
 
 
+@router.post("/characters/rig-check-all")
+def rig_check_all(db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """One-time (repeatable) check of every character's approved poses, for poses approved before the check existed.
+    Informational only: it records results for the pose cards and never changes an approval."""
+    from .models import Job
+    busy = {j.character_id for j in db.query(Job).filter(Job.kind == "rig_check", Job.status.in_(("queued", "running")))}
+    chars = [c for c in db.query(Character).order_by(Character.id) if not c.locked and c.art_status == "approved"]
+    queued = [c.name for c in chars if c.id not in busy]
+    for c in chars:
+        if c.id not in busy:
+            enqueue(db, "rig_check", episode_id=c.episode_id, character_id=c.id)
+    db.add(Event(episode_id=None, kind="character", message=f"Rig check queued for {len(queued)} character(s) by {user}"))
+    db.commit()
+    return {"queued": queued, "already_running": len(chars) - len(queued),
+            "skipped_locked": [c.name for c in db.query(Character).filter_by(locked=True)]}
+
+
 @router.post("/characters", status_code=201)
 def create_character(body: CharacterIn, db: Session = Depends(get_db)):
     if not KEY.match(body.key):
