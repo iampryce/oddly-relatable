@@ -222,8 +222,9 @@ export default function Characters() {
   };
   const remove = () => {
     const names = chosen.map(c => c.name);
-    if (!window.confirm(`Delete for good ${names.length} character(s): ${names.join(', ')}? Their poses are removed too. This cannot be undone.`)) return;
-    act.run('delete', async () => { await api('/characters/delete', {body: {ids: picked, confirm_names: names}}); setPicked([]); });
+    if (!window.confirm(`Move ${names.length} character(s) to the Bin: ${names.join(', ')}? They are hidden everywhere and can be restored for 30 days.`)) return;
+    // through the Bin like every other delete (restorable; removed for good only from the Bin)
+    act.run('delete', async () => { for (const id of picked) await api('/bin/move', {body: {kind: 'character', ref: String(id)}}); setPicked([]); });
   };
   const card = (c: any) => {
     const can = cleanup && removable(c, usage);
