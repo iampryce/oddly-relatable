@@ -783,3 +783,4 @@ from . import audio_scenes  # noqa: E402,F401
 from . import audio_production  # noqa: E402,F401
 from . import rig_check  # noqa: E402,F401
 from . import character_looks  # noqa: E402,F401
+from . import set_proposals  # noqa: E402,F401

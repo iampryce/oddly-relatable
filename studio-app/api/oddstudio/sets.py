@@ -206,7 +206,7 @@ def set_candidate(ctx: Ctx) -> dict:
     version = style_version(db)
     if version == "v2":
         cfg["background"] = None   # a set plate is its own scenery: no flat background instruction
-    prompt = f"{set_style(version)}\nSetting: {p['description']}"
+    prompt = prompt_for(db, p["description"])
     providers.image_generate(cfg, prompt, out, reference=style_reference_for(db, version, folder))
     im = Image.open(out)
     w, h = im.size
@@ -219,7 +219,7 @@ def set_candidate(ctx: Ctx) -> dict:
     recs = records(db)
     recs[p["set_id"]] = {"label": p["label"], "description": p["description"], "status": "candidate", "asset_id": a.id,
                          "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id,
-                         "style_version": version}
+                         "style_version": version, "episode_id": p.get("episode_id")}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")
     return {"set_id": p["set_id"], "asset_id": a.id, "width": w, "height": h}
