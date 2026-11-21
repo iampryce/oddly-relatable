@@ -279,6 +279,7 @@ def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_styl
             f"in a relaxed neutral stance with the arms hanging at the sides with both hands visible (hands never in pockets or covered by sleeves), whole body visible with space around it, on a "
             f"plain flat mid-grey (#808080) background; no scenery, no floor, no shadow, no text. "
             f"{house_style.character_rules('v2', c.skin_tone or '')} Character: {c.name}. Appearance: {c.visual_description}. "
+            f"{house_style.RIG_RULES} "
             f"Expression: {expression}, shown with restraint through the brows, the eyes and a small mouth change; the body "
             f"and stance stay exactly as in the neutral pose. " + " ".join(refs))
 
@@ -306,7 +307,8 @@ def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: 
             f"(hands never in pockets or covered by sleeves), whole body visible with space around it, plain transparent (or flat white) background, no "
             f"scenery, no text. {house_style.CHARACTER_RULES} Clothing covers the torso only (no trousers, sleeves or "
             f"skin-coloured limbs). Character: {c.name}. "
-            f"Appearance: {c.visual_description}. Expression and body language: {expression}, exaggerated and readable. "
+            f"Appearance: {c.visual_description}. {house_style.RIG_RULES} "
+            f"Expression and body language: {expression}, exaggerated and readable. "
             + " ".join(refs))
 
 
@@ -333,10 +335,10 @@ def style_reference(ctx: Ctx, version: str = "v1") -> Path | None:
 
 
 def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict, simplify: bool = False,
-                   version: str = "v1") -> tuple[CharacterAsset, Path]:
+                   version: str = "v1", tag: str = "") -> tuple[CharacterAsset, Path]:
     folder = ctx.folder("characters", c.key, "generated")
     # The attempt number keeps every generation as its own file: a retried sheet never overwrites earlier evidence.
-    out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}-a{ctx.job.attempts}.png"
+    out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}-a{ctx.job.attempts}{tag}.png"
     style = style_reference(ctx, version)
     refs = [r for r in (ref, style) if r is not None]
     ctx.log(f"Generating '{expression}' in house style {version} with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
@@ -774,3 +776,4 @@ from . import audio_first  # noqa: E402,F401
 from . import audio_scenes  # noqa: E402,F401
 from . import audio_production  # noqa: E402,F401
 from . import rig_check  # noqa: E402,F401
+from . import character_looks  # noqa: E402,F401

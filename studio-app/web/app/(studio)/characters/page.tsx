@@ -1,9 +1,9 @@
 'use client';
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
-import {groupCharacters, removable, rigStatus, visiblePoses} from '@/lib/characterView';
+import {groupCharacters, imageCost, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
 const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null, skin_tone: ''};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
@@ -77,6 +77,24 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState(false);
   const [allPoses, setAllPoses] = useState(false);
+  const [plan, setPlan] = useState<any>(null);
+  const [cands, setCands] = useState(3);
+  const [cap, setCap] = useState(1);
+  useEffect(() => {
+    // the first sheet: only the expressions the story needs (neutral for a silent character), cost shown first
+    if (!open || c.locked || c.art_status === 'approved' || plan) return;
+    api(`/characters/${c.id}/sheet-plan`).then(p => { setPlan(p); setExprs(p.expressions.join(', ')); }).catch(() => {});
+  }, [open, c.id, c.locked, c.art_status, plan]);
+  const exprList = exprs.split(',').map(x => x.trim()).filter(Boolean);
+  const hasNeutral = c.assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && a.expression === 'neutral');
+  const genSheet = () => {
+    if (!window.confirm(`Generate ${c.name}'s sheet: ${imageCost(exprList.length)}?`)) return;
+    act.run('gen', () => api(`/characters/${c.id}/sheet`, {body: {expressions: exprList}}));
+  };
+  const genCands = () => {
+    if (!window.confirm(`Generate ${cands} body pose candidate(s) for ${c.name}: ${imageCost(cands)} (cap ${'$'}${cap.toFixed(2)}). Each is rig-checked; only passing ones are shown.`)) return;
+    act.run('cands', () => api(`/characters/${c.id}/body-candidates`, {body: {n: cands, max_usd: cap}}));
+  };
   const everyPose = c.assets.filter((a: any) => a.kind === 'pose');
   const poses = visiblePoses(c.assets, allPoses);
   const refs = c.assets.filter((a: any) => a.kind === 'reference');
@@ -118,6 +136,10 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
       <ErrorBox error={act.error} />
       <p className="small">{c.description || <span className="muted">No description.</span>}</p>
       {c.visual_description && <p className="small muted">Look: {c.visual_description}</p>}
+      {!c.locked && <div className="row small" style={{gap: 6}}>
+        {c.episode_id && <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('look', () => api(`/characters/${c.id}/look/from-notes`, {method: 'POST'}))}>Write the look from the video notes (free)</button>}
+        <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('look-ai', () => api(`/characters/${c.id}/look/write`, {method: 'POST'}))}>Write the look (AI writer)</button>
+        <span className="muted">Then edit it. The rig rules (single-line black limbs, both hands visible, sleeveless, no pockets) are always added by the studio.</span></div>}
       <div className="small"><strong>Expressions usable in scripts:</strong> {Object.keys(c.expressions).join(', ') || <span className="muted">none yet</span>}</div>
       {sheet && <div><strong className="small">Expression sheet</strong> <span className={`badge ${sheet.status === 'approved' ? 'good' : sheet.status === 'review' ? 'warn' : 'bad'}`}>{sheet.status}</span>
         <a href={sheet.url} target="_blank" rel="noreferrer"><img className="scene-img" style={{marginTop: 6}} src={sheet.url} alt={`${c.name} expression sheet`} loading="lazy" /></a></div>}
@@ -136,7 +158,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
                   : p.rig_check.ok === false ? `Rig check failed: ${p.rig_check.message}` : `Rig check: ${p.rig_check.message}`}</div>
             : <div className="small muted" style={{marginTop: 4}}>Rig check: waiting for the worker</div>)}
           {!c.locked && p.status === 'review' && <div className="row" style={{justifyContent: 'center', marginTop: 4}}>
-            <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>Approve</button>
+            <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
       {everyPose.length > poses.length || allPoses ? <label className="small row" style={{gap: 6}}><input type="checkbox" checked={allPoses} onChange={e => setAllPoses(e.target.checked)} />
@@ -147,7 +169,13 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
             <label className="btn sm" style={{display: 'inline-block', margin: 0}}>Upload visual reference<input type="file" accept="image/png,image/jpeg" hidden onChange={e => upload(e.target.files?.[0])} /></label></div>
           <div><label htmlFor={`exprs-${c.id}`}>Expression sheet (comma separated; neutral is drawn first and anchors the rest; one image each, started only by you)</label>
             <div className="row"><input id={`exprs-${c.id}`} style={{flex: 1}} value={exprs} onChange={e => setExprs(e.target.value)} />
-              <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('gen', () => api(`/characters/${c.id}/sheet`, {body: {expressions: exprs.split(',').map(x => x.trim()).filter(Boolean)}}))}>Generate sheet</button></div></div>
+              <button className="btn primary" disabled={!!act.busy || !exprList.length} onClick={genSheet}>Generate sheet</button></div>
+            <span className="muted small">{imageCost(exprList.length)}{plan ? ` · default: ${plan.reason}` : ''}</span></div>
+          <div className="row small" style={{gap: 6, alignItems: 'center'}}><strong>Body pose candidates</strong>
+            <input type="number" min={1} max={6} value={cands} onChange={e => setCands(Math.max(1, Math.min(6, Number(e.target.value) || 1)))} style={{width: 56}} aria-label="number of candidates" />
+            <span>cap $</span><input type="number" min={0.1} max={10} step={0.1} value={cap} onChange={e => setCap(Number(e.target.value) || 1)} style={{width: 64}} aria-label="cost cap in dollars" />
+            <button className="btn sm" disabled={!!act.busy} onClick={genCands}>Generate candidates</button>
+            <span className="muted">{imageCost(cands)}; each is rig-checked and only passing ones are shown.</span></div>
           {c.art_status === 'approved' && <div><button className="btn" disabled={!!act.busy} onClick={() => act.run('restyle', () => api(`/characters/${c.id}/restyle`, {method: 'POST', body: {}}))}>Restyle to house style</button>
             <span className="muted small"> Redraws {c.name} in Character 01&apos;s stickman style (keeps their traits). The current art stays in use until you approve the new sheet.</span></div>}
           {c.scope === 'episode' && c.art_status === 'approved' && <div><button className="btn" disabled={!!act.busy} onClick={() => act.run('promote', () => api(`/characters/${c.id}/promote`, {method: 'POST'}))}>Add to recurring cast</button>

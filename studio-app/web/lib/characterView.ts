@@ -39,3 +39,8 @@ export function groupCharacters(chars: any[], usage: Usage, archived: number[], 
 export function removable(c: any, usage: Usage): boolean {
   return !c.locked && !(usage[c.key] || []).some(e => e.live);
 }
+
+// The image cost shown before any generation (the image provider's range per image).
+export function imageCost(images: number): string {
+  return `${images} image(s), about $${(images * 0.05).toFixed(2)}-$${(images * 0.2).toFixed(2)}`;
+}

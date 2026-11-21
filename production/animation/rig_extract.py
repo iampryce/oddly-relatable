@@ -116,6 +116,8 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
     # line width: arm run width just below the split
     lw = int(np.median([e - s + 1 for s, e in (runs(a[split + 40])[0], runs(a[split + 40])[-1])]))
     # trace each arm line down to the hand blob (run wider than 2.2 line widths)
+    inferred = []
+
     def trace(side):
         y, last = split + 4, None
         while y < bot:
@@ -123,9 +125,18 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
             if not rr:
                 break
             run = rr[0] if side == "l" else rr[-1]
+            cx = (run[0] + run[1]) / 2
+            if last is not None and abs(cx - last[1]) > 1.5 * lw:
+                # the outer line jumped to another part of the body: the arm ended here with no hand drawn (hidden in
+                # a sleeve or a pocket). When the arm itself is clearly visible (a long free line), its end is used as
+                # the hand; otherwise this stays a clear error below.
+                if last[0] - split > 0.15 * H:
+                    inferred.append(side)
+                    return last, (last[1], float(last[0]))
+                break
             if run[1] - run[0] + 1 > 2.2 * lw and y > split + 60:
                 break
-            last = (y, (run[0] + run[1]) / 2)
+            last = (y, cx)
             y += 1
         # hand: the blob below; centroid of the outer run over the next rows while it stays wide
         ys, xs = [], []
@@ -168,7 +179,7 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
     return {"top": top, "bottom": bot, "height": H, "neck": [neck_x, neck_y], "arm_split_y": split, "line_width": lw,
             "shoulder_l": list(shoulder_l), "shoulder_r": list(shoulder_r), "hand_l": list(hand_l), "hand_r": list(hand_r),
             "hip_y": hip_y, "hip_l": [leg_l_x, hip_y], "hip_r": [leg_r_x, hip_y],
-            "ankle_l": [ank_l_x, ankle_y], "ankle_r": [ank_r_x, ankle_y]}
+            "ankle_l": [ank_l_x, ankle_y], "ankle_r": [ank_r_x, ankle_y], **({"hands_inferred": inferred} if inferred else {})}
 
 
 def face_features(rgba: np.ndarray, top: int, neck_y: int, neck_x: float) -> dict:

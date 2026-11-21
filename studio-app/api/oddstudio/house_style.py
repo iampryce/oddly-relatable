@@ -5,6 +5,12 @@ brows, simple flat hats or hair, natural skin tones, plain flat clothes, solid b
 (a hair shape, a hat, a clothing colour), never by extra detail.
 """
 
+# Appended to every character image prompt by the server (owner decision 2026-11-21), whatever the Look says, so a
+# drawn character can always be rigged: the acting rig needs both hands and the limbs as clear single lines.
+RIG_RULES = ("Rig rules (always): arms and legs are SOLID BLACK single-line limbs; both hands clearly visible and never "
+             "hidden; sleeveless clothing on the torso only (no sleeves covering the arms or hands); no pockets, and "
+             "the hands are never in pockets.")
+
 CHARACTER_RULES = (
     "HOUSE STYLE (strict): a cartoon stickman with a very large perfectly round head (about one third of the total height) "
     "and small round ears; big round expressive eyes with bold black outlines and black pupils, bold expressive brows, a "
