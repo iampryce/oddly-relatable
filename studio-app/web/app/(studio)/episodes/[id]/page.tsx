@@ -4,6 +4,7 @@ import {api, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox, JobStatus, Pipeline, Stage} from '@/components/ui';
 import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
+import SceneSetSelect from '@/components/SceneSetSelect';
 import CastPanel from '@/components/CastPanel';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
@@ -250,7 +251,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
 }
 
 // ------------------------------------------------------------------ storyboard
-function StoryboardTab({ep, can, act, characters, environments}: Ctx) {
+function StoryboardTab({ep, can, act, characters, environments, reload}: Ctx) {
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<Scene | null>(null);
   const [instruction, setInstruction] = useState('');
@@ -283,6 +284,7 @@ function StoryboardTab({ep, can, act, characters, environments}: Ctx) {
             </div>
             {sc.revision_note && <div className="alert warn small">Revision note: {sc.revision_note}</div>}
             <JobNote job={ref} />
+            <SceneSetSelect ep={ep} scene={sc} onChange={reload} />
             <div className="grid cols-2" style={{marginTop: 10}}>
               <div>{editing === sc.id && draft ? (
                 <div className="stack">

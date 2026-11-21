@@ -109,8 +109,14 @@ def generate_script(ctx: Ctx) -> dict:
     chars = writer_characters(db, ep.id)
     provider = text_provider(get_section(db, "text"))
     ctx.log(f"Writing the script with provider {provider.name}")
-    answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")), writer.script_prompt(idea, chars, sets.writer_environments(db), job.payload.get("instruction", "")))
+    from . import scene_sets
+    answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")),
+                                    writer.script_prompt(idea, chars, sets.writer_environments(db), job.payload.get("instruction", ""))
+                                    + scene_sets.sets_text(db, ep))
     script = validate_script(answer, {c.key for c in characters(db)})
+    for note in scene_sets.continuity(script["scenes"], scene_sets.episode_sets(db, ep)):
+        ctx.log(note)
+        event(db, ep.id, "script", f"Scene set: {note}")
     made = register_new_characters(db, ep.id, script)
     if made:
         ctx.log(f"The script introduces new characters: {', '.join(made)} (pose sheets needed before production)")
@@ -159,7 +165,7 @@ def generate_storyboard(ctx: Ctx) -> dict:
         cast = list(dict.fromkeys(k for ln in s["lines"] for k in referenced(ln)))   # speakers, look-at targets, reactors
         db.add(StoryboardScene(episode_id=ep.id, position=i, scene_key=s["id"], heading=s["heading"], location=s.get("location", ""),
                                description=s.get("description", ""), action=s.get("action", ""), camera=s.get("camera", ""),
-                               characters=cast, lines=s["lines"], staging=s.get("staging"), status="draft"))
+                               characters=cast, lines=s["lines"], staging=s.get("staging"), set_id=s.get("set"), status="draft"))
     ep.storyboard_version += 1
     set_stage(ep, "storyboard_review")
     event(db, ep.id, "storyboard", f"Storyboard v{ep.storyboard_version} created from script v{sv.version}")

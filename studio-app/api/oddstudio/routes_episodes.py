@@ -493,6 +493,10 @@ def preflight(db: Session, ep: Episode) -> None:
         raise HTTPException(409, "choose this episode's set first (Storyboard tab, Set): there is no default set")
     if ep.set_id not in studio_sets.usable(db):
         raise HTTPException(409, f"the episode's set {ep.set_id!r} is not an approved set any more: choose another one")
+    from . import scene_sets
+    bad = scene_sets.problems(db, ep, ep.scenes)
+    if bad:
+        raise HTTPException(409, "; ".join(bad) + ": choose another set for the scene (Storyboard) or add it to the episode's sets")
     chars = by_key(db)
     keys = {k for s in ep.scenes for k in s.characters}
     try:

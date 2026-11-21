@@ -180,6 +180,8 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
                  "description": _str(s, "description", where, required=False),
                  "action": _str(s, "action", where, required=False),
                  "camera": _str(s, "camera", where, required=False, max_len=400), "lines": []}
+        if isinstance(s.get("set"), str) and s["set"].strip():
+            scene["set"] = s["set"].strip()[:80]     # checked against the episode's sets by scene_sets.continuity
         st = s.get("staging")
         if isinstance(st, dict) and st:
             # how the scene starts (feat/seating): {character: seated | standing}, in seat order

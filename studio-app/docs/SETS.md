@@ -41,3 +41,16 @@ How seats are used in a render:
 - A scene can start with characters seated (`start: "seat:N"`). Its seated characters take the seats in the scene's staging order, speaker first.
 - If there are more seated characters than seats, the extras stand, and the job log says so.
 - A character told to sit on a taken seat goes to the nearest free seat. If no seat is free, they stay standing.
+
+## A set per scene (a story that moves location)
+
+- **The episode's sets.** On the Set card, tick "Also for scene changes" on other approved sets. Scenes can only use these sets and the episode's own set.
+- **Who picks each scene's set:**
+  - **The simple split** changes set only when the accepted video notes' setting changes and one of the episode's sets matches the new setting. Otherwise it keeps the previous scene's set.
+  - **The AI writer** (audio and script-first) gets the list and the rule: keep the set unless the story clearly moves.
+  - **You** can change a scene's set in the Storyboard tab while the storyboard is in review.
+- **Unknown sets:** if the writer names a set that is not on the episode's list, the scene keeps the previous scene's set, and the event log says so.
+- **Continuity:** a set changes only at a cut. Each cut starts its scene in that scene's staging on its own set's seats: the scene's characters on stage, the others off.
+- **Missing sets block:** a scene whose set is no longer approved stops production with the scene named. There is no silent default.
+- **Unchanged otherwise:** a render with one set and no staging is byte-identical to before. Long episodes render their segments the same way. Audio passthrough, lip sync and the audio QA are unchanged.
+- Data: `episodes.scene_set_ids`, `storyboard_scenes.set_id` (migration `0011`).

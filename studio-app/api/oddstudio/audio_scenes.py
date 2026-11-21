@@ -112,7 +112,7 @@ def notes_acting(lines: list[dict], notes: list[dict], silent: list[str], cast: 
 
 
 def build_script(title: str, lines: list[dict], cast: list[str], silent: list[str], plan: dict | None, fmt: str = "short",
-                 known: set[str] | None = None, notes: list[dict] | None = None) -> dict:
+                 known: set[str] | None = None, notes: list[dict] | None = None, set_words: list | None = None) -> dict:
     """The audio episode's script: the writer's plan (or the simple split when `plan` is None) around the transcript.
     The simple split uses the video notes (if any) for shots and silent reactions. Raises ScriptError when the plan
     breaks the rules."""
@@ -147,6 +147,12 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
             st = staging_for([by_id[run[0]]], VN.for_line(notes, by_id[run[0]]), cast, silent) or None
         if st:
             scenes[-1]["staging"] = st
+        if isinstance(s.get("set"), str) and s["set"].strip():
+            scenes[-1]["set"] = s["set"].strip()[:80]
+        if set_words is not None:
+            from . import video_notes as VN
+            r = VN.for_line(notes or [], by_id[run[0]])
+            set_words.append((r or {}).get("setting"))
         if fmt == "long":   # a long episode's scenes belong to acts 1-3: the recording's order, split in thirds
             scenes[-1]["act"] = 1 + (i * 3) // len(runs)
     doc = {"title": str(plan.get("title") or title)[:100] or title[:100], "logline": str(plan.get("logline") or "")[:400],
@@ -195,14 +201,14 @@ def notes_text(lines: list[dict], notes: list[dict]) -> str:
 
 
 def prompt(lines: list[dict], cast: list[Character], silent: list[Character], hints: dict, environments: list[str],
-           notes: list[dict] | None = None) -> str:
+           notes: list[dict] | None = None, sets_text: str = "") -> str:
     listing = "\n".join(f"[{ln['id']} | {ln['speaker']} | {ln['start']:.1f}-{ln['end']:.1f} s] {ln['text']}" for ln in lines)
     who = "\n".join(f"- {c.key}: {c.name}. {c.description[:160]}" for c in cast)
     quiet = "\n".join(f"- {c.key}: {c.name} (on screen, never speaks; can react)" for c in silent) or "(none)"
     hint = (f"The owner's video suggests: about {hints.get('people_count')} people, setting {hints.get('setting') or '?'}, "
             f"mood {hints.get('mood') or '?'}.\n" if hints else "")
     return (f"Recorded lines (id | speaker | time | text):\n{listing}\n\nSpeaking characters:\n{who}\n"
-            f"Silent characters:\n{quiet}\n{hint}{notes_text(lines, notes or [])}Locations you may use: {', '.join(environments) or 'free text'}\n\n"
+            f"Silent characters:\n{quiet}\n{hint}{notes_text(lines, notes or [])}{sets_text}Locations you may use: {', '.join(environments) or 'free text'}\n\n"
             "Group the lines into scenes (at most 12). A scene is a run of CONSECUTIVE line ids; cut only between lines; "
             "every line id appears exactly once, in order. For each line give the acting: expression (one of "
             f"{', '.join(EXPRESSIONS)}), gesture (one of {', '.join(g for g in GESTURES if g != 'none')} or none), look_at "
@@ -211,7 +217,7 @@ def prompt(lines: list[dict], cast: list[Character], silent: list[Character], hi
             "For each scene, optionally give its starting staging: each on-screen character seated or standing, the "
             "speaker of its first line first (the order is the seat order).\n"
             'JSON: {"title": "", "logline": "", "hook": "POV: ...", "scenes": [{"heading": "", "location": "", '
-            '"description": "", "action": "", "camera": "", "staging": {"key": "seated"}, "line_ids": ["l1", "l2"]}], '
+            '"description": "", "action": "", "camera": "", "set": "", "staging": {"key": "seated"}, "line_ids": ["l1", "l2"]}], '
             '"lines": {"l1": {"expression": "neutral", "gesture": "none", "look_at": "", "shot": "medium", '
             '"reactions": [{"character": "", "expression": "", "gesture": ""}]}}}')
 
@@ -282,6 +288,7 @@ def audio_scenes(ctx: Ctx) -> dict:
     chars = {c.key: c for c in db.query(Character).all()}
     cast = list(dict.fromkeys(ln["speaker"] for ln in lines))
     silent = [m["character_key"] for m in tr.get("silent_cast", []) if m["character_key"] in chars and m["character_key"] not in cast]
+    from . import scene_sets
     from .reference_plan import effective
     notes = effective(tr)    # the notes as accepted in the Reference plan (edits applied, ignored items left out)
     plan, how = None, "simple split"
@@ -289,13 +296,20 @@ def audio_scenes(ctx: Ctx) -> dict:
         try:
             ans = text_provider(get_section(db, "text")).complete_json(
                 SYSTEM, prompt(lines, [chars[k] for k in cast], [chars[k] for k in silent], tr.get("media_hints") or {},
-                               writer_environments(db), notes))
+                               writer_environments(db), notes, scene_sets.sets_text(db, ep)))
             build_script(ep.title, lines, cast, silent, ans, ep.format, set(chars))   # validate the plan first
             plan, how = ans, "AI writer"
         except (ProviderError, ProviderNotConfigured, ScriptError, ValueError, TypeError, KeyError) as e:
             ctx.log(f"The writer's scenes could not be used ({str(e)[:300]}); using the simple split")
             db.add(Event(episode_id=ep.id, kind="script", message=f"Writer not used ({str(e)[:200]}): simple split instead"))
-    script = build_script(ep.title, lines, cast, silent, plan, ep.format, set(chars), notes)
+    words: list = []
+    script = build_script(ep.title, lines, cast, silent, plan, ep.format, set(chars), notes, words)
+    allowed = scene_sets.episode_sets(db, ep)
+    if plan is None and len(allowed) > 1:
+        scene_sets.from_notes(db, script["scenes"], words, allowed)   # the notes' setting changes, matched to the episode's sets
+    for note in scene_sets.continuity(script["scenes"], allowed):
+        ctx.log(note)
+        db.add(Event(episode_id=ep.id, kind="script", message=f"Scene set: {note}"))
     if notes:
         how += " with video notes as suggestions"
     sv = save_script(db, ep, script, "audio-scenes" if plan else "audio-simple-split", how)

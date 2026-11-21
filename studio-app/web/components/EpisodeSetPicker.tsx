@@ -42,6 +42,11 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
             <span className="muted small">{o.source === 'repository' ? 'studio plate' : 'approved set'} · {o.style_version}{o.seat ? ' · has a seat' : ''}</span>
             <span className="small">{o.used_in.length ? `Used in ${o.used_in.length} earlier episode(s): ${o.used_in.map((e: any) => e.title).join(', ')}` : 'Not used in any other episode'}</span>
             <button className="btn sm" disabled={!!act.busy || o.id === data.current || locked} onClick={() => pick(o)}>{o.id === data.current ? 'Chosen' : 'Use this set'}</button>
+            {data.current && o.id !== data.current && <label className="small row" style={{gap: 4}}>
+              <input type="checkbox" disabled={!!act.busy || locked} checked={(ep.scene_set_ids || []).includes(o.id)}
+                onChange={e => act.run('scene-sets', () => api(`/episodes/${ep.id}/scene-sets`, {method: 'PUT', body: {set_ids: e.target.checked
+                  ? [...(ep.scene_set_ids || []), o.id] : (ep.scene_set_ids || []).filter((x: string) => x !== o.id)}}))} />
+              Also for scene changes</label>}
           </div>))}
       </div>}
     </div>
