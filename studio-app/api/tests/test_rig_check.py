@@ -167,6 +167,27 @@ class ApprovalCheckTest(unittest.TestCase):
         self.assertIs(self.card(nia, n_id)["rig_check"]["ok"], True)
         self.assertEqual((self.card(ralph, r_id)["status"], self.card(nia, n_id)["status"]), ("approved", "approved"))
 
+    def test_a_failed_expression_pose_never_blocks_production(self):
+        """An expression pose is head-only (e.g. arms crossed): only its face is checked, and a failure only means the
+        neutral face is used for that expression. Production waits only on the body pose."""
+        from oddstudio import rig_check
+        from oddstudio.db import new_session
+        from oddstudio.models import Character
+        cid = self.character("nia", "Nia")
+        n = self.pose(cid, "neutral", v2_figure)
+        d = self.pose(cid, "deadpan", hidden_hands_figure)
+        self.c.post(f"/api/characters/{cid}/sheet/decision", json={"decision": "approve"})
+        self.env.run_jobs(["rig_check"])
+        self.assertEqual(self.card(cid, n)["rig_check"]["role"], "body")
+        face = self.card(cid, d)["rig_check"]
+        self.assertEqual(face["role"], "face", "an expression pose gets the head-only check, never the body check")
+        with new_session() as s:
+            recs = rig_check.records(s)
+            recs[str(d)] = {**face, "ok": False, "message": "Nia: this expression's face cannot be rigged"}
+            rig_check.save(s, recs)
+            s.commit()
+            self.assertEqual(rig_check.blocking_problems(s, [s.get(Character, cid)]), [])
+
     def test_new_pose_prompts_ask_for_visible_hands(self):
         from types import SimpleNamespace
         from oddstudio.tasks import pose_prompt

@@ -154,8 +154,10 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
           <span className={`badge ${p.status === 'approved' ? 'good' : p.status === 'rejected' ? 'bad' : 'warn'}`}>{p.status}</span>
           {!c.locked && p.status === 'approved' && (p.rig_check
             ? <div className={`small ${p.rig_check.ok === false ? 'alert bad' : 'muted'}`} style={{marginTop: 4}} title={p.rig_check.message}>
-                {p.rig_check.ok === true ? `Rig check: OK (${p.rig_check.role === 'body' ? 'body and face' : 'face'})`
-                  : p.rig_check.ok === false ? `Rig check failed: ${p.rig_check.message}` : `Rig check: ${p.rig_check.message}`}</div>
+                {p.rig_check.role === 'body'
+                  ? (p.rig_check.ok === true ? 'Rig check: OK (body pose: body and face)' : p.rig_check.ok === false ? `Rig check failed (body pose): ${p.rig_check.message}` : `Rig check: ${p.rig_check.message}`)
+                  : (p.rig_check.ok === true ? 'Head-only pose: face OK (no body check; never blocks production)'
+                    : p.rig_check.ok === false ? `Head-only pose: face not rigged, the neutral face is used instead (no body check; never blocks production)` : `Head-only pose: ${p.rig_check.message}`)}</div>
             : <div className="small muted" style={{marginTop: 4}}>Rig check: waiting for the worker</div>)}
           {!c.locked && p.status === 'review' && <div className="row" style={{justifyContent: 'center', marginTop: 4}}>
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
