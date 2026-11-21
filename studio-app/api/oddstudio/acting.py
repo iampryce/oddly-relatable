@@ -134,6 +134,31 @@ def cues_for(clip: Path, text: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------- render
+def referenced(line: dict) -> list[str]:
+    """Every character a line puts on screen: its speaker, who the speaker looks at, and who reacts."""
+    keys = [line.get("speaker")]
+    if line.get("look_at"):
+        keys.append(line["look_at"])
+    keys += [r.get("character") for r in line.get("reactions") or [] if isinstance(r, dict)]
+    return [k for k in keys if k]
+
+
+def render_cast(lines: list[tuple[int, dict]], scene_characters: dict, chars_by_key: dict) -> tuple[list[str], set[str]]:
+    """The render's cast: everyone the lines reference (speakers, look-at targets, reactions) plus the scenes' cast, in
+    order of appearance; and who of them speaks. A referenced character that is not in the studio, or has no approved
+    pose art, stops the render with a message naming them (never a renderer crash on a missing rig)."""
+    order = []
+    for sid, ln in lines:
+        order += referenced(ln) + list(scene_characters.get(sid) or [])
+    keys = list(dict.fromkeys(order))
+    unknown = [k for k in keys if k not in chars_by_key]
+    if unknown:
+        raise engine.EngineInputError("These characters are in the scenes but not in the studio: " + ", ".join(unknown)
+                                      + ". Add them under Characters, or remove them from the scenes.")
+    engine.check_cast_ready([chars_by_key[k] for k in keys])
+    return keys, {ln["speaker"] for _, ln in lines}
+
+
 def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key: dict, folder: Path,
            end_card: str | None = None) -> tuple[Path, Path, dict]:
     """refs: per scene, the (scene_id, line_index) pairs to perform (a segment, or the whole episode).
@@ -149,8 +174,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         src_audio, total = AP.source_audio(db, ep, folder / "source")
         end_card = None                      # the video must end with the recording
     scenes = {sid: db.get(StoryboardScene, sid) for rs in refs for sid, _ in rs}
-    present = [k for rs in refs for sid, li in rs for k in [scenes[sid].lines[li]["speaker"]] + list(scenes[sid].characters)]
-    keys = list(dict.fromkeys(k for k in present if k in chars_by_key))
+    lines_in = [(sid, scenes[sid].lines[li]) for rs in refs for sid, li in rs]
+    keys, speaking = render_cast(lines_in, {sid: scenes[sid].characters for sid in scenes}, chars_by_key)
     first_scene_cast = set(scenes[refs[0][0][0]].characters) if refs and refs[0] else set()
     prod = get_section(db, "production")
     env_id = (scenes[refs[0][0][0]].location if refs and refs[0] else "") or prod.get("environment") or "living-room-empty-03"
@@ -170,7 +195,10 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         rig = json.loads((rd / "rig.json").read_text())
         faces[k] = set(rig["faces"])
         lips = sum(rig["faces"]["neutral"]["mouth"].get("color", [0, 0, 0])) > 150   # coloured lips (not a black line)
-        cast[k] = {"rig": str(rd), "height": 530, "lips": lips, "start": "on" if (k in first_scene_cast or not first_scene_cast) else "off"}
+        # on stage from the start: the first scene's cast, and characters who never speak here (silent characters only
+        # react or are looked at, so they have no line of their own to walk in on)
+        on = k in first_scene_cast or not first_scene_cast or k not in speaking
+        cast[k] = {"rig": str(rd), "height": 530, "lips": lips, "start": "on" if on else "off"}
 
     lines, t, entered = [], 0.5, {k for k in keys if cast[k]["start"] == "on"}
     line_ids = []

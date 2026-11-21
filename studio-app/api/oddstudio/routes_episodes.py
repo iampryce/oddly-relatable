@@ -362,7 +362,8 @@ def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db))
         raise HTTPException(422, str(e).replace("script.scenes[0]", f"scene {sc.position}"))
     for k in ("heading", "location", "description", "action", "camera", "lines"):
         setattr(sc, k, checked[k])
-    sc.characters = list(dict.fromkeys(ln["speaker"] for ln in checked["lines"]))
+    from .acting import referenced
+    sc.characters = list(dict.fromkeys(k for ln in checked["lines"] for k in referenced(ln)))
     sc.status, sc.revision_note = "draft", ""
     log_event(db, ep.id, "storyboard", f"Scene {sc.position} edited")
     db.commit()
