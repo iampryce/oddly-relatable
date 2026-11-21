@@ -45,12 +45,12 @@ export function ShotComparison() {
   // the one summary (free): recomputed whenever the selection, models or plans change
   const paidModels = PAID.filter(m => models.has(m));
   const ids = chosenPlans.map((p: any) => p.id).join(',');
-  const readyCount = chosenPlans.filter((p: any) => p.status === 'ready').length;
+  const statusSig = chosenPlans.map((p: any) => `${p.id}:${p.status}`).join(',');   // every selected plan's state
   useEffect(() => {
     if (!ids) { setSummary(null); return; }
     api('/motion/shot-batch/run', {body: {plan_ids: ids.split(','), models: [...models], framing, confirm: false}})
       .then(setSummary).catch(e => setErr(e.message));
-  }, [ids, readyCount, paidModels.join(','), JSON.stringify(framing), batch.data?.spent_usd, batch.data?.pending_usd]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ids, statusSig, paidModels.join(','), JSON.stringify(framing), batch.data?.spent_usd, batch.data?.pending_usd]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSelected = async () => {
     if (!summary?.clips) return;

@@ -144,10 +144,13 @@ class ShotCompareTest(Base):
                 raise RuntimeError("fal.ai: generation failed (test)")
             return good(endpoint, body, out)
         fal.set_test_run(run)
-        body = {"plan_ids": [plans[0]["id"]], "models": ["kling-2.6-pro-i2v", "kling-avatar-v2-standard"]}
+        body = {"plan_ids": [plans[0]["id"]], "models": ["kling-2.6-pro-i2v", "kling-avatar-v2-standard"],
+                "framing": {"kling-2.6-pro-i2v": "medium"}}
         s = self.c.post("/api/motion/shot-batch/run", json=body).json()
         self.c.post("/api/motion/shot-batch/run", json={**body, "confirm": True, "expected_usd": s["total_usd"]})
         self.env.run_jobs(["shot_generate"])
+        i2v = next(b for e, b in self.sent if "image-to-video" in e)
+        self.assertIn("first-frame-medium", i2v["start_image_url"], "the confirmed framing override is the frame sent")
         row = next(p for p in self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()["plans"] if p["id"] == plans[0]["id"])
         self.assertEqual(row["results"]["kling-2.6-pro-i2v"]["status"], "done")
         self.assertTrue(row["results"]["kling-2.6-pro-i2v"]["url"])
