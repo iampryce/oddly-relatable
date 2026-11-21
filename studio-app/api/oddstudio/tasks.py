@@ -259,12 +259,15 @@ def style_version(db: Session) -> str:
     return v if v in house_style.STYLE_VERSIONS else "v1"
 
 
-def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False) -> str:
+def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False,
+                   body_fix: bool = False) -> str:
     """House style v2 (owner decision 2026-11-20): adult minimal stick-figure style. A flat mid-grey background, because
     white heads and torsos would merge with a white one and break the cut-out. Expressions keep the neutral body: the
     acting rig uses only the heads, and the face carries the acting with restraint."""
     refs = []
-    if with_identity and simplify:
+    if with_identity and body_fix:
+        refs.append("IMAGE 1 is THIS character: keep who they are (head shape and size, hair or cap shape and colour, garment and colours, line weight, proportions) but REDRAW THE BODY in a relaxed neutral stance with the arms hanging at the sides and both hands clearly visible, even if the reference hides them; the new pose replaces the old one.")
+    elif with_identity and simplify:
         refs.append("IMAGE 1 is THIS character's previous design in an OLDER style: keep only who they are (hair or cap shape and "
                     "colour, garment colour) and redraw them completely in house style v2 above: no ears, no nose, solid black "
                     "oval eyes without whites, tall lanky adult proportions, black blob hands and feet, no shoes.")
@@ -284,13 +287,16 @@ def pose_prompt_v2(c: Character, expression: str, with_identity: bool, with_styl
             f"and stance stay exactly as in the neutral pose. " + " ".join(refs))
 
 
-def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False, version: str = "v1") -> str:
+def pose_prompt(c: Character, expression: str, with_identity: bool, with_style: bool, simplify: bool = False, version: str = "v1",
+                body_fix: bool = False) -> str:
     if version == "v2":
-        return pose_prompt_v2(c, expression, with_identity, with_style, simplify)
+        return pose_prompt_v2(c, expression, with_identity, with_style, simplify, body_fix)
     """Image prompt for one pose. References are attached in this order: the character's own approved/neutral pose
     (identity), then the house-style reference (the show's locked lead character)."""
     refs = []
-    if with_identity and simplify:
+    if with_identity and body_fix:
+        refs.append("IMAGE 1 is THIS character: keep who they are (head shape and size, hair or cap shape and colour, garment and colours, line weight, proportions) but REDRAW THE BODY in a relaxed neutral stance with the arms hanging at the sides and both hands clearly visible, even if the reference hides them; the new pose replaces the old one.")
+    elif with_identity and simplify:
         refs.append("IMAGE 1 is THIS character's previous, more detailed design: keep who they are (hair or hat shape, skin "
                     "tone, clothing type and colours) but redraw them simpler in the house style described above: remove "
                     "textures, stubble, jewellery and fine detail.")
@@ -335,7 +341,7 @@ def style_reference(ctx: Ctx, version: str = "v1") -> Path | None:
 
 
 def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cfg: dict, simplify: bool = False,
-                   version: str = "v1", tag: str = "") -> tuple[CharacterAsset, Path]:
+                   version: str = "v1", tag: str = "", body_fix: bool = False) -> tuple[CharacterAsset, Path]:
     folder = ctx.folder("characters", c.key, "generated")
     # The attempt number keeps every generation as its own file: a retried sheet never overwrites earlier evidence.
     out = folder / f"{re.sub(r'[^a-z0-9]+', '-', expression)}-job{ctx.job.id}-a{ctx.job.attempts}{tag}.png"
@@ -344,7 +350,7 @@ def _generate_pose(ctx: Ctx, c: Character, expression: str, ref: Path | None, cf
     ctx.log(f"Generating '{expression}' in house style {version} with image provider {cfg.get('provider')} ({len(refs)} reference image(s))")
     if version == "v2":
         cfg = {**cfg, "background": "mid-grey (#808080)"}
-    image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify, version), out, refs or None)
+    image_generate(cfg, pose_prompt(c, expression, ref is not None, style is not None, simplify, version, body_fix), out, refs or None)
     if engine.make_cutout(out):
         ctx.log(f"'{expression}': background or halo removed")
     info = engine.analyse_pose(out)

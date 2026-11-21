@@ -119,7 +119,7 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
     inferred = []
 
     def trace(side):
-        y, last = split + 4, None
+        y, last, last_w = split + 4, None, 0
         while y < bot:
             rr = runs(a[y])
             if not rr:
@@ -128,15 +128,15 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
             cx = (run[0] + run[1]) / 2
             if last is not None and abs(cx - last[1]) > 1.5 * lw:
                 # the outer line jumped to another part of the body: the arm ended here with no hand drawn (hidden in
-                # a sleeve or a pocket). When the arm itself is clearly visible (a long free line), its end is used as
-                # the hand; otherwise this stays a clear error below.
-                if last[0] - split > 0.15 * H:
+                # a sleeve). Only a clean, free line end counts: a long arm (over 15% of the height) whose last row is
+                # about one line wide. Anything else (an arm that merges into the body or a pocket) stays a clear error.
+                if last[0] - split > 0.15 * H and last_w <= 1.6 * lw:
                     inferred.append(side)
                     return last, (last[1], float(last[0]))
                 break
             if run[1] - run[0] + 1 > 2.2 * lw and y > split + 60:
                 break
-            last = (y, cx)
+            last, last_w = (y, cx), run[1] - run[0] + 1
             y += 1
         # hand: the blob below; centroid of the outer run over the next rows while it stays wide
         ys, xs = [], []
