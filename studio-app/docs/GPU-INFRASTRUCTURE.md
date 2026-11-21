@@ -1,6 +1,6 @@
 # GPU and on-demand worker infrastructure: research and recommendation
 
-**Status (2026-11-16): RESEARCH AND PROPOSAL ONLY.** Nothing has been signed up for, bought or provisioned. No paid resource may be created until the owner approves the decisions in §8. The Shorts workflow, the local CPU worker and the existing job queue stay as they are.
+**Status (2026-11-16; hard requirements added 2026-11-21, §11–§13): RESEARCH AND PROPOSAL ONLY.** Nothing has been signed up for, bought or provisioned. No paid resource may be created until the owner approves the decisions in §8. The Shorts workflow, the local CPU worker and the existing job queue stay as they are.
 
 **Prices checked on 2026-11-16.** Figures marked **(official)** come from the provider's own pricing page or documentation. Figures marked **(secondary)** come from third-party trackers or blogs and were not confirmed on the provider's page. Figures marked **(estimate)** are this document's own calculations. GPU prices change often, and spot prices change hourly, so check them again before any approval.
 
@@ -123,6 +123,8 @@ Long-form already renders as independent segments of at most 60 s (D-L2 A), so s
 
 ### 5.2 Fallback: Modal
 
+> **Superseded for GPU work by §11.2:** Modal cannot run our plain Docker worker image without its own deployment code. The portable fallback is AWS EC2 g6e or Lambda.
+
 - L4 24 GB at $0.80/h, or L40S 48 GB at $1.95/h. Per second, scale to zero, cold start in seconds, and $30/month free credit **(official)**. At our volume, the credit alone may cover the GPU work.
 - **Drawbacks:**
   - Modal-specific Python deployment.
@@ -166,6 +168,8 @@ Voices and writing (about $2–$5, `VOICE-AND-CASTING.md` §4) are unchanged. Ev
 **Principle:** the control plane (VPS: API, Postgres, Redis, dashboard) stays the single source of truth. Remote workers are disposable. They hold no database or Redis credentials and no long-lived cloud keys, and they can disappear at any moment without losing state.
 
 ### 6.1 How a remote worker reaches the queue
+
+> **For GPU work this is replaced by §11.2:** the studio calls an HTTP job API on the worker, so no inbound port is needed. The pull design below remains the proposal for CPU long-form segments.
 
 | Option | Security | Fit |
 |---|---|---|
@@ -275,6 +279,10 @@ A small **provisioner** loop runs on the control plane (inside the API container
 
 ---
 
+**Further decisions from the hard requirements are in §13.**
+
+---
+
 ## 9. Figures not verified
 
 - RunPod egress (believed free; not on the pricing page) and vCPU count per 4090 pod.
@@ -320,3 +328,168 @@ A small **provisioner** loop runs on the control plane (inside the API container
 - DigitalOcean billing granularity: https://computeprices.com/providers/digitalocean/gpus/rtx4000ada
 
 **Internal:** `studio-app/README.md`, `docs/DEPLOYMENT.md`, `docs/LONG-FORM-PLAN.md` (measured render times), `docs/VOICE-AND-CASTING.md` (API costs), `api/oddstudio/queue.py`, `worker.py`, `tasks.py`, `storage.py`, `providers.py`.
+
+---
+
+## 11. Hard requirements (owner, 2026-11-21)
+
+These three requirements are binding on any GPU design. Where they conflict with §5 or §6, this section wins. It is still a proposal: nothing is built, bought or provisioned.
+
+### 11.1 Pay-per-use only
+
+**Rule:** nothing GPU-related may bill while no job is running, apart from the few minutes of boot and idle tail described below.
+
+**What this rules out:**
+- always-on pods or VMs, reserved or committed instances and savings plans;
+- RunPod Serverless "active" (minimum) workers, and any setting that keeps a warm worker;
+- a RunPod network volume or a stopped pod with a volume, because storage bills while idle ($0.07–0.20/GB-month, §3.1). Weights are therefore not kept on rented storage between sessions (§11.2, "Weights").
+
+**What is allowed:** RunPod Secure Cloud pods, billed per second **(official)**, created for a batch of jobs and **terminated** (not stopped) afterwards. Other per-second hosts that run a Docker image (AWS EC2 g6/g6e, Lambda, Vast.ai) remain options.
+
+**Overhead per session (estimate):** boot, image pull and weights download take about 5–10 min, and the idle tail is 5 min. On an L40S at $1.09/h that is about **$0.20–0.30 per session**. Queued GPU jobs therefore run together in one session wherever possible.
+
+**The monthly spend cap (in the studio):**
+- **Setting:** Settings > GPU worker, `monthly_cap_usd`, default **$50** (the §5.4 recommendation). A warning shows at 80%.
+- **Ledger:** every rented session is recorded: provider, pod ID, GPU type, the price per hour at launch, launch and terminate times, and its cost. Cost accrues from launch, not from the first job, so boot and idle time count. Month-to-date spend is the sum. The pattern is the same as the existing fal.ai ledger (`fal.py`: `check_budget` / `reserve`), but this is a separate cap. Whether fal.ai spend should count against the same cap is an owner decision (§11.5).
+- **Before a launch:** the studio reserves price × maximum lifetime (for example $1.09 × 2 h = $2.18). If month-to-date plus that reservation would pass the cap, nothing is launched. Queued GPU jobs show "Paused: monthly GPU cap reached" and wait. They are not failed. Because of the reservation, a session cannot push spend past the cap.
+- **During a session:** every 30 s the running cost is added to month-to-date. If the total reaches the cap, the running job is cancelled with "Stopped: monthly GPU cap reached. Retry it after raising the cap or next month", and the pod is terminated.
+- **Reconciliation:** each month, the ledger is checked against the provider's own billing, which replaces the estimate (§6.6).
+- **Provider-side backstop:** a prepaid RunPod balance with auto-top-up **off**. This is the hard limit if the studio itself fails.
+
+**Automatic idle shutdown.** There are four layers, and each works if the one above it fails:
+
+| Layer | What it does | Default |
+|---|---|---|
+| 1. Studio idle timer | Terminates the pod once no GPU job has run or been queued for N minutes | 5 min |
+| 2. Studio maximum lifetime | Terminates the pod after this many minutes, busy or not. A job cut off is failed and can be retried | 120 min |
+| 3. Orphan sweep | Runs when the studio worker starts and every 5 min. It lists the account's pods through the provider API and terminates any pod that is not in the ledger, past its lifetime, or belongs to a session already marked ended. Pod IDs are stored in Postgres, so this survives a studio restart | always on |
+| 4. Worker self-limit | The worker refuses new jobs after its own lifetime or idle limit and reports "expired" on `/health`. It **cannot stop billing by itself**: stopping a pod from inside needs a credential, and how that works is still unknown (AP-84B3 runbook, U1). No account-level API key is ever placed on the pod | lifetime + 10 min |
+
+The studio holds the only RunPod API key. It is kept in the secrets store and never sent to the worker.
+
+### 11.2 Portable worker: a plain Docker image with an HTTP job API
+
+**Image.** `oddstudio-gpu-worker`, a standard OCI image pinned by digest. It holds a CUDA runtime base, ComfyUI with pinned custom nodes, and a small HTTP server. There is nothing provider-specific in the image. It runs anywhere with an NVIDIA driver and the NVIDIA Container Toolkit:
+
+```
+docker run --gpus all -p 8000:8000 -e WORKER_TOKEN=… -v /models:/models oddstudio-gpu-worker@sha256:…
+```
+
+**The job API.** The studio calls the worker; the worker never calls the studio.
+
+| Call | Purpose |
+|---|---|
+| `GET /health` | Version, image digest, GPU and VRAM, loaded models, busy/idle, seconds left before its self-limit |
+| `POST /jobs` (multipart: `job.json` plus input files) | Starts a job and returns 202 with `{id}`. The studio's job ID and attempt number form an idempotency key, so a repeated submit does not run twice |
+| `GET /jobs/{id}` | Status, progress, log tail, start and finish times, and each output's name, size and SHA-256 |
+| `GET /jobs/{id}/outputs/{name}` | Downloads one output. The studio checks its SHA-256 before creating the `Asset` row |
+| `POST /jobs/{id}/cancel` | Cancels the job |
+| `DELETE /jobs/{id}` | Deletes the job's files on the worker once the studio has its outputs |
+
+- A job is a ComfyUI workflow (JSON, hash recorded) plus its inputs and parameters. Starting with `comfyui-workflow`, the kind is general, so new models need a new workflow and weights, not new API calls.
+- The worker runs one job at a time and keeps only in-memory state. The studio's Postgres stays the source of truth. If the worker disappears, only the running job is lost, and it is retried from the dashboard as today (§6.5).
+- **Auth:** a bearer token. For a rented pod, the studio generates a random token per session and passes it as an environment variable at launch. For our own machine, the token is a secret in Settings. Every field is validated, uploads are size-limited, and output names come only from the worker's own records.
+- **Transport:** HTTPS only. A RunPod pod's HTTP port is reached through RunPod's HTTPS proxy, `https://<pod id>-8000.proxy.runpod.net` **(secondary; to be confirmed)**. Because the API is asynchronous (a submit returns at once, then status is polled), the proxy's request timeout (about 100 s, **secondary**) does not matter.
+- **No storage dependency:** inputs travel in the request, and outputs are fetched by the studio. S3 is not needed, so the S3 hold does not block this.
+
+**One address in Settings.** A new "GPU worker" section replaces today's `comfyui.url` (`settings_store.py`; today only a connection test):
+
+| Setting | Rented | Own machine |
+|---|---|---|
+| `mode` | `rented` | `own` |
+| `worker_url` | Filled in by the studio for each session, shown read-only | **The one address to change**, e.g. `https://gpu.example.internal:8000` |
+| `token` | Generated per session | A secret in Settings |
+| Provider, GPU type, image digest | RunPod, L40S or 4090, the pinned digest | Not used |
+| Cap, idle timer, maximum lifetime | Apply | Do not apply, since no rental is billed. Electricity can be recorded as an optional estimate |
+
+Moving from rental to our own machine is then: run the same image on the machine, set `mode: own` and `worker_url`. Nothing else in the studio changes.
+
+**Our own machine needs a network path.** The VPS must reach the worker. Behind a home or office router, that means the machine opens an outbound tunnel (WireGuard to the VPS, or a similar tunnel), so no port is opened at home. Which tunnel is an owner decision when the machine exists.
+
+**Weights.** Weights are not baked into the image (Qwen-Image-Edit alone is about 40 GB at BF16, **estimate**), and not kept on rented storage (§11.1). At boot, the worker downloads them from Hugging Face, pinned by revision and checked against SHA-256, from the same kind of manifest AP-84B3-D1 already uses. On our own machine `/models` is a local folder, filled once.
+
+**This changes earlier sections:**
+- §6.1 (remote workers pull jobs over WireGuard) no longer applies to GPU work. The studio makes **outbound** HTTPS calls only, so the VPS opens no port for rented GPUs, and decision 7 in §8 becomes moot for GPU. The pull design in §6.1–§6.4 remains the proposal for CPU long-form segments only.
+- §5.2 (Modal as fallback): Modal does not run a plain Docker image with an exposed port in the same way. It needs its own Python deployment, which is lock-in. The portable fallback is AWS EC2 **g6e** (L40S 48 GB, per second, about $1.86/h on demand, **secondary**) or Lambda. Modal stays possible only behind a separate adapter.
+- RunPod Serverless stays excluded: its handler and queue model is RunPod-specific.
+
+### 11.3 Where lock-in remains
+
+| Item | Lock-in | Effort to switch |
+|---|---|---|
+| Launch, list and terminate pods; price lookup | **RunPod-specific.** It sits in one small provider adapter in the studio (`create`, `status`, `terminate`, `list`, `price`) | One new adapter per provider. AWS, Lambda and Vast.ai all have equivalent APIs |
+| Reaching the pod | RunPod's proxy URL format | The adapter returns the URL. Other hosts give a public IP or their own proxy |
+| Billing reconciliation | Each provider's billing API or console | Per provider; manual entry is the fallback |
+| Prepaid balance as the hard backstop | RunPod's prepaid model | AWS has no prepaid balance. Use AWS Budgets with an action that denies `RunInstances` |
+| CUDA and driver version | The image needs a host driver new enough for its CUDA version | Generic: true of any NVIDIA host, including our own |
+| Image, job API, workflows, weights | **None.** OCI image, our own API, ComfyUI JSON, Hugging Face files | n/a |
+
+### 11.4 Which card class runs the chosen models
+
+The models come from the owner-approved AP-84B3-D1 experiment (Qwen-Image-Edit-2511 primary, SDXL 1.0 baseline) and from §2 and §5 of this report (FLUX for self-hosted images, LoRA training, Wan 2.2 if video is ever self-hosted). VRAM needs are **estimates** from published model sizes and the benchmarks in §3.2; they are to be measured in the first approved test.
+
+| Model | 24 GB (RTX 4090) | 32 GB (RTX 5090) | 48 GB (L40S, A40) | Note |
+|---|---|---|---|---|
+| SDXL 1.0 + LoRA training | Yes | Yes | Yes | 12–16 GB is enough for inference |
+| FLUX.1 schnell / dev (FP8) + LoRA training | Yes | Yes | Yes | FP16 dev is tight on 24 GB |
+| Qwen-Image-Edit-2511, BF16 (as approved in D1-4) | No | No | **Yes** | The reason D1-4 chose L40S, with A40 as fallback |
+| Qwen-Image-Edit-2511, FP8 or GGUF quantised | Possibly | Likely | Yes | Quality after quantisation is **not tested** |
+| Wan 2.2 TI2V-5B (video) | Yes, slow (about 9 min per 5 s clip, **secondary**) | Yes | Yes | Hosted Kling is cheaper at our volume (§5.3) |
+| Wan 2.2 14B (video) | No | No | Tight; 80 GB preferred | Not planned |
+
+**Conclusion:** the 48 GB class (L40S) is needed only for Qwen-Image-Edit at full precision. Everything else runs on a 24–32 GB card. If quantised Qwen-Image-Edit proves good enough in the test, a 32 GB card covers every chosen model.
+
+---
+
+## 12. When buying our own GPU makes sense
+
+**Prices checked 2026-11-21; all secondary (retailer listings and trackers), and moving fast because of AI demand and memory shortages:**
+- RTX 4090 24 GB: no longer made; used about $2,100–2,600.
+- RTX 5090 32 GB: launch price $1,999, but US listings are mostly about $3,300–7,700.
+- L40S 48 GB: about $6,200–10,000 per card. It is passively cooled, so it needs a server chassis.
+- RTX PRO 6000 Blackwell 96 GB: about $13,250–16,000. Far beyond our needs.
+
+**Assumptions (estimate):**
+- **24–32 GB machine:** a used 4090 plus a host PC (CPU, 64 GB RAM, 1,000 W power supply, 2 TB SSD), about $1,500 → about **$4,000** in total.
+- **48 GB machine:** an L40S plus a server chassis, about $3,000 → about **$11,000**.
+- **Written off over 36 months:** about $111/month and $306/month.
+- **Power:** about 0.6 kW under load at $0.20/kWh → about $0.12 per GPU-hour.
+- **Rental comparison:** RunPod Secure Cloud at $0.89/h (4090) and $1.09/h (L40S) (§3.1).
+- **Not counted:** our own time for setup and maintenance, repairs, internet and the tunnel. All of these favour renting.
+
+**24–32 GB class (owning about $111/month plus $0.12 per GPU-hour, against renting a 4090 at $0.89/h):**
+
+| Monthly rental spend | GPU-hours it buys | Owning would cost | Cheaper |
+|---|---|---|---|
+| $10 | 11 | about $112 | Rent, by about $100 |
+| $25 | 28 | about $114 | Rent, by about $90 |
+| $50 (our cap) | 56 | about $118 | Rent, by about $70 |
+| $100 | 112 | about $124 | Rent, by about $25 |
+| **about $128** | **about 144 (about 5 h a day)** | **about $128** | **Break-even** |
+| $150 | 169 | about $131 | Own, by about $20 |
+| $300 | 337 | about $151 | Own, by about $150 |
+
+**48 GB class (owning about $306/month plus $0.11 per GPU-hour, against renting an L40S at $1.09/h):** break-even is about **$340/month of rental, about 310 GPU-hours (10 h a day)**. That is above the whole $150/month studio target.
+
+**When buying makes sense:**
+1. GPU rental has stayed above about **$130/month for at least three months running**, in reconciled bills rather than estimates. That is over twice the proposed $50 cap and about 5 GPU-hours every day.
+2. The chosen models are settled and fit a 24–32 GB card (§11.4). This means quantised Qwen-Image-Edit has passed review, or the work has moved to SDXL/FLUX.
+3. Prices are near list again. At today's RTX 5090 listings ($3,300–7,700), the machine costs about $5,000–9,500 and break-even rises to about $160–305 a month of rental.
+
+**Today:** the expected GPU spend is $10–20 a month (§5.4), far below break-even, so **renting is cheaper by about $90–100 a month**. Because of §11.2, buying later is a Settings change, not a redesign. **If we buy, the card should be an RTX 5090 32 GB near list price, or a used RTX 4090 24 GB.** Not an L40S.
+
+## 13. Owner decisions added by §11 and §12
+
+These are added to §8:
+1. Approve the push design (§11.2), which replaces §6.1 for GPU work: the studio calls an HTTP job API on the worker, so the VPS opens no port.
+2. The monthly GPU cap (recommended $50), its 80% warning, and whether fal.ai spend counts against the same cap or keeps its own experimental budget.
+3. The idle timer (recommended 5 min) and the maximum lifetime (recommended 120 min).
+4. Weights: download them at each boot (recommended; nothing billed while idle), or keep a network volume at about $5–6/month. The volume breaks the strict pay-per-use rule.
+5. The portable fallback host: AWS g6e (recommended) or Lambda, in place of Modal.
+6. Buying hardware: not now. Revisit when the §12 trigger is met.
+
+**Sources added (checked 2026-11-21, secondary):**
+- RTX 5090 prices: https://gpupoet.com/gpu/learn/price/november-2026/nvidia-geforce-rtx-5090, https://tech-insider.org/nvidia-rtx-50-prices-rise-november-2026-rtx-5090-3340/, https://www.techradar.com/computing/gpu/high-end-pc-gaming-is-in-big-trouble-thanks-to-ai-and-rtx-5090-price-hikes-are-prime-examples
+- L40S prices: https://getdeploying.com/gpus/nvidia-l40s, https://www.newegg.com/p/N82E16888892001
+- RTX PRO 6000 Blackwell prices: https://tech-insider.org/nvidia-rtx-pro-6000-blackwell-price-2026/, https://www.tweaktown.com/news/113098/nvidias-rtx-pro-6000-blackwell-gpu-price-almost-doubles-reaching-16-000/index.html
+- Used RTX 4090 listings: https://www.ebay.com/shop/rtx-4090-gpu
