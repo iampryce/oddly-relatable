@@ -90,10 +90,15 @@ def check(c, poses: list[tuple[int, str, Path]], body_asset: int, folder: Path, 
 
 def blocking_problems(db, chars: list) -> list[str]:
     """Characters whose rig BODY pose failed its check (production would fail during the render)."""
+    from .models import Job
     recs = records(db)
     bad = []
+    pending = {j.character_id for j in db.query(Job).filter(Job.kind == "rig_check", Job.status.in_(("queued", "running")))}
     for c in chars:
         if c.locked or c.art_status != "approved":
+            continue
+        if c.id in pending:
+            bad.append(f"{c.name}: the rig check of the approved poses is still running; start production when it has finished.")
             continue
         pid = body_pose_id(c)
         rec = recs.get(pid[1:]) if pid and pid.startswith("p") else None

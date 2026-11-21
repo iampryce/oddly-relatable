@@ -107,6 +107,12 @@ class ApprovalCheckTest(unittest.TestCase):
         aid = self.pose(cid, "neutral", hidden_hands_figure)
         self.assertEqual(self.c.post(f"/api/character-assets/{aid}/decision", json={"decision": "approve"}).status_code, 200)
         self.assertIsNone(self.card(cid, aid)["rig_check"], "queued: the card says it is waiting for the worker")
+        from oddstudio import rig_check
+        from oddstudio.db import new_session
+        from oddstudio.models import Character
+        with new_session() as s:
+            waiting = rig_check.blocking_problems(s, [s.get(Character, cid)])
+        self.assertIn("still running", waiting[0], "production waits for the check instead of failing in the render")
         ran = self.env.run_jobs(["rig_check"])
         self.assertEqual(ran[0][1], "succeeded", ran)
         chk = self.card(cid, aid)["rig_check"]
