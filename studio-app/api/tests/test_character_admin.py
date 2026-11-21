@@ -47,6 +47,21 @@ class CharacterAdminTest(unittest.TestCase):
         self.assertEqual(r.json()["deleted"], ["Oldie", "Spare"])
         self.assertNotIn("oldie", self.ids())
 
+    def test_a_storyboard_line_reference_counts_as_use(self):
+        from oddstudio.db import new_session
+        from oddstudio.models import Episode, StoryboardScene
+        with new_session() as s:
+            ep = Episode(title="Dinner", stage="storyboard_review")
+            s.add(ep)
+            s.flush()
+            s.add(StoryboardScene(episode_id=ep.id, position=1, scene_key="s1", heading="h", location="x", description="",
+                                  action="", camera="", characters=[], lines=[{"speaker": "theo", "text": "Hi.",
+                                                                               "reactions": [{"character": "mae"}]}]))
+            s.commit()
+        theo, mae = self.char("theo"), self.char("mae")
+        for cid in (theo, mae):
+            self.assertEqual(self.c.post("/api/characters/archive", json={"ids": [cid]}).status_code, 409)
+
     def test_a_character_of_a_live_episode_is_kept(self):
         from oddstudio.db import new_session
         from oddstudio.models import Episode

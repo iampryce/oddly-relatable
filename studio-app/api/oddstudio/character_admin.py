@@ -47,9 +47,13 @@ def usage(db: Session) -> dict[str, list[dict]]:
 
     for c in db.query(Character).filter(Character.episode_id.isnot(None)):
         add(c.key, c.episode_id)
+    from .acting import referenced   # speaker, look-at target and reactions: everyone the renderer casts
     for s in db.query(StoryboardScene).all():
         for k in s.characters or []:
             add(k, s.episode_id)
+        for ln in s.lines or []:
+            for k in referenced(ln):
+                add(k, s.episode_id)
     for e in eps.values():
         for k in ((e.audio_transcript or {}).get("cast") or {}).values():
             add(k, e.id)
@@ -61,7 +65,8 @@ def usage(db: Session) -> dict[str, list[dict]]:
                     add(ch.get("key"), e.id)
                 for sc in c.get("scenes", []):
                     for ln in sc.get("lines", []):
-                        add(ln.get("speaker"), e.id)
+                        for k in referenced(ln):
+                            add(k, e.id)
     return {k: sorted(v.values(), key=lambda x: x["id"]) for k, v in out.items()}
 
 
