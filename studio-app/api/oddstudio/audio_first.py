@@ -727,7 +727,9 @@ def set_cast(eid: int, body: CastIn, db: Session = Depends(get_db)):
             raise HTTPException(422, f"{sp.label}: key must be lowercase letters, digits and dashes, starting with a letter")
         if db.query(Character).filter_by(key=n.key).first() or n.key in created:
             raise HTTPException(409, f"{sp.label}: a character with key {n.key!r} already exists")
-        db.add(Character(key=n.key, name=n.name, description=n.description, visual_description=n.visual_description,
+        from .character_looks import look_from_notes, notes_ranges
+        db.add(Character(key=n.key, name=n.name, description=n.description,
+                         visual_description=n.visual_description.strip() or look_from_notes(notes_ranges(ep), True),
                          voice_style=voice_style_of(n), bubble_style=n.bubble_style, scope="episode", episode_id=ep.id,
                          engine_character=f"studio-{n.key}", art_status="none", default_expression="neutral", voice=""))
         created.append(n.key)
@@ -790,7 +792,9 @@ def set_silent_cast(eid: int, body: SilentCastIn, db: Session = Depends(get_db))
                 raise HTTPException(422, f"{m.name}: key must be lowercase letters, digits and dashes, starting with a letter")
             if db.query(Character).filter_by(key=n.key).first() or n.key in created:
                 raise HTTPException(409, f"{m.name}: a character with key {n.key!r} already exists")
-            db.add(Character(key=n.key, name=n.name, description=n.description, visual_description=n.visual_description,
+            from .character_looks import look_from_notes, notes_ranges
+            db.add(Character(key=n.key, name=n.name, description=n.description,
+                             visual_description=n.visual_description.strip() or look_from_notes(notes_ranges(ep), False),
                              voice_style="", bubble_style=n.bubble_style, scope="episode", episode_id=ep.id,
                              engine_character=f"studio-{n.key}", art_status="none", default_expression="neutral", voice=""))
             created.append(n.key)
