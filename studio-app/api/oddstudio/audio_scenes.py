@@ -98,14 +98,29 @@ def notes_acting(lines: list[dict], notes: list[dict], silent: list[str], cast: 
         a = {}
         if r.get("shot"):
             a["shot"] = r["shot"]
-        roles = role_map([ln], cast or [], silent)
+        roles = role_map([ln], cast or [], silent, r)
         sp = next((ro for ro in r.get("roles", []) if ro.get("role") == "speaker"), None)
         if sp and roles.get(sp.get("facing", "")) and roles[sp["facing"]] != ln["speaker"]:
             a["look_at"] = roles[sp["facing"]]
         reactors = [ro for ro in r.get("roles", []) if ro["role"].startswith("reactor") and ro.get("react", True)]
         if silent and reactors:
-            a["reactions"] = [{"character": silent[(int(ro["role"].split()[1]) - 1) % len(silent)],
-                               "expression": VN.EMOTION_EXPRESSION.get(ro.get("emotion", ""), "neutral")} for ro in reactors[:3]]
+            # each reactor's own character (confirmed people), else the N-th silent character; never wrapped around,
+            # never the speaker, never twice; an unconfirmed or extra person gives no reaction
+            order = [x["role"] for x in r.get("roles", []) if x.get("role", "").startswith("reactor")]
+
+            def reactor(ro):
+                if "who" in ro:
+                    return roles.get(ro["role"])
+                k = order.index(ro["role"])          # the k-th reactor present is the k-th silent character
+                return silent[k] if k < len(silent) else None
+            seen, reacts = {ln["speaker"]}, []
+            for ro in reactors:
+                k = reactor(ro)
+                if k and k not in seen:
+                    seen.add(k)
+                    reacts.append({"character": k, "expression": VN.EMOTION_EXPRESSION.get(ro.get("emotion", ""), "neutral")})
+            if reacts:
+                a["reactions"] = reacts[:3]
         if a:
             out[ln["id"]] = a
     return out
