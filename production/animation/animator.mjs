@@ -217,7 +217,7 @@ export function drawCharacter(ctx, c, p) {
   const legs = [[c.hipL, p.footL, c.shoeL, c.shoeLOff, -1], [c.hipR, p.footR, c.shoeR, c.shoeROff, 1]];
   for (const [hip, footW, shoe, off, side] of legs) {
     const t = toLocal(footW);
-    const pref = p.kneeDir || {x: side * 0.8, y: -0.2};
+    const pref = p.kneeDir ? {x: side * p.kneeDir.x, y: p.kneeDir.y} : {x: side * 0.8, y: -0.2};
     const {joint, end} = ik(hip, t, c.thigh, c.shin, pref);
     limb(ctx, hip, joint, end, lw);
     ctx.drawImage(shoe, end.x + off.x, end.y + off.y);

@@ -56,7 +56,9 @@ class SetStagingEditTest(unittest.TestCase):
         self.assertEqual(out["episodes"], [{"id": eid, "title": "Will test", "seats": 4, "seated_at_once": 4, "ok": True,
                                             "note": "enough seats for the 4 seated at once"}], "every episode using it is re-checked")
         plan = self.c.get(f"/api/episodes/{eid}/reference-plan").json()
-        self.assertNotIn("seat(s):", plan["ranges"][0]["items"]["seating"]["note"], "the seating warning is gone")
+        note = plan["ranges"][0]["items"]["seating"]["note"]
+        self.assertNotIn("seat(s):", note, "the seating warning is gone")
+        self.assertIn("drawn about", note, "seats 10-15 px apart are close: the plan says the cast is drawn smaller")
         from oddstudio.db import new_session
         from oddstudio.models import Event
         with new_session() as s:

@@ -182,13 +182,35 @@ def measure_body(rgba: np.ndarray, style: str = "v1") -> dict:
             "ankle_l": [ank_l_x, ankle_y], "ankle_r": [ank_r_x, ankle_y], **({"hands_inferred": inferred} if inferred else {})}
 
 
+def eye_pair(cands: list, head_w: int) -> list:
+    """The two eye whites: the PAIR of white shapes most alike in size and at the same height, each at most 40% of the
+    head's width (white hair, a white hat or a glint is not an eye; Episode 14's Uncle Mortimer). Falls back to the
+    two biggest when no pair qualifies."""
+    def box(c):
+        y0, x0 = c.min(0); y1, x1 = c.max(0)
+        return {"c": c, "w": x1 - x0 + 1, "h": y1 - y0 + 1, "cy": (y0 + y1) / 2, "n": len(c)}
+    bs = [box(c) for c in cands if len(c) > 30]
+    ok = [b for b in bs if b["w"] <= 0.4 * head_w]
+    best, score = None, None
+    for i in range(len(ok)):
+        for j in range(i + 1, len(ok)):
+            a, b = ok[i], ok[j]
+            ratio = max(a["n"], b["n"]) / max(1, min(a["n"], b["n"]))
+            dy = abs(a["cy"] - b["cy"]) / max(a["h"], b["h"])
+            if ratio <= 2.0 and dy <= 0.6:
+                s = ratio + dy - 0.000001 * (a["n"] + b["n"])   # alike first, then the bigger pair
+                if score is None or s < score:
+                    best, score = [a["c"], b["c"]], s
+    return best or [b["c"] for b in (ok if len(ok) >= 2 else bs)[:2]]
+
+
 def face_features(rgba: np.ndarray, top: int, neck_y: int, neck_x: float) -> dict:
     """Eyes (the two biggest white discs) and the mouth (lowest non-skin mark under the eyes, near the centre line)."""
     head = rgba[top:neck_y]
     rgb = head[:, :, :3].astype(int)
     alpha = head[:, :, 3] > 128
     white = alpha & (rgb.min(2) > 225)
-    comps = sorted(components(white), key=len, reverse=True)[:2]
+    comps = eye_pair(sorted(components(white), key=len, reverse=True)[:8], head.shape[1])
     eyes = []
     for c in sorted(comps, key=lambda c: c[:, 1].mean()):
         y0, x0 = c.min(0); y1, x1 = c.max(0)

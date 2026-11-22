@@ -608,6 +608,8 @@ def render_episode(ctx: Ctx) -> dict:
     ep = db.get(Episode, job.episode_id)
     prod = get_section(db, "production")
     script = current_script(db, ep)
+    from .acting import episode_hook
+    script = {**script, "hook": episode_hook(db, ep)}      # the episode's own banner (off: no hook)
     story = engine.build_story(episode_id=ep.id, revision=ep.revision, title=ep.title, script=script, scenes=list(ep.scenes),
                                chars_by_key=prepare_characters(ctx), production=prod)
     folder = ctx.folder("episodes", ep.id, f"r{ep.revision}", "render")

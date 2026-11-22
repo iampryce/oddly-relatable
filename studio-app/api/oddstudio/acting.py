@@ -58,6 +58,46 @@ def presentation(ep, hook: str) -> dict:
             "banner_font": str(FONTS / "Anton-Regular.ttf"), "emoji_font": str(FONTS / "NotoColorEmoji-Regular.ttf")}
 
 
+def episode_hook(db, ep) -> str:
+    """The banner text this episode shows: "" when its banner is off; else its own text, the script's hook, or the
+    title. Used by the acting renderer (video and stills) and the pose engine's final render alike."""
+    from .serialize import hook_on
+    if not hook_on(ep):
+        return ""
+    own = (getattr(ep, "hook_text", None) or "").strip()
+    if own:
+        return own
+    from .tasks import current_script
+    try:
+        script = current_script(db, ep) or {}
+    except Exception:  # noqa: BLE001 -- no script yet: the title
+        script = {}
+    return script.get("hook") or ep.title
+
+
+HEIGHT = 530          # a character's standing height in set pixels (the default)
+HEAD_OVERLAP = 0.25   # seated neighbours' heads may overlap by at most this share of a head's width
+
+
+def cast_height(seats: list[dict], head_ratio: float, default: int = HEIGHT) -> int:
+    """The characters' height for a set: the default, unless the set's seats are too close together for heads this
+    big (head width = head_ratio x height); then the largest height at which neighbouring seated heads overlap by at
+    most HEAD_OVERLAP of a head's width."""
+    xs = sorted(s["x"] for s in seats or [])
+    gaps = [b - a for a, b in zip(xs, xs[1:]) if b > a]
+    if not gaps or head_ratio <= 0:
+        return default
+    fit = min(gaps) / ((1 - HEAD_OVERLAP) * head_ratio)
+    return int(min(default, max(default * 0.5, fit)))
+
+
+def head_ratio(rig: dict) -> float:
+    try:
+        return float(rig["faces"]["neutral"]["size"][0]) / float(rig["body"]["height"])
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return 0.0
+
+
 def enabled(db) -> bool:
     return get_section(db, "motion").get("provider") == "procedural-rig"
 
@@ -218,17 +258,25 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     first_scene_cast = set(scenes[refs[0][0][0]].characters) if refs and refs[0] else set()
     prod = get_section(db, "production")
 
-    cast, faces = {}, {}
+    cast, faces, ratios = {}, {}, []
     for k in keys:
         c = chars_by_key[k]
         rd = rig_for(ctx, c)
         rig = json.loads((rd / "rig.json").read_text())
+        ratios.append(head_ratio(rig))
         faces[k] = set(rig["faces"])
         lips = sum(rig["faces"]["neutral"]["mouth"].get("color", [0, 0, 0])) > 150   # coloured lips (not a black line)
         # on stage from the start: the first scene's cast, and characters who never speak here (silent characters only
         # react or are looked at, so they have no line of their own to walk in on)
         on = k in first_scene_cast or not first_scene_cast or k not in speaking
-        cast[k] = {"rig": str(rd), "height": 530, "lips": lips, "start": "on" if on else "off"}
+        cast[k] = {"rig": str(rd), "height": HEIGHT, "lips": lips, "start": "on" if on else "off"}
+    # one height for everyone, fitted to the episode's set: close seats draw the cast smaller so seated heads do not
+    # pile up (the chairs in a generated set are often spaced for normal proportions, not for big-headed characters)
+    h = cast_height(studio_sets.seats_of(st), max(ratios or [0.0]))
+    if h != HEIGHT:
+        ctx.log(f"the set's seats are close together: characters drawn {h} px tall instead of {HEIGHT}")
+    for v in cast.values():
+        v["height"] = h
     # how the first scene starts (feat/seating): its seated characters take the set's seats in staging order (speaker
     # first); more seated characters than seats stand, and the log says so
     first = scenes[refs[0][0][0]] if refs and refs[0] else None
@@ -342,7 +390,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
 
     s = get_settings()
     from .tasks import current_script
-    hook = (current_script(db, ep) or {}).get("hook") or ep.title
+    hook = episode_hook(db, ep)
     # presentation (locked, owner 2026-11-17): comic speech bubbles by the speaker and a permanent top hook banner
     spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration,
             **presentation(ep, hook),

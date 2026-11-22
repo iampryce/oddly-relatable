@@ -267,6 +267,27 @@ def set_dialogue_display(eid: int, body: DialogueDisplayIn, db: Session = Depend
     return S.episode_summary(ep)
 
 
+class HookIn(BaseModel):
+    enabled: bool
+    text: str | None = Field(default=None, max_length=120)
+
+
+@router.put("/episodes/{eid}/hook")
+def set_hook(eid: int, body: HookIn, db: Session = Depends(get_db)):
+    """The episode's "POV" hook banner: on or off, and its own text (empty: the script's hook). Applies to the stills
+    and the next render. Not while a render is running."""
+    ep = get_episode(db, eid)
+    if ep.stage in ("producing", "publishing"):
+        raise HTTPException(409, f"not while the episode is {ep.stage}: change it before or after the render")
+    text = " ".join((body.text or "").split()) or None
+    if (ep.hook_banner, ep.hook_text) != (body.enabled, text):
+        log_event(db, ep.id, "episode", f"Hook banner {'on' if body.enabled else 'off'}" + (f": {text}" if text else "")
+                                        + " (applies to the stills and the next render)")
+        ep.hook_banner, ep.hook_text = body.enabled, text
+        db.commit()
+    return S.episode_summary(ep)
+
+
 # ------------------------------------------------------------------ script
 class InstructionIn(BaseModel):
     instruction: str = Field(default="", max_length=2000)

@@ -7,6 +7,7 @@ import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import SceneSetSelect from '@/components/SceneSetSelect';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import CastPanel from '@/components/CastPanel';
+import {hookNote} from '@/lib/hookView';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
 import AudioPanel from '@/components/AudioPanel';
@@ -50,7 +51,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
     <>
       <div className="spread">
         <div><h1>{ep.title} <DeleteButton kind="episode" id={ep.id} label={`episode ${ep.id} "${ep.title}"`} onDone={() => { window.location.href = '/bin'; }} /></h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
-        <DialogueDisplay ep={ep} act={act} />
+        <DialogueDisplay ep={ep} act={act} /><HookBanner ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
       <EpisodeSetPicker ep={ep} act={act} />
@@ -82,6 +83,26 @@ function DialogueDisplay({ep, act}: {ep: any; act: ReturnType<typeof useAction>}
         <option value="none">None (audio only)</option><option value="captions">Captions</option><option value="bubbles">Speech bubbles</option>
       </select>
       <div className="muted small">{locked ? 'Locked while rendering' : 'Applies to the next render'}</div>
+    </div>
+  );
+}
+
+// The "POV" hook banner (per episode; audio episodes start with it off): on or off, and its own text (empty: the
+// script's hook). Applies to the stills and the next render.
+function HookBanner({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
+  const locked = ['producing', 'publishing'].includes(ep.stage);
+  const [text, setText] = useState<string>(ep.hook_text || '');
+  useEffect(() => { setText(ep.hook_text || ''); }, [ep.hook_text]);
+  const save = (enabled: boolean, t: string) => act.run('hook', () => api(`/episodes/${ep.id}/hook`, {method: 'PUT', body: {enabled, text: t}}));
+  return (
+    <div style={{minWidth: 260}}>
+      <label className="row" style={{gap: 6}}><input type="checkbox" checked={!!ep.hook_banner} disabled={locked || !!act.busy}
+        onChange={e => save(e.target.checked, text)} />Hook banner ("POV: ...")</label>
+      {ep.hook_banner && <div className="row" style={{gap: 4}}>
+        <input aria-label="hook banner text" value={text} maxLength={120} placeholder="the script's hook" disabled={locked || !!act.busy}
+          onChange={e => setText(e.target.value)} />
+        <button className="btn sm" disabled={locked || !!act.busy || text === (ep.hook_text || '')} onClick={() => save(true, text)}>Save</button></div>}
+      <div className="muted small">{hookNote(ep, locked)}</div>
     </div>
   );
 }

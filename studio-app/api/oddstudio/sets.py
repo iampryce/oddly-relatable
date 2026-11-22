@@ -206,9 +206,11 @@ def suggest(db, word: str | None, among: dict | None = None) -> str | None:
     return None
 
 
-RULES = ("Studio rules (always): an EMPTY room with no people, characters or animals; {seats}no written text, "
-         "letters, numbers, signs, posters, logos or brands anywhere (screens and boards are blank, frames are empty); "
-         "nothing copied from any existing show, film or place.")
+RULES = ("Studio rules (always): an EMPTY room with no people, characters or animals; {seats}chairs, stools and "
+         "sofas face the camera or are seen from the side, never with their backs to the camera; seats spaced well "
+         "apart (the cast are stick figures with big heads: at least one chair's width between neighbouring seats); "
+         "no written text, letters, numbers, signs, posters, logos or brands anywhere (screens and boards are blank, "
+         "frames are empty); nothing copied from any existing show, film or place.")
 OLD_STYLE_LOOK = {"v1": "warm painted look, soft evening lamp light, cosy wood (old house style with a reference image)",
                   "v2": "soft painted gradients, warm lamp light against a cool window (old house style with a reference image)"}
 # Palettes offered by the variety guard when the description fixes no colours (rotated per episode, skipping any whose

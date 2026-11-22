@@ -36,6 +36,7 @@ SET_KEYS = ("setting", "furniture", "time")
 SHOT_KEYS = ("shot", "camera")
 CAMERA_OK = ("static",)
 POSE_OK = ("seated", "standing", "leaning", "walking")
+TYPICAL_HEAD = 0.42     # the cast's head width / height (the renderer uses each rig's own figure)
 
 
 def ranges_of(tr: dict) -> list[dict]:
@@ -248,6 +249,12 @@ def view(db: Session, ep: Episode) -> dict:
             seat_note.append(f"the episode's set has {seats} seat(s): {seated - seats} seated person(s) will stand")
         if seated and spec is None:
             seat_note.append("choose the episode's set to see how many seats it has")
+        if seated and spec is not None:
+            from .acting import HEIGHT, cast_height
+            h = cast_height(sets.seats_of(spec), TYPICAL_HEAD)
+            if h < HEIGHT:
+                seat_note.append(f"the set's seats are close together: the characters are drawn about {h} px tall instead of "
+                                 f"{HEIGHT} (a set with seats further apart keeps them full size)")
         if any(ro.get("pose") not in (None, *POSE_OK) for ro in r.get("roles", [])):
             seat_note.append("lying down or kneeling will be skipped: they stand")
         left = [ro for ro in r.get("roles", []) if ro.get("role") != "speaker" and ro.get("role") not in roles]
