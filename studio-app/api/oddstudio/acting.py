@@ -129,6 +129,17 @@ def seat_starts(staging: dict, cast: list[str], seats: int) -> tuple[dict[str, s
     return out, left
 
 
+def still_times(lines: list[dict], n: int) -> list[float]:
+    """The moments the storyboard stills show: the scene's first line just after it starts, then the middle of lines
+    spread over the scene, at most n in all."""
+    if not lines:
+        return [0.5]
+    pick = lines if len(lines) <= n else [lines[round(k * (len(lines) - 1) / (n - 1))] for k in range(n)] if n > 1 else lines[:1]
+    out = [round(min(ln["end"], ln["start"] + 0.4), 3) if k == 0 else round((ln["start"] + ln["end"]) / 2, 3)
+           for k, ln in enumerate(pick)]
+    return sorted(dict.fromkeys(out))
+
+
 def face_for(rig_faces: set[str], c, expression: str) -> str:
     """The rig face for a line's expression, matched like the pose engine (exact, then loose), else neutral."""
     e = (expression or "").lower()
@@ -178,11 +189,14 @@ def render_cast(lines: list[tuple[int, dict]], scene_characters: dict, chars_by_
 
 
 def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key: dict, folder: Path,
-           end_card: str | None = None) -> tuple[Path, Path, dict]:
+           end_card: str | None = None, stills: int = 0) -> tuple[Path, Path, dict]:
     """refs: per scene, the (scene_id, line_index) pairs to perform (a segment, or the whole episode).
     Returns (mp4 with audio, mix wav, report).
     Audio-first episodes use the ABSOLUTE timeline (audio_production.py): each line at its recorded start and end, the
-    video exactly as long as the recording, which is muxed in unchanged; the render must pass the audio QA."""
+    video exactly as long as the recording, which is muxed in unchanged; the render must pass the audio QA.
+    stills > 0 (storyboard stills): the same render up to the last still, saving that many frames (one in each line,
+    spread over the lines) as PNG files instead of a video; no audio is needed (a line without its slice of the
+    recording yet keeps a closed mouth). Returns (None, None, report with "stills": [{file, t}])."""
     from .models import StoryboardScene
     db = ctx.db
     folder.mkdir(parents=True, exist_ok=True)
@@ -256,7 +270,7 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             k = ln["speaker"]
             clip = clips.get(sid, {}).get(li)
             cues, seconds = [], float(ln.get("duration") or 1.6)
-            if absolute and not clip:
+            if absolute and not clip and not stills:
                 raise engine.EngineInputError(f"{ln.get('line_id') or 'a line'}: no slice of the recording (run the scene again)")
             if clip:
                 local = storage().get_to_file(clip["key"], folder / "voice" / Path(clip["key"]).name)
@@ -338,9 +352,11 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             **({"flip": True} if first is not None and scene_sets.is_reverse(db, scene_sets.scene_set(ep, first)) else {}),
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
             "timeline": "absolute" if absolute else "sequential"}
+    if stills:
+        spec["stills"] = still_times(lines, stills)   # the presentation (dialogue display) is the video's
     spec_file = folder / "acting.json"
     spec_file.write_text(json.dumps(spec, indent=1))
-    silent = folder / "acting-video.mp4"
+    silent = folder / ("stills" if stills else "acting-video.mp4")
     env = engine.env_for_node()
     if s.ffmpeg:
         env["FFMPEG"] = s.ffmpeg
@@ -351,6 +367,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     report = json.loads(r.stdout.strip().splitlines()[-1])
     for w in report.get("warnings", []):
         ctx.log(f"renderer: {w}")
+    if stills:
+        return None, None, {**report, "lines": len(lines), "cast": keys}
 
     if absolute:
         mp4 = AP.mux_original(silent, src_audio, total, folder / "acting.mp4")

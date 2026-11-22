@@ -280,22 +280,43 @@ export function mixWav(clips, seconds, out) {
 }
 
 // ---------------------------------------------------------------- render loop
-export async function renderVideo({width = 1080, height = 1920, fps = 30, seconds, drawFrame, audio, out, ffmpeg = 'ffmpeg', font}) {
+export async function renderVideo({width = 1080, height = 1920, fps = 30, seconds, drawFrame, audio, out, ffmpeg = 'ffmpeg', font,
+  stills = null}) {
   if (font) GlobalFonts.registerFromPath(font, 'Sub');
   const canvas = createCanvas(width, height), ctx = canvas.getContext('2d');
+  if (stills) {
+    // stills mode (storyboard): the frames are drawn in order exactly as for the video (the renderer keeps state from
+    // frame to frame: camera, scene, actions), up to the last still; only the frames at the given times are saved as
+    // PNG files in `out` (a folder). No video is encoded and no audio is used.
+    fs.mkdirSync(out, {recursive: true});
+    const want = stills.map(t => Math.max(0, Math.min(Math.round(seconds * fps) - 1, Math.round(t * fps))));
+    const last = Math.max(...want), files = [];
+    for (let i = 0; i <= last; i++) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      drawFrame(ctx, i / fps, {width, height});
+      want.forEach((f, k) => {
+        if (f === i) {
+          const file = path.join(out, `still-${String(k + 1).padStart(2, '0')}.png`);
+          fs.writeFileSync(file, canvas.toBuffer('image/png'));
+          files[k] = {file, t: Math.round(i / fps * 1000) / 1000};
+        }
+      });
+    }
+    return {frames: last + 1, stills: files};
+  }
   const args = ['-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${width}x${height}`, '-r', String(fps), '-i', '-',
     ...(audio ? ['-i', audio] : []), '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
     ...(audio ? ['-c:a', 'aac', '-b:a', '192k', '-shortest'] : []), '-movflags', '+faststart', out];
   const ff = spawn(ffmpeg, args, {stdio: ['pipe', 'inherit', 'inherit']});
   const done = new Promise((res, rej) => ff.on('close', code => code === 0 ? res() : rej(new Error(`ffmpeg exited ${code}`))));
-  const frames = Math.round(seconds * fps), stills = [];
+  const frames = Math.round(seconds * fps), times = [];
   for (let i = 0; i < frames; i++) {
     const t = i / fps;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     drawFrame(ctx, t, {width, height});
     const px = ctx.getImageData(0, 0, width, height).data;
     if (!ff.stdin.write(Buffer.from(px.buffer, px.byteOffset, px.byteLength))) await new Promise(r => ff.stdin.once('drain', r));
-    stills.push(t);
+    times.push(t);
   }
   ff.stdin.end();
   await done;

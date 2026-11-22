@@ -508,6 +508,7 @@ function drawScene(ctx, t) {
 }
 
 const t0 = Date.now();
-await renderVideo({width: W, height: H, fps: FPS, seconds: DUR, drawFrame: (ctx, t) => drawFrame(ctx, t), out: OUT,
-  ffmpeg: process.env.FFMPEG || 'ffmpeg', font: spec.font});
-console.log(JSON.stringify({out: OUT, seconds: DUR, frames: Math.round(DUR * FPS), render_seconds: (Date.now() - t0) / 1000, warnings}));
+const res = await renderVideo({width: W, height: H, fps: FPS, seconds: DUR, drawFrame: (ctx, t) => drawFrame(ctx, t), out: OUT,
+  ffmpeg: process.env.FFMPEG || 'ffmpeg', font: spec.font, stills: spec.stills || null});
+console.log(JSON.stringify({out: OUT, seconds: DUR, frames: spec.stills ? res.frames : Math.round(DUR * FPS),
+  render_seconds: (Date.now() - t0) / 1000, warnings, ...(spec.stills ? {stills: res.stills} : {})}));
