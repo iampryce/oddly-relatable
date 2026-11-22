@@ -229,7 +229,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
               <SceneView scene={sc} characters={characters} />
             </div>
             </div>))}
-          {audio && <div className="alert info small">The dialogue comes from the recording. Scenes are runs of recorded lines (a cut falls only between two lines). Edit to change headings, expressions and shots or to join scenes; to rebuild the scenes, use the Audio tab.</div>}
+          {audio && <div className="alert info small">The dialogue comes from the recording. Scenes are runs of recorded lines (a cut falls only between two lines). Edit to change headings, expressions and shots or to join scenes; to rebuild the scenes from the recording, use the Audio tab ("Rebuild scenes from audio" after the script is approved: it discards the storyboard and the script approval; poses, sets and the Reference plan stay).</div>}
           {can('regenerate_section') && !audio && (
             <div className="card row">
               <input style={{flex: 1, minWidth: 220}} placeholder="Instruction for regeneration, e.g. 'make the twist darker'" value={instruction} onChange={e => setInstruction(e.target.value)} />

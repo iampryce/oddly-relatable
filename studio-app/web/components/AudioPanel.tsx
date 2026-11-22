@@ -10,6 +10,7 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
+import {rebuildConfirmText, rebuildCost} from '@/lib/rebuildView';
 
 // Audio-first episode, stage 1: the uploaded audio (the voice track), its timed lines, a speaker per line, and the cast.
 // The server validates every change (timing inside the audio, in order, no overlaps); this page only prepares it.
@@ -165,6 +166,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
       {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
       {st.stage === 'audio_labelling' && <SilentCastCard st={st} episodeId={episodeId} act={act} />}
       {(st.stage === 'audio_labelling' || st.stage === 'script_review') && <ScenesCard st={st} episodeId={episodeId} act={act} dirty={dirty} />}
+      {(st.allowed_actions || []).includes('rebuild_audio_scenes') && <RebuildCard episodeId={episodeId} act={act} />}
     </div>
   );
 }
@@ -277,6 +279,26 @@ function ScenesCard({st, episodeId, act, dirty}: {st: any; episodeId: number; ac
       </div>
     </div>
   );
+}
+
+// After the script was approved: build the scenes again from the recording (the storyboard and the script approval are
+// discarded; poses, sets and the Reference plan stay). The confirmation lists exactly what goes and what stays.
+function RebuildCard({episodeId, act}: {episodeId: number; act: ReturnType<typeof useAction>}) {
+  const preview = useApi<any>(`/episodes/${episodeId}/audio/rebuild-scenes`).data;
+  const run = (mode: 'writer' | 'simple') => {
+    if (!preview || !window.confirm(rebuildConfirmText(preview, mode))) return;
+    act.run('rebuild', () => api(`/episodes/${episodeId}/audio/rebuild-scenes`, {body: {mode, confirm: true}}));
+  };
+  return (
+    <div className="card stack">
+      <h2 style={{margin: 0}}>Rebuild scenes from audio</h2>
+      <p className="muted small">The script is approved. To build the scenes again from the recording (for example after a fix to how scenes start), this discards the storyboard and the script approval and goes back to script review with new scenes. Poses, sets, the episode's set and the Reference plan are not touched, and nothing is approved for you.</p>
+      {preview && <p className="small">Discards: {preview.discards.storyboard_scenes} storyboard scene(s){preview.discards.stills_unlinked ? ` and their stills` : ''}, {preview.discards.script_approval}. AI writer: {rebuildCost(preview, 'writer')}.</p>}
+      <div className="row">
+        <button className="btn primary" disabled={!preview || !!act.busy} onClick={() => run('writer')}>Rebuild scenes from audio (AI writer)</button>
+        <button className="btn" disabled={!preview || !!act.busy} onClick={() => run('simple')}>Rebuild with the simple split (free)</button>
+      </div>
+    </div>);
 }
 
 // Characters named in the dialogue who never speak: they can react silently on screen (Stage 2 places them).

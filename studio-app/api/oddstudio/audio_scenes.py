@@ -347,11 +347,21 @@ def build_scenes(eid: int, body: ScenesIn, db: Session = Depends(get_db)):
     from .audio_first import audio_episode
     ep = audio_episode(db, eid)
     _gate(ep, "build_audio_scenes")
+    check_buildable(db, ep, body.mode)
+    set_stage(ep, "script_generating")
+    ep.last_error = ""
+    db.commit()
+    return S.job(enqueue(db, "audio_scenes", episode_id=ep.id, revision=ep.revision, payload={"mode": body.mode}))
+
+
+def check_buildable(db: Session, ep: Episode, mode: str) -> None:
+    """What building the scenes needs: an accepted Reference plan (when there are notes), a known mode, the
+    transcript, and a cast character as every line's speaker."""
     from .reference_plan import needs_acceptance
     if needs_acceptance(ep.audio_transcript or {}):
         raise HTTPException(409, "accept the Reference plan first (Audio tab, Reference plan): it shows what the video "
                                  "notes will drive, and nothing is built from them until you accept it")
-    if body.mode not in ("writer", "simple"):
+    if mode not in ("writer", "simple"):
         raise HTTPException(422, "mode must be writer or simple")
     lines = (ep.audio_transcript or {}).get("lines", [])
     keys = {c.key for c in db.query(Character).all()}
@@ -359,10 +369,94 @@ def build_scenes(eid: int, body: ScenesIn, db: Session = Depends(get_db)):
         raise HTTPException(409, "transcribe the audio first")
     if any(ln.get("speaker") not in keys for ln in lines):
         raise HTTPException(409, "give every line a speaker and apply the cast first (each speaker must be a character)")
+
+
+def writer_estimate(db: Session, ep: Episode) -> dict:
+    """What one AI-writer scene build is expected to cost: the prompt it would send (about 4 characters per token) and
+    about 120 output tokens per line, at list prices; with a fallback provider set, the higher of the two."""
+    from . import scene_sets
+    from .reference_plan import effective
+    from .sets import writer_environments
+    from .settings_store import get_section
+    from .shot_compare import TEXT_PRICES
+    cfg = get_section(db, "text")
+    prov, fb = cfg.get("provider", "none"), cfg.get("fallback", "none")
+    if prov in ("none", ""):
+        return {"provider": "none", "usd": 0.0, "note": "no text provider in Settings: the simple split is used (free)"}
+    tr = ep.audio_transcript or {}
+    lines = tr.get("lines", [])
+    chars = {c.key: c for c in db.query(Character).all()}
+    cast = list(dict.fromkeys(ln["speaker"] for ln in lines))
+    silent = [m["character_key"] for m in tr.get("silent_cast", []) if m["character_key"] in chars and m["character_key"] not in cast]
+    p = prompt(lines, [chars[k] for k in cast if k in chars], [chars[k] for k in silent], tr.get("media_hints") or {},
+               writer_environments(db, ep), effective(tr), scene_sets.sets_text(db, ep))
+    tin, tout = round((len(SYSTEM) + len(p)) / 4), 300 + 120 * len(lines)
+    price = lambda x: (tin * TEXT_PRICES[x][0] + tout * TEXT_PRICES[x][1]) / 1e6 if x in TEXT_PRICES else 0.0
+    usd = max(price(prov), price(fb) if fb not in ("none", "", prov) else 0.0)
+    note = "" if prov in TEXT_PRICES else f"no per-call API cost for {prov}"
+    if fb not in ("none", "", prov):
+        note = f"estimate covers {prov} or its fallback {fb}"
+    return {"provider": prov, "usd": round(usd, 4), "input_tokens": tin, "output_tokens": tout, "note": note}
+
+
+KEEPS = ("every script version (the current one stays in the history)", "the stills images (kept in storage)",
+         "poses and their approvals", "sets and their approvals", "the episode's chosen set",
+         "the Reference plan and its acceptance", "the recording, transcript, speakers and cast")
+
+
+def rebuild_preview(db: Session, ep: Episode) -> dict:
+    scenes = sorted(ep.scenes, key=lambda s: s.position)
+    return {"stage": ep.stage,
+            "discards": {"storyboard_scenes": len(scenes),
+                         "stills_unlinked": sum(1 for s in scenes if s.reference_asset_id),
+                         "script_approval": (f"the approval of script v{ep.approved_script_version}"
+                                             if ep.approved_script_version else "the script approval"),
+                         "scene_edits": "per-scene edits on the storyboard (headings, descriptions, per-scene sets, staging)"},
+            "keeps": list(KEEPS), "cost": {"writer": writer_estimate(db, ep), "simple": {"usd": 0.0, "note": "free"}},
+            "after": "the episode goes back to script review with the new scenes: approve the script, then generate the "
+                     "storyboard and refresh the stills (free) as usual"}
+
+
+class RebuildIn(BaseModel):
+    mode: str = "writer"      # writer | simple
+    confirm: bool = False
+
+
+@router.get("/episodes/{eid}/audio/rebuild-scenes")
+def rebuild_scenes_preview(eid: int, db: Session = Depends(get_db)):
+    """What "Rebuild scenes from audio" would discard and keep, and the AI writer's estimated cost (nothing changes)."""
+    from .audio_first import audio_episode
+    ep = audio_episode(db, eid)
+    _gate(ep, "rebuild_audio_scenes")
+    return rebuild_preview(db, ep)
+
+
+@router.post("/episodes/{eid}/audio/rebuild-scenes")
+def rebuild_scenes(eid: int, body: RebuildIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """After the script was approved (script approved, storyboard review or approved): discard the storyboard and the
+    script approval and build the scenes again from the recording (the current scene continuity applies). Without
+    confirm: the preview only. Poses, sets, the episode's set, the Reference plan and its acceptance, the recording,
+    transcript and cast are not touched; nothing is approved."""
+    from .audio_first import audio_episode
+    ep = audio_episode(db, eid)
+    _gate(ep, "rebuild_audio_scenes")
+    check_buildable(db, ep, body.mode)
+    preview = rebuild_preview(db, ep)
+    if not body.confirm:
+        return preview
+    n = len(ep.scenes)
+    for sc in list(ep.scenes):
+        db.delete(sc)
+    db.flush()
+    was = ep.stage
     set_stage(ep, "script_generating")
     ep.last_error = ""
+    db.add(Event(episode_id=ep.id, kind="script",
+                 message=f"Scenes rebuilt from the audio by {user} (from {was}): {n} storyboard scene(s) and "
+                         f"{preview['discards']['script_approval']} discarded; {'AI writer' if body.mode == 'writer' else 'simple split'}"))
     db.commit()
-    return S.job(enqueue(db, "audio_scenes", episode_id=ep.id, revision=ep.revision, payload={"mode": body.mode}))
+    job = enqueue(db, "audio_scenes", episode_id=ep.id, revision=ep.revision, payload={"mode": body.mode})
+    return {**preview, "job": S.job(job)}
 
 
 @router.post("/episodes/{eid}/audio/reopen-labels")

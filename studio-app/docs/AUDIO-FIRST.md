@@ -67,6 +67,13 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 
 ## Scenes and production (Stages 2 and 3)
 
+**Rebuild scenes from audio.** This builds the scenes again after the script was approved, for example so a later fix to how scenes start applies. It is on the Audio tab at "script approved", "storyboard review" and "storyboard approved" only.
+- **Before anything changes**, the confirmation lists what is discarded, what is kept, and the AI writer's estimated cost. The simple split is free.
+- **Discarded:** the storyboard scenes, which unlinks their stills (the images stay in storage); the approval of the current script; and per-scene edits on the storyboard.
+- **Kept:** every script version (the current one stays in the history), poses and sets with their approvals, the episode's chosen set, the Reference plan and its acceptance, and the recording, transcript, speakers and cast.
+- **Afterwards**, the episode is back at script review with the new scenes. You approve the script, then generate the storyboard and refresh the stills as usual. Nothing is approved for you.
+- **API:** `GET /api/episodes/{id}/audio/rebuild-scenes` for the preview; `POST` with `{"mode": "writer"|"simple", "confirm": true}` to rebuild. Without `confirm`, the POST returns the preview only.
+
 **Storyboard stills.** With the studio rig animator as the motion provider (every audio episode), "Refresh stills" renders the scene with the acting renderer, which also makes the video.
 - **What they show:** the episode's own set and its seats, and the episode's dialogue display (no bubble when "Dialogue on screen" is None).
 - **The sheet:** up to six frames, the first just after the scene's first line starts and the rest spread over its lines.
