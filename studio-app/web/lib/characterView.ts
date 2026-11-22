@@ -4,17 +4,74 @@ export function rigStatus(c: any): {label: string; tone: string} {
   if (c.locked) return {label: 'rig: repository art', tone: ''};
   const approved = c.assets.filter((a: any) => a.kind === 'pose' && a.status === 'approved');
   if (!approved.length) return {label: 'rig: no approved pose', tone: 'warn'};
+  if (c.rig_check_job) return {label: `rig: check ${c.rig_check_job.status}`, tone: 'warn'};
   const body = approved.find((a: any) => a.rig_check?.role === 'body');
   if (!body) return {label: 'rig: not checked', tone: 'warn'};
   return body.rig_check.ok ? {label: 'rig: OK', tone: 'good'} : {label: 'rig: failed', tone: 'bad'};
 }
 
-// Poses shown by default: approved ones, and poses awaiting review for an expression with no approved pose yet.
+// Poses shown by default: approved ones and every pose awaiting review, including candidates for an expression that
+// already has an approved pose (e.g. body pose candidates). Superseded, rejected and rig-failed poses stay hidden
+// until "show all poses".
 export function visiblePoses(assets: any[], all: boolean): any[] {
   const poses = assets.filter((a: any) => a.kind === 'pose');
   if (all) return poses;
-  const approvedExp = new Set(poses.filter((p: any) => p.status === 'approved').map((p: any) => p.expression));
-  return poses.filter((p: any) => p.status === 'approved' || (p.status === 'review' && !approvedExp.has(p.expression)));
+  return poses.filter((p: any) => p.status === 'approved' || p.status === 'review');
+}
+
+// A pose awaiting review for an expression that already has an approved pose: approving it replaces that pose.
+export function isCandidate(p: any, assets: any[]): boolean {
+  return p.kind === 'pose' && p.status === 'review' &&
+    assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && a.expression === p.expression);
+}
+
+// What a pose card says about its rig check. Approved poses: the result, or the job when one is queued or running,
+// or "not checked yet". Candidates awaiting review: their own check (made when they were generated), if any.
+export function poseRigText(p: any, job: {id: number; status: string} | null): {text: string; tone: string} | null {
+  const r = p.rig_check;
+  if (r) {
+    if (r.role === 'body') {
+      if (r.ok === true) return {text: 'Rig check: OK (body pose: body and face)', tone: 'muted'};
+      if (r.ok === false) return {text: `Rig check failed (body pose): ${r.message}`, tone: 'alert bad'};
+      return {text: `Rig check: ${r.message}`, tone: 'muted'};
+    }
+    if (r.ok === true) return {text: 'Head-only pose: face OK (no body check; never blocks production)', tone: 'muted'};
+    if (r.ok === false) return {text: 'Head-only pose: face not rigged, the neutral face is used instead (no body check; never blocks production)', tone: 'muted'};
+    return {text: `Head-only pose: ${r.message}`, tone: 'muted'};
+  }
+  if (p.status !== 'approved') return null;
+  if (job?.status === 'queued') return {text: `Rig check: queued, waiting for the worker (job ${job.id})`, tone: 'muted'};
+  if (job?.status === 'running') return {text: `Rig check: running (job ${job.id})`, tone: 'muted'};
+  return {text: 'Rig check: not checked yet', tone: 'warn'};
+}
+
+// The "Run rig check" button: some approved pose has no result and no check is queued or running.
+export function needsRigCheck(c: any): boolean {
+  if (c.locked || c.rig_check_job) return false;
+  return c.assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && !a.rig_check);
+}
+
+// A job the page started and follows: queued, running (with progress), then the result or the error.
+export function jobText(j: any): string {
+  if (!j) return '';
+  if (j.status === 'queued') return `Queued job ${j.id}…`;
+  if (j.status === 'running') {
+    const p = j.progress || {};
+    return `Running job ${j.id}…${p.total ? ` (${p.done || 0} of ${p.total} done)` : ''}`;
+  }
+  if (j.status === 'failed') return `Job ${j.id} failed: ${j.error || 'no reason given'}`;
+  if (j.status === 'cancelled') return `Job ${j.id} was cancelled`;
+  const r = j.result || {};
+  if (j.kind === 'body_candidates') {
+    const passed = (r.passed || []).length, failed = (r.failed || []).length;
+    return `${passed + failed} done: ${passed} passed, ${failed} failed the rig check` + (passed ? ' (shown below as candidates)' : '');
+  }
+  if (j.kind === 'rig_check') return `Rig check done: ${r.checked ?? 0} pose(s) checked, ${r.failed ?? 0} failed`;
+  return `Job ${j.id} done`;
+}
+
+export function jobFinished(j: any): boolean {
+  return !!j && !['queued', 'running'].includes(j.status);
 }
 
 export type Usage = Record<string, {id: number; title: string; stage: string; live: boolean}[]>;

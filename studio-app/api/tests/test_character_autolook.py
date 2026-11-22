@@ -191,15 +191,25 @@ class CharacterFlowTest(unittest.TestCase):
         self.assertEqual(self.drawn, [])
         r = self.c.post(f"/api/characters/{cid}/body-candidates", json={"n": 3, "max_usd": 1.0})
         self.assertEqual(r.status_code, 200, r.text)
+        jid = r.json()["job"]["id"]
+        self.assertEqual(self.c.get(f"/api/jobs/{jid}").json()["status"], "queued", "the page follows the job it started")
         ran = self.env.run_jobs(["body_candidates"])
         self.assertEqual(ran[0][1], "succeeded", ran)
+        j = self.c.get(f"/api/jobs/{jid}").json()
+        self.assertEqual((j["kind"], j["status"], len(j["result"]["passed"]), len(j["result"]["failed"])), ("body_candidates", "succeeded", 2, 1),
+                         "the page ends with: 3 done, 2 passed, 1 failed the rig check")
         self.assertEqual(len(self.drawn), 3)
         self.assertTrue(all("both hands clearly visible" in p for p in self.drawn))
         poses = [a for a in self.chars()["nia"]["assets"] if a["kind"] == "pose"]
         self.assertEqual(sorted(a["status"] for a in poses), ["review", "review", "rig_failed"],
                          "only passing candidates go to review")
         review = [a for a in poses if a["status"] == "review"]
+        self.assertTrue(all(a["rig_check"] and a["rig_check"]["ok"] is True and a["rig_check"]["role"] == "body" for a in review),
+                        "each candidate's own rig check is sent to the page")
         self.c.post(f"/api/character-assets/{review[0]['id']}/decision", json={"decision": "approve"})
+        cand = next(a for a in self.chars()["nia"]["assets"] if a["id"] == review[1]["id"])
+        self.assertEqual((cand["status"], cand["rig_check"]["ok"]), ("review", True),
+                         "a candidate for an expression that now has an approved pose keeps its status and its check")
         self.c.post(f"/api/character-assets/{review[1]['id']}/decision", json={"decision": "approve"})
         st = {a["id"]: a["status"] for a in self.chars()["nia"]["assets"] if a["kind"] == "pose"}
         self.assertEqual((st[review[0]["id"]], st[review[1]["id"]]), ("rejected", "approved"),
