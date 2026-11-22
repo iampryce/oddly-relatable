@@ -449,6 +449,10 @@ def rebuild_scenes(eid: int, body: RebuildIn, db: Session = Depends(get_db), use
         db.delete(sc)
     db.flush()
     was = ep.stage
+    # the approvals of the discarded script and storyboard are withdrawn (as a script revision request does), so
+    # nothing downstream keeps reading the old version as approved
+    ep.approved_script_version = None
+    ep.approved_storyboard_version = None
     set_stage(ep, "script_generating")
     ep.last_error = ""
     db.add(Event(episode_id=ep.id, kind="script",

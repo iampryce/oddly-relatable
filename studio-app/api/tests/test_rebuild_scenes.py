@@ -83,6 +83,7 @@ class RebuildScenesTest(unittest.TestCase):
         self.assertEqual(r.json()["job"]["kind"], "audio_scenes")
         e = self.ep()
         self.assertEqual((e["stage"], e["scenes"]), ("script_generating", []), "the storyboard is discarded")
+        self.assertIsNone(e["approved_script_version"], "the old script's approval is withdrawn")
         ran = self.env.run_jobs(["audio_scenes"])
         self.assertEqual(ran[0][1], "succeeded", ran)
         e = self.ep()
