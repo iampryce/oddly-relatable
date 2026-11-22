@@ -33,6 +33,9 @@ ALLOWED: dict[str, set[str]] = {
     "edit_video_notes": {"audio_upload", "audio_labelling", "script_review"},
     "build_audio_scenes": {"audio_labelling", "script_review"},
     "reopen_audio_labels": {"script_review"},
+    # audio episodes: the scenes built again from the recording after the script was approved (the storyboard is
+    # discarded, the script goes back to review; poses, sets and the Reference plan are untouched)
+    "rebuild_audio_scenes": {"script_approved", "storyboard_review", "storyboard_approved"},
     "label_audio": {"audio_labelling"},
     "audio_cast": {"audio_labelling"},
     "generate_outline": {"script_pending", "outline_review"},
