@@ -81,6 +81,17 @@ SET_STYLE_V2 = (
     "standing adult's eye height with gentle perspective. The lower third must be open, flat floor where characters will "
     "stand, with no furniture or objects blocking it. No text, no people, no animals, no characters.")
 
+# One deliberate house style for SETS (owner decision 2026-11-22, feat/episode-sets), for every style version: it
+# matches the flat stickman cast and says nothing about palette, light, materials or mood, which come from each
+# episode's own description (so no episode inherits a warm, cosy, painted-wood look). No reference image is attached.
+SET_STYLE_FLAT = (
+    "Background plate for an adult 2D animated comedy, vertical 2:3 composition. Flat-colour 2D illustration that "
+    "matches simple flat stickman characters: clean geometric shapes, flat colour fills with at most one flat shadow "
+    "tone per surface, crisp edges, thin consistent outlines or none, no gradients, no brush or paper texture, no "
+    "photographic detail, not a 3D render. Clear, readable lighting with every part of the room visible. Camera at a "
+    "standing adult's eye height with gentle perspective. The lower third is open, flat floor where characters will "
+    "stand, with nothing blocking it.")
+
 RESTYLE_DESCRIPTIONS_V2 = {
     "leo": "Leo: a flat dark-brown short side-parted hair cap shape; plain white torso; no garment.",
     "ben": "Ben: a flat slate-blue flat-cap (newsboy cap) shape; plain white torso under a charcoal open blazer.",

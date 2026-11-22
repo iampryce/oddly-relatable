@@ -209,8 +209,9 @@ def set_options(eid: int, db: Session = Depends(get_db)):
     from . import sets as studio_sets
     ep = get_episode(db, eid)
     used = studio_sets.usage(db, exclude_episode=ep.id)
-    options = [{**s, "thumbnail": studio_sets.thumbnail_url(db, k), "used_in": used.get(k, [])}
-               for k, s in studio_sets.usable(db).items()]
+    allowed = studio_sets.for_episode(db, ep)
+    options = [{**s, "thumbnail": studio_sets.thumbnail_url(db, k), "used_in": used.get(k, [])} for k, s in allowed.items()]
+    hidden = len(set(studio_sets.usable(db)) - set(allowed))
     tr = ep.audio_transcript or {}
     word = ((tr.get("media_hints") or {}).get("setting") or "").strip() if ep.source == "audio" else ""
     from .models import Asset
@@ -222,8 +223,8 @@ def set_options(eid: int, db: Session = Depends(get_db)):
         a = db.get(Asset, r.get("preview_asset_id") or r.get("asset_id")) if (r.get("preview_asset_id") or r.get("asset_id")) else None
         pending.append({"id": k, "label": r.get("label", k), "for_this_episode": r.get("episode_id") == ep.id,
                         "thumbnail": storage().url(a.storage_key) if a else None})
-    return {"current": ep.set_id, "options": options, "candidates": pending,
-            "suggestion": {"word": word, "set_id": studio_sets.suggest(db, word)} if word else None}
+    return {"current": ep.set_id, "options": options, "candidates": pending, "hidden_other_episodes": hidden,
+            "suggestion": {"word": word, "set_id": studio_sets.suggest(db, word, allowed)} if word else None}
 
 
 class SetChoiceIn(BaseModel):
@@ -240,6 +241,9 @@ def choose_set(eid: int, body: SetChoiceIn, db: Session = Depends(get_db)):
     usable = studio_sets.usable(db)
     if body.set_id not in usable:
         raise HTTPException(422, "choose an approved set (candidates must be approved in Settings > Sets first)")
+    if body.set_id not in studio_sets.for_episode(db, ep):
+        raise HTTPException(409, "that set belongs to another episode: every episode gets its own set unless one is kept "
+                                 "for reuse (Keep this set for future episodes, in Settings > Sets or on that episode)")
     if ep.set_id != body.set_id:
         n = len(studio_sets.usage(db, exclude_episode=ep.id).get(body.set_id, []))
         log_event(db, ep.id, "episode", f"Set chosen: {usable[body.set_id]['label']} ({body.set_id})"

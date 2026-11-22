@@ -111,7 +111,7 @@ def generate_script(ctx: Ctx) -> dict:
     ctx.log(f"Writing the script with provider {provider.name}")
     from . import scene_sets
     answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")),
-                                    writer.script_prompt(idea, chars, sets.writer_environments(db), job.payload.get("instruction", ""))
+                                    writer.script_prompt(idea, chars, sets.writer_environments(db, ep), job.payload.get("instruction", ""))
                                     + scene_sets.sets_text(db, ep))
     script = validate_script(answer, {c.key for c in characters(db)})
     for note in scene_sets.continuity(script["scenes"], scene_sets.episode_sets(db, ep)):

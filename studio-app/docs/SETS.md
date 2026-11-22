@@ -1,34 +1,55 @@
 # Sets (backgrounds)
 
-Every episode has its own set, chosen on purpose. There is no silent default.
+**Every episode gets a new set of its own.** An earlier set is used again only when you keep it for reuse and choose it (owner rule 2026-11-22). There is no silent default.
 
 ## Choosing the episode's set
 
 - The **Set** card on the episode (below the pipeline) shows the current set.
-- **Choose an approved set** opens a picker with thumbnails. Each set shows the earlier episodes that already use it. Picking a set that is already in use asks for confirmation, so reuse is always deliberate.
+- **Choose an approved set** opens a picker with two groups:
+  - **This episode's sets:** sets made for this episode, and any set it already uses.
+  - **Kept for reuse:** sets you kept for future episodes, and the studio's repository plates.
+  - Each set shows the other episodes that already use it, and reuse always asks for confirmation.
+- **Another episode's set is not offered** until it is kept. The card says how many are hidden. Choosing one through the API is refused with "Keep this set for future episodes" (`409`), and so is adding it for scene changes.
+- **Keep this set for future episodes** is a checkbox on the episode's own set cards and on each set in Settings › Sets (`POST /api/sets/{id}/keep {"keep": true|false}`). Un-keeping a set hides it from new episodes; episodes already using it keep it.
+- **The writer** is offered only this episode's sets and the kept ones.
 - **Production cannot start without a set.** The message is: "choose this episode's set first (Storyboard tab, Set): there is no default set".
 - A set that is withdrawn (rejected) after it was chosen also blocks production until another one is chosen.
-- When the video notes name a setting, it is shown as a suggestion only. It is never applied by itself.
+- When the video notes name a setting, a matching set among this episode's own and kept sets is shown as a suggestion only. It is never applied by itself.
 - Episodes that existed before this change keep the set they rendered with (migration `0008`).
-- API: `GET /api/episodes/{id}/set-options` and `PUT /api/episodes/{id}/set` (the set must be approved; not while the episode is producing or publishing).
+- API: `GET /api/episodes/{id}/set-options` and `PUT /api/episodes/{id}/set` (the set must be approved and allowed for the episode; not while it is producing or publishing).
 
 ## A new set for the story
 
-The **Proposed set for this story** box sits on the same card. The studio proposes an original set description, you edit it, and only your click generates a candidate.
+The **A new set for this story** box sits on the same card. The studio proposes an original set description, you edit it, and only your click generates a candidate.
 
+- **Set notes from the video (audio episodes, words only).**
+  - When the video is analysed, one more vision call reads a few frames per distinct room (at most 3 frames for each of at most 4 rooms). The rooms are the notes' settings after smoothing, so a short cut to another angle is not a new room.
+  - The answer must use fixed lists: room size, the main piece and where it sits, the number of seats and how they are arranged, each piece of furniture (item, shape, material, colour, place, including windows, doors, shelves, plants and lamps), the walls, floor, ceiling and light as colour words, and the mood.
+  - Anything else is removed and counted: names, brands, logos, text, artwork and people. Screens and boards are always drawn blank.
+  - Each room becomes one sentence built only from those words. It is editable under "Set notes from the video" (`PUT /api/episodes/{id}/set-notes`).
+  - The frames and the video are deleted after the job, and no frame ever goes to an image generator. To make the notes again, upload the video again.
+  - The cost is part of the notes estimate shown before the upload (two rooms assumed) and counts against the notes cap.
 - **Audio episodes: "Propose from the video notes" (free).**
-  - A fixed sentence is built only from the notes' list values: the setting type, furniture, time of day, how many people are seated or standing, whether they face each other, and the mood.
-  - Example: "An original dining room with a long table, evening, 3 people seated facing each other, 1 person standing; the mood is nervous."
-  - Your edits to the notes apply.
-- **Script-first episodes: "Propose from the story (AI writer)".**
-  - One sentence from the title, logline and scene descriptions, written by the selected text provider.
-  - Quotes and cast names are removed.
-- **Edit and save.** Edit the text and save it. The box then shows the exact prompt that will be sent: the locked house style, then "Setting:" and your text.
-- **Generate this set.** The button shows the estimated image cost (about $0.05–0.20 per image), asks you to confirm, and then sends exactly that prompt.
-  - The candidate is linked to the episode, appears on the card and in Settings › Sets, and is used only after you approve it there.
+  - With set notes, each room's notes are used verbatim, one proposal per room. An office and a meeting room give two proposals, each with its own Generate button.
+  - Older notes without set notes give the earlier fixed sentence from the notes' list values.
+- **Script-first episodes: "Propose from the story (AI writer)".** One sentence from the title, logline and scene descriptions; quotes and cast names are removed.
+- **Exactly what is sent.** "Sent to the image API (exactly), part by part" lists each part:
+  - **studio style:** one flat-colour set style that matches the stickman cast. It sets no palette, light, material or mood, and has no warm, cosy, painted-wood wording.
+  - **your description:** "Setting:" and the room's text.
+  - **studio rules:** always added. An empty room with no people; seating for at least the cast (the most people the notes show at once, else the number of speakers); no text, signs, logos or brands; nothing copied.
+  - **variety guard.**
+  - **view:** for two-sided rooms.
+- **No reference image.** Sets are generated from text only. Every set used to be an edit of the same reference plate, which is why they looked alike.
+- **Variety guard.**
+  - It lists the look of the studio's five most recent sets from other episodes: each set's stored look, else the look words of its description, plus the look the old house style gave it.
+  - It asks that, where the description does not fix them, the new set clearly differs in palette, floor material, light, time of day and layout.
+  - When the description names no colour, it adds a palette for this episode, avoiding wall colours the recent sets use. The reference video's own colours win when the set notes name them.
+  - The guard is editable and saved per episode (`PUT /api/episodes/{id}/set-proposal/variety`); empty goes back to the automatic one.
+- **Generate this set.** The button shows the estimated image cost (about $0.05–0.20 per image) and asks you to confirm. The prompt shown is stored in the job and sent exactly as shown. The candidate keeps it (Settings › Sets, "Sent to the image API") along with its look signature for later variety guards.
+  - The candidate is linked to the episode, appears on the card and in Settings › Sets, and is used only after you approve it there. A set made for an episode is not kept for reuse until you say so; a set made in Settings › Sets (for no episode) is a library set and is kept.
   - A second request never overwrites a queued one; each gets its own ID.
 - Nothing is generated or approved by itself.
-- Data: `episodes.set_proposal` (migration `0009`, holding the text, its source and when it was saved).
+- Data: `episodes.set_proposal` (migration `0009`) holds the rooms, each with its text, source and seats, plus the variety guard; the set notes are part of the episode's video notes.
 
 ## Seats and the table front
 

@@ -216,6 +216,10 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>
           <button className="btn" disabled={!!busy} onClick={() => run('no', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'reject'}}))}>Reject</button></div></>}
+      {x.status !== 'rejected' && <label className="small row" style={{gap: 4}}><input type="checkbox" checked={!!x.kept} disabled={!!busy}
+        onChange={e => run('keep', () => api(`/sets/${x.id}/keep`, {method: 'POST', body: {keep: e.target.checked}}))} />
+        Keep this set for future episodes (otherwise only {x.episode_id ? 'its own episode' : 'episodes that already use it'} can use it)</label>}
+      {x.prompt && <details><summary className="small">Sent to the image API</summary><pre className="small" style={{whiteSpace: 'pre-wrap'}}>{x.prompt}</pre></details>}
       <div><DeleteButton kind="set" id={x.id} label={`the set ${x.label} (${x.status})`} onDone={reload} /></div>
     </div>);
 }
@@ -228,7 +232,7 @@ function SetsCard() {
   return (
     <div className="card stack" id="sets">
       <div className="spread"><h2>Sets (background environments)</h2><BulkDelete what="sets" label="Delete unused candidates" onDone={reload} /></div>
-      <p className="muted small">New sets are generated as candidates in the approved house style (the living room is the style reference) and are used in production only after you approve them. They appear to the writer when the studio rig animator is the motion provider.</p>
+      <p className="muted small">New sets are generated as candidates in the flat set style (text only, no reference image, with a variety guard against the recent sets) and are used in production only after you approve them. Each episode gets its own set: a set is offered to other episodes only when you keep it for future episodes.</p>
       <ErrorBox error={error} />
       {(data?.sets || []).map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} />)}
       {active.length > 0 && <span className="badge busy">generating {active.length} candidate(s)…</span>}

@@ -7,6 +7,7 @@
 import {useEffect, useState} from 'react';
 import {api, isVideoFile} from '@/lib/api';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
+import {setNotesCost} from '@/lib/setView';
 
 export type NotesChoice = {notes: boolean; window: {start: number; end: number} | null; ready: boolean};
 
@@ -59,7 +60,7 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
       </div>}
       {err && <p className="small" style={{color: 'var(--bad, #b00)'}}>{err}</p>}
       {notes && est && (est.configured
-        ? <p className={`small ${est.within_cap === false ? 'alert bad' : 'muted'}`}>Notes from {est.frames} frame(s) in {est.calls} call(s) · estimated cost about ${est.usd < 0.01 ? est.usd.toFixed(4) : est.usd.toFixed(3)} ({est.provider} {est.model}){est.note ? ` · ${est.note}` : ''} · cap ${Number(est.cap_usd ?? 0.5).toFixed(2)} per episode{est.within_cap === false ? ': over the cap, so the upload with notes will be refused (use a shorter part, or raise the cap in Settings › Video and visual analysis)' : ''}. The actual token use is recorded with the notes.</p>
+        ? <p className={`small ${est.within_cap === false ? 'alert bad' : 'muted'}`}>Notes from {est.frames} frame(s) in {est.calls} call(s) · estimated cost about ${est.usd < 0.01 ? est.usd.toFixed(4) : est.usd.toFixed(3)} ({est.provider} {est.model}){est.note ? ` · ${est.note}` : ''} · cap ${Number(est.cap_usd ?? 0.5).toFixed(2)} per episode{est.within_cap === false ? ': over the cap, so the upload with notes will be refused (use a shorter part, or raise the cap in Settings › Video and visual analysis)' : ''}. {setNotesCost(est) ? ` · ${setNotesCost(est)}` : ''}. The actual token use is recorded with the notes.</p>
         : <p className="small" style={{color: 'var(--bad, #b00)'}}>{est.message}</p>)}
     </div>
   );
