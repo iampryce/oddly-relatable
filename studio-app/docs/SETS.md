@@ -55,6 +55,11 @@ The **A new set for this story** box sits on the same card. The studio proposes 
 
 On the set approval screen (Settings › Sets) you mark the set's staging before approving it.
 
+An **approved** set's staging can be edited later: **Edit staging (seats, table front, floor, standing area)**, then **Save staging** (`PUT /api/sets/{id}/staging`).
+- The picture and the approval never change. Only the staging and its preview are redrawn.
+- Every episode using the set (as its set or for scene changes) is re-checked: its seats against the most people its video notes seat at once. The result is shown under the set and logged on each episode. A rendered episode is told to render again to use the new staging.
+- The same checks as at approval refuse a seat outside the picture, hips below the feet, or a table front that is not a box inside the picture.
+
 - **Seats:** "Add a seat", then click where the seated feet rest. A set can have several seats. You can adjust each seat's hip height and feet height. A set that already has the older single `seat` keeps working.
 - **Table front:** "Mark the table front", then click two corners. That part of the picture is drawn again after the seated characters, so they sit behind the table. Standing characters are drawn after it, in front.
 

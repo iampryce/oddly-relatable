@@ -5,6 +5,7 @@ import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import {stagingSummary} from '@/lib/setStaging';
 import {gpuLine, sessionLine, allInPerClip} from '@/lib/gpuView';
 
 // Capabilities come from the server's provider registry (capabilities.py): which providers exist, what they need,
@@ -201,7 +202,10 @@ function VoiceCompare() {
 
 function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
   const [b, setB] = useState<any>(x.blocking);
+  const [editing, setEditing] = useState(false);
+  const [checked, setChecked] = useState<any[] | null>(null);
   const {busy, error, run} = useAction(reload);
+  const saveStaging = () => run('staging', async () => { const r: any = await api(`/sets/${x.id}/staging`, {method: 'PUT', body: {blocking: b}}); setChecked(r.episodes); setEditing(false); });
   const field = (k: string, label: string) => <div><label htmlFor={`${x.id}-${k}`}>{label}</label><input id={`${x.id}-${k}`} type="number" value={b[k]} onChange={e => setB((o: any) => ({...o, [k]: Number(e.target.value)}))} /></div>;
   return (
     <div className="stack small" style={{borderTop: '1px solid var(--line, #ddd)', paddingTop: 8}}>
