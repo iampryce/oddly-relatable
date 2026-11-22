@@ -4,7 +4,7 @@ import {api} from '@/lib/api';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
 import {Empty, ErrorBox} from '@/components/ui';
-import {groupCharacters, imageCost, removable, rigStatus, visiblePoses} from '@/lib/characterView';
+import {groupCharacters, imageCost, isCandidate, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
 const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null, skin_tone: ''};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
@@ -92,16 +92,26 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
     if (!window.confirm(`Generate ${c.name}'s sheet: ${imageCost(exprList.length)}?`)) return;
     act.run('gen', () => api(`/characters/${c.id}/sheet`, {body: {expressions: exprList}}));
   };
+  // a job this card started (candidates or a rig check), followed until it ends; its state and any error are shown
+  const [follow, setFollow] = useState<any>(null);
+  useEffect(() => {
+    if (!follow || jobFinished(follow)) return;
+    const t = setTimeout(() => api(`/jobs/${follow.id}`).then(j => { setFollow(j); if (jobFinished(j)) reload(); })
+      .catch(e => setFollow({...follow, status: 'failed', error: `could not read the job: ${e.message}`})), 2000);
+    return () => clearTimeout(t);
+  }, [follow, reload]);
   const genCands = () => {
     if (!window.confirm(`Generate ${cands} body pose candidate(s) for ${c.name}: ${imageCost(cands)} (cap ${'$'}${cap.toFixed(2)}). Each is rig-checked; only passing ones are shown.`)) return;
-    act.run('cands', () => api(`/characters/${c.id}/body-candidates`, {body: {n: cands, max_usd: cap}}));
+    act.run('cands', async () => setFollow((await api(`/characters/${c.id}/body-candidates`, {body: {n: cands, max_usd: cap}})).job));
   };
+  const runRigCheck = () => act.run('rig', async () => setFollow((await api(`/characters/${c.id}/rig-check`, {method: 'POST'})).job));
   const everyPose = c.assets.filter((a: any) => a.kind === 'pose');
   const poses = visiblePoses(c.assets, allPoses);
   const refs = c.assets.filter((a: any) => a.kind === 'reference');
   const sheet = c.assets.find((a: any) => a.kind === 'sheet');
   const sample = c.assets.find((a: any) => a.kind === 'voice-sample');
   const reviewing = poses.filter((p: any) => p.status === 'review').length;
+  const candidates = poses.filter((p: any) => isCandidate(p, c.assets)).length;
   const upload = (file?: File) => file && act.run('upload', () => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => api(`/characters/${c.id}/reference`, {body: {png_base64: String(r.result).split(',')[1]}}).then(resolve, reject);
@@ -136,6 +146,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
           {!c.locked && <DeleteButton kind="character" id={c.id} label={c.name} onDone={reload} />}</span>
       </div>
       <ErrorBox error={act.error} />
+      {follow && <div className={`small ${follow.status === 'failed' ? 'alert bad' : 'muted'}`} role="status">{jobText(follow)}</div>}
       <p className="small">{c.description || <span className="muted">No description.</span>}</p>
       {c.visual_description && <p className="small muted">Look: {c.visual_description}</p>}
       {!c.locked && <div className="row small" style={{gap: 6}}>
@@ -146,26 +157,23 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
       {sheet && <div><strong className="small">Expression sheet</strong> <span className={`badge ${sheet.status === 'approved' ? 'good' : sheet.status === 'review' ? 'warn' : 'bad'}`}>{sheet.status}</span>
         <a href={sheet.url} target="_blank" rel="noreferrer"><img className="scene-img" style={{marginTop: 6}} src={sheet.url} alt={`${c.name} expression sheet`} loading="lazy" /></a></div>}
       {!c.locked && reviewing > 0 && (
-        <div className="alert warn row" style={{justifyContent: 'space-between'}}><span>{reviewing} pose(s) await your review. Only approved poses are used in production.</span>
+        <div className="alert warn row" style={{justifyContent: 'space-between'}}><span>{reviewing} pose(s) await your review{candidates ? `, ${candidates} of them candidate(s) to replace an approved pose` : ''}. Only approved poses are used in production.
+          {candidates > 0 && <> Approve sheet also decides the candidates (one approved pose per expression, the last one wins): approve or reject candidates one by one first.</>}</span>
           <span className="row"><button className="btn sm good" disabled={!!act.busy} onClick={() => act.run('ok', () => api(`/characters/${c.id}/sheet/decision`, {body: {decision: 'approve'}}))}>Approve sheet</button>
             <button className="btn sm danger" disabled={!!act.busy} onClick={() => act.run('no', () => api(`/characters/${c.id}/sheet/decision`, {body: {decision: 'reject'}}))}>Reject sheet</button></span></div>)}
       {poses.length > 0 && <div className="poses">{poses.map((p: any) => (
         <div key={p.id} className="pose">
           <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt={`${c.name} ${p.expression}`} loading="lazy" /></a>
           <div className="small">{p.expression}</div>
-          <span className={`badge ${p.status === 'approved' ? 'good' : p.status === 'rejected' ? 'bad' : 'warn'}`}>{p.status}</span>
-          {!c.locked && p.status === 'approved' && (p.rig_check
-            ? <div className={`small ${p.rig_check.ok === false ? 'alert bad' : 'muted'}`} style={{marginTop: 4}} title={p.rig_check.message}>
-                {p.rig_check.role === 'body'
-                  ? (p.rig_check.ok === true ? 'Rig check: OK (body pose: body and face)' : p.rig_check.ok === false ? `Rig check failed (body pose): ${p.rig_check.message}` : `Rig check: ${p.rig_check.message}`)
-                  : (p.rig_check.ok === true ? 'Head-only pose: face OK (no body check; never blocks production)'
-                    : p.rig_check.ok === false ? `Head-only pose: face not rigged, the neutral face is used instead (no body check; never blocks production)` : `Head-only pose: ${p.rig_check.message}`)}</div>
-            : <div className="small muted" style={{marginTop: 4}}>Rig check: waiting for the worker</div>)}
+          <span className={`badge ${p.status === 'approved' ? 'good' : p.status === 'rejected' ? 'bad' : 'warn'}`}>{isCandidate(p, c.assets) ? 'Candidate' : p.status}</span>
+          {!c.locked && (() => { const r = poseRigText(p, c.rig_check_job); return r && <div className={`small ${r.tone}`} style={{marginTop: 4}} title={p.rig_check?.message}>{r.text}</div>; })()}
           {!c.locked && <div style={{marginTop: 4}}><DeleteButton kind="pose" id={p.id} label={`${c.name}'s ${p.expression} pose (${p.status})`} onDone={reload} /></div>}
           {!c.locked && p.status === 'review' && <div className="row" style={{justifyContent: 'center', marginTop: 4}}>
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
+      {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
+        <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}
       {everyPose.length > poses.length || allPoses ? <label className="small row" style={{gap: 6}}><input type="checkbox" checked={allPoses} onChange={e => setAllPoses(e.target.checked)} />
         Show all poses ({everyPose.length - visiblePoses(c.assets, false).length} superseded, rejected or extra hidden)</label> : null}
       {!c.locked && (

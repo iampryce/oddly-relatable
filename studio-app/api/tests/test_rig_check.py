@@ -167,6 +167,42 @@ class ApprovalCheckTest(unittest.TestCase):
         self.assertIs(self.card(nia, n_id)["rig_check"]["ok"], True)
         self.assertEqual((self.card(ralph, r_id)["status"], self.card(nia, n_id)["status"]), ("approved", "approved"))
 
+    def test_the_rig_check_job_is_reported_and_one_character_can_be_checked(self):
+        """The page says "waiting for the worker" only while a rig check job really exists: the character carries its
+        queued or running check job; with none, a pose is "not checked yet" and can be checked on its own."""
+        from oddstudio.db import new_session
+        from oddstudio.models import Character, CharacterAsset
+        from oddstudio.routes_characters import refresh_art
+        cid = self.character("ralph", "Ralph")
+        aid = self.pose(cid, "neutral", v2_figure)
+        chars = lambda: {x["id"]: x for x in self.c.get("/api/characters").json()}
+        self.assertEqual(self.c.post(f"/api/characters/{cid}/rig-check").status_code, 409, "nothing approved to check yet")
+        with new_session() as s:   # approved before the check existed: no job, no result
+            s.get(CharacterAsset, aid).status = "approved"
+            s.flush()
+            refresh_art(s, s.get(Character, cid))
+            s.commit()
+        c = chars()[cid]
+        self.assertIsNone(c["rig_check_job"], "no job: the card must not say it is waiting for the worker")
+        self.assertIsNone(self.card(cid, aid)["rig_check"])
+        r = self.c.post(f"/api/characters/{cid}/rig-check")
+        self.assertEqual(r.status_code, 200, r.text)
+        jid = r.json()["job"]["id"]
+        self.assertEqual(chars()[cid]["rig_check_job"], {"id": jid, "status": "queued"})
+        self.assertEqual(self.c.post(f"/api/characters/{cid}/rig-check").json()["job"]["id"], jid, "no second job while one is queued")
+        self.assertEqual(self.c.post("/api/characters/rig-check-all").json()["already_running"], 1)
+        ran = self.env.run_jobs(["rig_check"])
+        self.assertEqual([x[1] for x in ran], ["succeeded"], ran)
+        self.assertIsNone(chars()[cid]["rig_check_job"])
+        self.assertIs(self.card(cid, aid)["rig_check"]["ok"], True)
+        j = self.c.get(f"/api/jobs/{jid}").json()
+        self.assertEqual((j["kind"], j["status"], j["result"]["checked"]), ("rig_check", "succeeded", 1))
+        self.assertEqual(self.card(cid, aid)["status"], "approved", "never changes an approval")
+        # approving a pose queues a check: the card then reports that real job
+        h = self.pose(cid, "happy", lambda p: v2_figure(p, mouth="smile"))
+        self.c.post(f"/api/character-assets/{h}/decision", json={"decision": "approve"})
+        self.assertEqual(chars()[cid]["rig_check_job"]["status"], "queued")
+
     def test_a_failed_expression_pose_never_blocks_production(self):
         """An expression pose is head-only (e.g. arms crossed): only its face is checked, and a failure only means the
         neutral face is used for that expression. Production waits only on the body pose."""

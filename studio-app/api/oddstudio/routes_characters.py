@@ -35,10 +35,18 @@ def get_char(db: Session, cid: int) -> Character:
     return c
 
 
-def out(db: Session, c: Character) -> dict:
+def rig_jobs(db: Session) -> dict:
+    """{character id: its rig check job} for jobs still queued or running (the latest per character)."""
+    from .models import Job
+    jobs = db.query(Job).filter(Job.kind == "rig_check", Job.status.in_(("queued", "running"))).order_by(Job.id).all()
+    return {j.character_id: j for j in jobs}
+
+
+def out(db: Session, c: Character, jobs: dict | None = None, checks: dict | None = None) -> dict:
     from . import rig_check
+    jobs = rig_jobs(db) if jobs is None else jobs
     return S.character(c, db.query(CharacterAsset).filter_by(character_id=c.id).order_by(CharacterAsset.id.desc()).all(),
-                       rig_check.records(db))
+                       rig_check.records(db) if checks is None else checks, jobs.get(c.id))
 
 
 class CharacterIn(BaseModel):
@@ -59,8 +67,27 @@ class CharacterIn(BaseModel):
 @router.get("/characters")
 def list_characters(db: Session = Depends(get_db)):
     from .bin import hidden_ids
+    from . import rig_check
     gone = hidden_ids(db, "character")
-    return [out(db, c) for c in db.query(Character).order_by(Character.id) if c.id not in gone]
+    jobs, checks = rig_jobs(db), rig_check.records(db)
+    return [out(db, c, jobs, checks) for c in db.query(Character).order_by(Character.id) if c.id not in gone]
+
+
+@router.post("/characters/{cid}/rig-check")
+def rig_check_one(cid: int, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Check one character's approved poses (free, local). Informational only: it never changes an approval. When a
+    check is already queued or running for this character, that job is returned instead of a second one."""
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "repository art is not rig-checked here")
+    if c.art_status != "approved":
+        raise HTTPException(409, f"{c.name} has no approved pose to check")
+    job = rig_jobs(db).get(c.id)
+    if job is None:
+        job = enqueue(db, "rig_check", episode_id=c.episode_id, character_id=c.id)
+        db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: rig check queued by {user}"))
+        db.commit()
+    return {"job": S.job(job)}
 
 
 @router.post("/characters/rig-check-all")
