@@ -158,6 +158,7 @@ class SetNotesFlowTest(Base):
         sets = {s["id"]: s for s in self.c.get("/api/sets").json()["sets"]}
         rec = sets[g["set_id"]]
         self.assertEqual((rec["kept"], rec["flat_style"], rec["prompt"]), (False, True, shown))
+        self.assertEqual(rec["seats_wanted"], 8, "the approval screen asks for the seats the proposal needs")
         self.assertIn("meeting room", g["set_id"] + rec["label"])
 
 
@@ -225,6 +226,15 @@ class VarietyAndReuseTest(unittest.TestCase):
         self.assertEqual((o["kept"], o["own"]), (True, False))
         self.assertEqual([u["id"] for u in o["used_in"]], [e1], "the picker shows where it is already used")
         self.assertEqual(self.c.put(f"/api/episodes/{e2}/set", json={"set_id": "first-office"}).status_code, 200, "reuse, chosen explicitly")
+        # a set used only for scene changes counts as used (the reuse confirmation shows it)
+        from oddstudio.db import new_session
+        from oddstudio.models import Episode
+        add_studio_set("library-kitchen", kept=True)
+        with new_session() as s:
+            s.get(Episode, e1).scene_set_ids = ["library-kitchen"]
+            s.commit()
+        o = next(o for o in self.c.get(f"/api/episodes/{e2}/set-options").json()["options"] if o["id"] == "library-kitchen")
+        self.assertEqual([u["id"] for u in o["used_in"]], [e1])
         # un-keeping it hides it from new episodes, but the episodes using it keep it
         self.c.post("/api/sets/first-office/keep", json={"keep": False})
         e3 = self.audio_episode("Third")
