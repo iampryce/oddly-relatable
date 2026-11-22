@@ -914,7 +914,10 @@ def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
         db.commit()
 
     w = None
-    jid = f"j{job.id}-a{job.attempts}"
+    # unique per submission: a long-lived worker (our own machine) may still hold an older job with the same studio job
+    # id and attempt (another studio, a restored database), and an idempotent repeat must never return that job's result
+    jid = f"j{job.id}-a{job.attempts}-{uuid.uuid4().hex[:10]}"
+    submitted = False
     try:
         why = gpu_blocked(view(db, p), model)
         if why:
@@ -935,6 +938,7 @@ def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
         mark(session=w["session"], worker=where, progress={"status": "submitted"})
         gpu.worker_submit(w["url"], w["token"], {"id": jid, "kind": "comfyui-workflow", "workflow": wf, "workflow_sha256": wsha,
                                                  "params": gpu_params(model, p), "inputs": inputs})
+        submitted = True
         ctx.log(f"GPU: {m['label']} submitted to {where}")
         while True:
             if w["session"]:
@@ -969,6 +973,9 @@ def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
     except Exception as e:
         mark(status="failed", error=str(e)[:300], progress=None)
         if w is not None:
+            if submitted:                      # the failed job's files do not stay on the worker
+                gpu.worker_cancel(w["url"], w["token"], jid)
+                gpu.worker_delete(w["url"], w["token"], jid)
             gpu.touch(db, w["session"])
         raise
 

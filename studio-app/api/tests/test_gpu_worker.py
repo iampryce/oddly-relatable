@@ -104,6 +104,15 @@ class WorkerApiTest(unittest.TestCase):
             self.assertEqual(r.status_code, 400, why)
         big = httpx.post(self.url + "/jobs", headers=self.h, content=b"x" * (5 << 20))
         self.assertEqual(big.status_code, 413)
+        self.assertEqual(httpx.post(self.url + "/jobs", headers=self.h, content=b"{not json").status_code, 400)
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=10)
+        c.putrequest("POST", "/jobs")
+        c.putheader("Authorization", f"Bearer {TOKEN}")
+        c.putheader("Content-Length", "abc")
+        c.endheaders()
+        self.assertEqual(c.getresponse().status, 400, "a malformed Content-Length gets an answer, not a dropped connection")
+        c.close()
         self.assertEqual(httpx.get(f"{self.url}/jobs/j1-a1/outputs/..%2F..%2Fetc", headers=self.h).status_code, 404)
         self.assertEqual(self.w.jobs, {})
 

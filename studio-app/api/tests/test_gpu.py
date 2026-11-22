@@ -359,6 +359,17 @@ class GpuShotComparisonTest(GpuTestBase):
             self.assertTrue(res["check"]["length_ok"])
             self.assertEqual(self.rp.calls, [], "no provider involved")
             self.assertEqual(w.jobs, {}, "the job's files are deleted on the worker once the studio has the clip")
+            # a failed clip's job does not stay on the worker either, and a later submission never reuses its id
+            real = SC.gpu_params
+            SC.gpu_params = lambda model, p: {**real(model, p), "stub_fail": "out of memory (test)"}
+            try:
+                self.c.post(f"/api/motion/shot/{plans[1]['id']}/run", json={"model": "infinitetalk-480p"})
+                ran = self.env.run_jobs(["shot_generate"])
+            finally:
+                SC.gpu_params = real
+            self.assertEqual(ran[0][1], "failed")
+            self.assertIn("out of memory", self.row(plans[1]["id"])["results"]["infinitetalk-480p"]["error"])
+            self.assertEqual(w.jobs, {}, "the failed job's files are deleted too")
         finally:
             httpd.shutdown()
             httpd.server_close()

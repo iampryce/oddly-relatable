@@ -370,7 +370,10 @@ def make_handler(w: Worker):
                 return
             parts = self._route()
             if parts == ["jobs"]:
-                n = int(self.headers.get("Content-Length") or 0)
+                raw = self.headers.get("Content-Length") or ""
+                if not raw.isdigit():
+                    return self._send(400, {"error": "Content-Length is required"})
+                n = int(raw)
                 if n <= 0 or n > w.max_body:
                     return self._send(413, {"error": f"the job must be between 1 byte and {w.max_body} bytes"})
                 try:
