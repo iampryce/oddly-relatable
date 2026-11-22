@@ -100,7 +100,8 @@ def effective(tr: dict) -> list[dict]:
     (never stored this way)."""
     ign = set(stored(tr).get("ignored", []))
     out = []
-    for i, r in enumerate(with_people(tr, ranges_of(tr))):
+    all_ranges = ranges_of(tr)
+    for i, r in enumerate(with_people(tr, all_ranges)):
         r = {k: v for k, v in r.items() if k != "line_ids"}
         if f"{i}:set" in ign:
             r = {k: v for k, v in r.items() if k not in SET_KEYS}
@@ -120,6 +121,16 @@ def effective(tr: dict) -> list[dict]:
     return out
 
 
+def range_index(ranges: list[dict], t: float) -> int | None:
+    """The one range a moment belongs to: the latest range that has started by `t` and not ended. Neighbouring
+    ranges overlap by a hundredth of a second at a cut, so a beat at the cut belongs to the range starting there."""
+    best = None
+    for k, r in enumerate(ranges):
+        if r["start"] <= t < r["end"] and (best is None or r["start"] >= ranges[best]["start"]):
+            best = k
+    return best
+
+
 def effective_beats(tr: dict) -> list[dict]:
     """The beats the builders act: supported types only, without those in ranges whose Movement item is ignored."""
     from .beats import SUPPORTED
@@ -127,7 +138,7 @@ def effective_beats(tr: dict) -> list[dict]:
     ranges = ranges_of(tr)
     out = []
     for b in (tr.get("video_notes") or {}).get("beats") or []:
-        i = next((k for k, r in enumerate(ranges) if r["start"] <= b["t"] < r["end"]), None)
+        i = range_index(ranges, b["t"])
         if b["type"] in SUPPORTED and not (i is not None and f"{i}:movement" in ign):
             out.append(b)
     return out
@@ -217,7 +228,8 @@ def view(db: Session, ep: Episode) -> dict:
     spec = sets.blocking_of(db, ep.set_id) if ep.set_id else None
     seats = len(sets.seats_of(spec)) if spec else 0
     out = []
-    for i, r in enumerate(with_people(tr, ranges_of(tr))):
+    all_ranges = ranges_of(tr)
+    for i, r in enumerate(with_people(tr, all_ranges)):
         rl = [ln for ln in lines if ln["start"] < r["end"] and ln["end"] > r["start"]]
         roles = role_map(rl, cast, silent, r)
         o = _original_for(tr, r)
@@ -235,7 +247,7 @@ def view(db: Session, ep: Episode) -> dict:
             seat_note.append(f"{len(left)} person(s) left out" + (f" ({unconfirmed} not confirmed under People)" if unconfirmed else
                                                                  " (more people than characters)"))
         from . import beats as BT
-        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if r["start"] <= b["t"] < r["end"]]
+        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if range_index(all_ranges, b["t"]) == i]
         pnames = BT.names_of(db, tr)
         skip = [b for b in in_range if b["type"] in BT.UNSUPPORTED]
         move_note = []

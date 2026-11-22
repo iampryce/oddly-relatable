@@ -187,6 +187,16 @@ class UnconfirmedPeopleTest(unittest.TestCase):
         self.assertEqual(len(reacts), len(set(reacts)), "no character reacts twice")
         self.assertTrue(set(reacts) <= {"ralph", "sidney", "winifred"})
 
+    def test_a_beat_at_a_cut_belongs_to_the_range_that_starts_there(self):
+        from oddstudio.reference_plan import effective_beats, range_index
+        ranges = [{"start": 0.0, "end": 3.98}, {"start": 3.97, "end": 7.95}, {"start": 19.86, "end": 49.67}, {"start": 49.66, "end": 52.65}]
+        self.assertEqual([range_index(ranges, t) for t in (1.0, 3.97, 49.66, 60.0)], [0, 1, 3, None])
+        tr = {"video_notes": {"ranges": ranges, "beats": [{"id": "b1", "t": 3.97, "type": "exit", "person": 3},
+                                                          {"id": "b2", "t": 19.87, "type": "enter", "person": 1},
+                                                          {"id": "b3", "t": 49.66, "type": "turn_to", "person": 2, "target": "person 3"}]},
+              "reference_plan": {"ignored": ["1:movement", "2:movement"]}}
+        self.assertEqual([b["id"] for b in effective_beats(tr)], ["b3"], "unticking the cut's ranges keeps the turn at 49.66 s")
+
     def test_without_confirmed_people_the_reactors_never_wrap_around(self):
         from oddstudio.reference_plan import role_map
         m = role_map([{"speaker": "uncle-mortimer"}], ["uncle-mortimer"], ["ralph", "sidney", "winifred"])
