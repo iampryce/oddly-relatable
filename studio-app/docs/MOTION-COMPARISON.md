@@ -30,3 +30,30 @@ Production › Motion Model Comparison › **Shot comparison** compares hosted A
   - **With a text provider in Settings:** the free preparation asks it to write each line's tone and action from the line's text, the lines before and after it, and the video notes. The tone is taken only from a fixed list (pompous, insulting, pleading, shocked, sarcastic, smug, deadpan, matter-of-fact, nervous, cheerful, angry, irritated, sad, puzzled, excited, mocking, proud, defensive, tender, exasperated, whispering, triumphant). The plan shows the tone, where it came from and the writer's estimated cost (text providers do not report usage here; about 4 characters per token at list prices).
   - **Fallback:** if the provider is not set, fails or gives nothing usable, the phrase matcher is used, with a note. It matches whole words and phrases only; cues such as "Sure," or "I," count only at the start of a sentence. A line with no cue still gets a sensible tone (excited, puzzled for a question, matter-of-fact otherwise, or the line's own mood).
   - **Your edit is never overwritten.**
+
+## Self-hosted models (GPU proof of concept)
+
+This is the engineering for `docs/GPU-INFRASTRUCTURE.md` §16, accepted 2026-11-22. Nothing here has been rented or run on a GPU yet.
+
+- **Three more columns:**
+  - **InfiniteTalk 480p**: image plus our line audio.
+  - **Wan 2.2 S2V-14B 480p**: image plus our line audio.
+  - **LatentSync 1.6**: re-syncs the mouth of this line's Kling 2.6 Pro clip to our audio, so it needs that clip first.
+
+  All three are Apache-2.0. They are unticked by default.
+- **The same plan and the same guarantees:**
+  - the same first frames (our approved art) and the line's own audio, sent to our GPU worker as files, never by URL, so no public URL is needed;
+  - the same per-run approval and the same one-confirm batch;
+  - our audio under every result, with the length checked to within one frame;
+  - the cost per clip and per second.
+- **A self-hosted clip's cost** is its GPU seconds at the session's hourly price. Boot and idle time are recorded on the GPU session, and Settings shows the all-in cost per clip.
+- **Where the clips run** is set in Settings › GPU worker: **Off** (the default); **Rented**, a RunPod Secure Cloud pod per session, billed per second and terminated when idle; or **Our own machine**, one address and a token. The worker image and its job API are in `studio-app/gpu-worker/`.
+- **Caps:** self-hosted clips are not on fal.ai's budget. Rented sessions have their own monthly cap (default $50, warning at 80%). Before a launch the studio reserves the price × (maximum session length + 5 min) and refuses a launch that would not fit. A clip still running when the cap is reached (for example, when the cap is lowered) is stopped with the reason, and the pod is terminated.
+- **Idle shutdown,** in four layers:
+  1. terminate after 5 idle minutes;
+  2. terminate after 120 minutes in any case;
+  3. a sweep at start-up and every 30 s terminates any pod with our name prefix that is not a live session, and closes sessions whose pod has gone;
+  4. the worker refuses jobs past its own limits.
+
+  The RunPod key stays on the studio and is never sent to a pod.
+- **Not runnable yet:** a model whose ComfyUI workflow is not pinned (`api/oddstudio/gpu_workflows/`) cannot run, and the page says so. The workflows, the node commits and the weights manifest are the remaining step at no cost before the paid proof of concept (`studio-app/gpu-worker/README.md`).

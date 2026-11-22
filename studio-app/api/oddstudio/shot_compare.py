@@ -15,6 +15,11 @@ and its length is checked to be the line's length within one frame.
 Models (fal.ai, checked 2026-11-21; both pages say "Commercial use permitted (Partner)"):
 - Kling 2.6 Pro image-to-video, audio off: $0.07 per second, 5 or 10 s clips (cut to the line afterwards).
 - Kling AI Avatar v2 Standard: image + OUR line audio -> a talking clip as long as the audio; $0.0562 per second.
+
+Self-hosted models (GPU_MODELS; proof of concept, docs/GPU-INFRASTRUCTURE.md §16) run on our own GPU worker (gpu.py):
+the same plan, the same first frames and line audio, the same per-run approval, our audio laid under the result and
+the same length check. They are sent as files to the worker (no public URL needed) and capped by the monthly GPU cap,
+not by fal.ai's budget. A model whose ComfyUI workflow is not pinned yet (gpu_workflows/<name>.json) cannot run.
 """
 from __future__ import annotations
 
@@ -53,6 +58,30 @@ MODELS = {
         "price": "$0.0562 per second of audio", "licence": "Commercial use permitted (fal Partner model)",
         "framing": "medium"},   # a talking-avatar model: head and upper body fill the frame (owner decision 2026-11-21)
 }
+# Self-hosted (GPU worker). gpu_seconds_per_second: GPU time per second of line, an ESTIMATE from Wan's published H100
+# table at default steps (§14.5: about 330 s per 5 s clip at 480p); the proof of concept measures the real figure.
+GPU_MODELS = {
+    "infinitetalk-480p": {
+        "backend": "gpu", "kind": "avatar", "workflow": "infinitetalk-480p", "gpu_seconds_per_second": 66.0,
+        "label": "InfiniteTalk 480p (self-hosted, our line audio)", "short": "InfiniteTalk",
+        "why": "open model (Apache-2.0) built on Wan 2.1 I2V-14B: image + our recorded line, the mouth follows the audio",
+        "price": "GPU time on our worker (rented per second, or our own machine)",
+        "licence": "Apache-2.0 (MeiGen-AI InfiniteTalk; base Wan 2.1 I2V-14B-480P, Apache-2.0)", "framing": "medium"},
+    "wan-2.2-s2v-480p": {
+        "backend": "gpu", "kind": "avatar", "workflow": "wan-2.2-s2v-480p", "gpu_seconds_per_second": 66.0,
+        "label": "Wan 2.2 S2V-14B 480p (self-hosted, our line audio)", "short": "Wan S2V",
+        "why": "Wan's own speech-to-video model (Apache-2.0): image + our recorded line",
+        "price": "GPU time on our worker (rented per second, or our own machine)",
+        "licence": "Apache-2.0 (Wan-AI Wan2.2-S2V-14B)", "framing": "medium"},
+    "latentsync-1.6": {
+        "backend": "gpu", "kind": "dub", "needs": "kling-2.6-pro-i2v", "workflow": "latentsync-1.6", "gpu_seconds_per_second": 10.0,
+        "label": "LatentSync 1.6 over the Kling i2v clip (self-hosted, our line audio)", "short": "LatentSync",
+        "why": "open lip-sync model (Apache-2.0): re-syncs the mouth of this line's Kling image-to-video clip to our audio",
+        "price": "GPU time on our worker (rented per second, or our own machine)",
+        "licence": "Apache-2.0 (ByteDance LatentSync)", "framing": "wide"},
+}
+ALL_MODELS = {**MODELS, **GPU_MODELS}
+WORKFLOW_DIR = Path(__file__).resolve().parent / "gpu_workflows"
 FRAMINGS = ("wide", "medium")
 NEGATIVE = "realistic, photo, 3d render, extra characters, text, logo, watermark, deformed, blur"
 
@@ -71,7 +100,13 @@ def save(db: Session, recs: dict) -> None:
         db.add(Setting(key=ROW, value=recs))
 
 
-def estimate(model: str, seconds: float) -> dict:
+def estimate(model: str, seconds: float, db: Session | None = None) -> dict:
+    if model in GPU_MODELS:
+        from . import gpu
+        price, src = gpu.planned_price(db) if db is not None else (0.0, "no price yet")
+        gs = GPU_MODELS[model]["gpu_seconds_per_second"] * max(1.0, seconds)
+        return {"billed_seconds": round(gs), "gpu_seconds": round(gs), "usd": round(gs * price / 3600, 4), "price_per_hour": price,
+                "note": f"GPU time estimate (published H100 timings, default steps; measured in the proof of concept); {src}"}
     m = MODELS[model]
     if m["kind"] == "i2v":
         billed = 5 if seconds <= 5 else 10
@@ -82,12 +117,52 @@ def estimate(model: str, seconds: float) -> dict:
 
 
 def prompt_for(model: str, action: str) -> str:
-    if MODELS[model]["kind"] == "i2v":
+    if ALL_MODELS[model]["kind"] == "i2v":
         return ("2D flat cartoon animation, static camera. The character in the image " + action.strip().rstrip(".") +
                 ". Keep the character's design, colours and proportions and the background exactly as in the image; "
                 "no new characters, no text, no camera move.")
     return (action.strip().rstrip(".") + ". Keep the character's flat 2D design and the background exactly as in the "
             "image; the mouth follows the audio.")
+
+
+def workflow_of(model: str) -> tuple[dict, str] | None:
+    """The pinned ComfyUI workflow of a self-hosted model and its SHA-256, or None while it is not pinned."""
+    f = WORKFLOW_DIR / f"{GPU_MODELS[model]['workflow']}.json"
+    if not f.is_file():
+        return None
+    wf = json.loads(f.read_text())
+    import hashlib
+    return wf, hashlib.sha256(json.dumps(wf, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def gpu_blocked(p: dict, model: str) -> str:
+    """Why a self-hosted model cannot run for this plan now ('' when it can, apart from the GPU's own availability)."""
+    m = GPU_MODELS[model]
+    if workflow_of(model) is None:
+        return f"its ComfyUI workflow is not pinned yet (gpu_workflows/{m['workflow']}.json)"
+    if m["kind"] == "dub":
+        r = (p.get("results") or {}).get(m["needs"]) or {}
+        if r.get("status") != "done" or r.get("binned") or not r.get("asset_id"):
+            return f"it needs this line's {MODELS[m['needs']]['label']} clip first"
+    return ""
+
+
+def gpu_params(model: str, p: dict) -> dict:
+    from .gpu import seed_for
+    return {"seconds": p["seconds"], "fps": 25, "prompt": prompt_for(model, p["action"]), "negative": NEGATIVE,
+            "seed": seed_for(p["id"] + model)}
+
+
+def gpu_job_preview(model: str, p: dict) -> dict:
+    """What the worker is sent (the files by name: they travel in the request, never by URL)."""
+    m = GPU_MODELS[model]
+    wf = workflow_of(model)
+    return {"kind": "comfyui-workflow", "workflow": m["workflow"], "workflow_sha256": wf[1] if wf else None,
+            "params": gpu_params(model, p), "inputs": gpu_input_names(model)}
+
+
+def gpu_input_names(model: str) -> list[str]:
+    return ["video.mp4", "audio.wav"] if GPU_MODELS[model]["kind"] == "dub" else ["image.png", "audio.wav"]
 
 
 def request_for(model: str, action: str, image_url: str, audio_url: str, seconds: float) -> dict:
@@ -271,10 +346,13 @@ def options(episode_id: int, db: Session = Depends(get_db)):
                           "seconds": round(float(ln.get("end", 0)) - float(ln.get("start", 0)), 2) if "start" in ln else None,
                           "ready": ok and "start" in ln, "why_not": None if ok else "the speaker has no approved neutral pose",
                           "action": action_from_notes(db, ep, ln)})
+    from . import gpu
     led = fal.spent(db)
     return {"episode": {"id": ep.id, "title": ep.title, "set_id": ep.set_id}, "lines": lines,
             "models": [{"id": k, **{x: m[x] for x in ("label", "why", "price", "licence")}} for k, m in MODELS.items()],
-            "spent_usd": round(led["total"], 2), "budget_usd": fal.budget(db)}
+            "gpu_models": [{"id": k, "kind": m["kind"], "short": m["short"], "framing": m["framing"], "pinned": workflow_of(k) is not None,
+                            **{x: m[x] for x in ("label", "why", "price", "licence")}} for k, m in GPU_MODELS.items()],
+            "gpu": gpu.availability(db), "spent_usd": round(led["total"], 2), "budget_usd": fal.budget(db)}
 
 
 class PlanIn(BaseModel):
@@ -306,7 +384,7 @@ def make_plan(body: PlanIn, db: Session = Depends(get_db)):
 
 def framing_of(p: dict, model: str) -> str:
     """The first frame a model gets: the owner's choice for this plan, else the model's default."""
-    return (p.get("framing") or {}).get(model) or MODELS[model]["framing"]
+    return (p.get("framing") or {}).get(model) or ALL_MODELS[model]["framing"]
 
 
 def view(db: Session, p: dict) -> dict:
@@ -329,6 +407,14 @@ def view(db: Session, p: dict) -> dict:
                             "sends": [f"the {framing_of(p, k)} first frame (approved set + approved neutral pose)"]
                                      + (["the line's own recorded audio"] if m["kind"] == "avatar" else []),
                             "result": p["results"].get(k)} for k, m in MODELS.items()]
+        out["requests"] += [{"model": k, "label": m["label"], "backend": "gpu", "endpoint": f"our GPU worker: workflow {m['workflow']}",
+                             "price": m["price"], "estimate": estimate(k, p["seconds"], db), "framing": framing_of(p, k),
+                             "frame_url": out["frame_urls"].get(framing_of(p, k)) if m["kind"] != "dub" else None,
+                             "body": gpu_job_preview(k, p), "blocked": gpu_blocked(p, k),
+                             "sends": ([f"the {framing_of(p, k)} first frame (approved set + approved neutral pose)"] if m["kind"] != "dub"
+                                       else [f"this line's {MODELS[m['needs']]['label']} clip (made from our own art)"])
+                                      + ["the line's own recorded audio"],
+                             "result": p["results"].get(k)} for k, m in GPU_MODELS.items()]
         out["urls_ok"] = bool(sent_img.startswith("http") and sent_aud.startswith("http"))
     from .bin import hidden_ids
     gone = hidden_ids(db, "clip")
@@ -359,7 +445,7 @@ def set_framing(pid: str, body: FramingIn, db: Session = Depends(get_db)):
     p = recs.get(pid)
     if not p:
         raise HTTPException(404, "no such plan")
-    if body.model not in MODELS or body.framing not in FRAMINGS:
+    if body.model not in ALL_MODELS or body.framing not in FRAMINGS:
         raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
     if (p["results"].get(body.model) or {}).get("status") in ("queued", "running"):
         raise HTTPException(409, "not while that model is running")
@@ -382,25 +468,40 @@ def run_model(pid: str, body: RunIn, db: Session = Depends(get_db), user: str = 
     p = records(db).get(pid)
     if not p:
         raise HTTPException(404, "no such plan")
-    if body.model not in MODELS:
+    if body.model not in ALL_MODELS:
         raise HTTPException(422, "unknown model")
     if p.get("status") != "ready":
         raise HTTPException(409, "the plan is not ready yet (its free preparation is still running or failed)")
     if (p["results"].get(body.model) or {}).get("status") in ("queued", "running", "done"):
         raise HTTPException(409, "already queued, running or done")
-    if not view(db, p).get("urls_ok"):
-        raise HTTPException(409, "fal.ai fetches the first frame and the line audio from the studio: set PUBLIC_URL on the server first")
-    est = estimate(body.model, p["seconds"])
-    check_cap(db, est["usd"])
+    est = estimate(body.model, p["seconds"], db)
+    if body.model in GPU_MODELS:
+        why = gpu_blocked(view(db, p), body.model)
+        if why:
+            raise HTTPException(409, f"{GPU_MODELS[body.model]['label']}: {why}")
+        check_gpu(db)
+    else:
+        if not view(db, p).get("urls_ok"):
+            raise HTTPException(409, "fal.ai fetches the first frame and the line audio from the studio: set PUBLIC_URL on the server first")
+        check_cap(db, est["usd"])
     job = approve(db, pid, body.model, user)
     db.commit()
     return {"job_id": job.id, "estimate": est}
 
 
 def pending_usd(db: Session) -> float:
-    """Approved runs not charged yet (queued or running): they count against the cap."""
-    return round(sum(r.get("estimated_usd") or 0 for q in records(db).values() for r in (q.get("results") or {}).values()
-                     if r.get("status") in ("queued", "running")), 4)
+    """Approved fal.ai runs not charged yet (queued or running): they count against fal.ai's cap. (Self-hosted clips
+    are covered by the GPU session's reservation instead.)"""
+    return round(sum(r.get("estimated_usd") or 0 for q in records(db).values() for k, r in (q.get("results") or {}).items()
+                     if k in MODELS and r.get("status") in ("queued", "running")), 4)
+
+
+def check_gpu(db: Session) -> dict:
+    from . import gpu
+    try:
+        return gpu.check_can_run(db)
+    except gpu.GpuUnavailable as e:
+        raise HTTPException(409, f"Self-hosted GPU: {e}")
 
 
 def check_cap(db: Session, usd: float) -> None:
@@ -418,11 +519,12 @@ def approve(db: Session, pid: str, model: str, user: str):
     from .queue import enqueue
     recs = records(db)
     p = recs[pid]
-    est = estimate(model, p["seconds"])
+    est = estimate(model, p["seconds"], db)
     p["results"][model] = {"status": "queued", "estimated_usd": est["usd"], "approved_by": user}
     save(db, recs)
-    job = enqueue(db, "shot_generate", episode_id=p["episode_id"], payload={"pid": pid, "model": model})
-    db.add(Event(episode_id=p["episode_id"], kind="episode", message=f"Shot comparison: {MODELS[model]['label']} approved by {user} "
+    job = enqueue(db, "shot_generate", episode_id=p["episode_id"],
+                  payload={"pid": pid, "model": model, "backend": ALL_MODELS[model].get("backend", "fal")})
+    db.add(Event(episode_id=p["episode_id"], kind="episode", message=f"Shot comparison: {ALL_MODELS[model]['label']} approved by {user} "
                                                                     f"(estimated ${est['usd']:.2f})"))
     return job
 
@@ -477,7 +579,7 @@ def batch_plan(body: BatchPlanIn, db: Session = Depends(get_db)):
 
 def batch_view(db: Session, eid: int) -> dict:
     """The episode's latest plan per line (progress, actions, first frames, results) and the budget."""
-    from . import fal
+    from . import fal, gpu
     latest: dict[tuple, dict] = {}
     for p in sorted(records(db).values(), key=lambda p: p.get("created", 0)):
         if p["episode_id"] == eid:
@@ -486,7 +588,8 @@ def batch_view(db: Session, eid: int) -> dict:
     plans = [view(db, p) for p in latest.values()]
     return {"plans": plans, "ready": sum(1 for p in plans if p["status"] == "ready"),
             "preparing": sum(1 for p in plans if p["status"] == "preparing"),
-            "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db), "budget_usd": fal.budget(db)}
+            "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db), "budget_usd": fal.budget(db),
+            "gpu": gpu.availability(db)}
 
 
 @router.get("/motion/shot-batch")
@@ -524,12 +627,12 @@ class BatchIn(BaseModel):
 
 def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float]], list[str]]:
     recs = records(db)
-    paid = [m for m in body.models if m in MODELS]
-    bad = [m for m in body.models if m not in MODELS and m != "rig"]
+    paid = [m for m in body.models if m in ALL_MODELS]
+    bad = [m for m in body.models if m not in ALL_MODELS and m != "rig"]
     if bad:
         raise HTTPException(422, f"unknown model: {', '.join(bad)}")
     for m, f in body.framing.items():
-        if m not in MODELS or f not in FRAMINGS:
+        if m not in ALL_MODELS or f not in FRAMINGS:
             raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
     clips, skipped = [], []
     for pid in body.plan_ids:
@@ -541,9 +644,11 @@ def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float
             if p.get("status") != "ready":
                 skipped.append(f"line {p['line'] + 1} ({p['text'][:30]}): still preparing")
             elif r.get("status") in ("queued", "running", "done"):
-                skipped.append(f"line {p['line'] + 1}, {MODELS[m]['label']}: already {r['status']}")
+                skipped.append(f"line {p['line'] + 1}, {ALL_MODELS[m]['label']}: already {r['status']}")
+            elif m in GPU_MODELS and gpu_blocked(view(db, p), m):
+                skipped.append(f"line {p['line'] + 1}, {GPU_MODELS[m]['label']}: {gpu_blocked(view(db, p), m)}")
             else:
-                clips.append((pid, m, estimate(m, p["seconds"])["usd"]))
+                clips.append((pid, m, estimate(m, p["seconds"], db)["usd"]))
     return clips, skipped
 
 
@@ -551,12 +656,17 @@ def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float
 def batch_run(body: BatchIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
     """Without confirm: the ONE summary (exact clips, total estimate, budget and approved-but-uncharged runs against the
     cap). With confirm (and the total the owner saw): queue exactly those clips. The rig renders are free and already made."""
-    from . import fal
+    from . import fal, gpu
     clips, skipped = _batch_clips(db, body)
     total = round(sum(c[2] for c in clips), 4)
+    fal_total = round(sum(u for _, m, u in clips if m in MODELS), 4)
+    gpu_clips = [c for c in clips if c[1] in GPU_MODELS]
     led = fal.spent(db)
+    g = gpu.availability(db)
     summary = {"clips": len(clips), "total_usd": total, "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db),
-               "budget_usd": fal.budget(db), "fits": led["total"] + pending_usd(db) + total <= fal.budget(db) + 1e-9,
+               "budget_usd": fal.budget(db), "fal_usd": fal_total,
+               "fits": led["total"] + pending_usd(db) + fal_total <= fal.budget(db) + 1e-9 and (not gpu_clips or g["ok"]),
+               "gpu": {**g, "clips": len(gpu_clips), "estimate_usd": round(sum(c[2] for c in gpu_clips), 4)},
                "rig": "rig" in body.models, "skipped": skipped,
                "items": [{"plan_id": pid, "model": m, "usd": u} for pid, m, u in clips]}
     if not body.confirm:
@@ -566,9 +676,12 @@ def batch_run(body: BatchIn, db: Session = Depends(get_db), user: str = Depends(
     if not clips:
         raise HTTPException(409, "nothing to run")
     recs = records(db)
-    if any(not view(db, recs[pid]).get("urls_ok") for pid, _, _ in clips):
+    if any(m in MODELS and not view(db, recs[pid]).get("urls_ok") for pid, m, _ in clips):
         raise HTTPException(409, "fal.ai fetches the first frames and the line audio from the studio: set PUBLIC_URL on the server first")
-    check_cap(db, total)
+    if fal_total:
+        check_cap(db, fal_total)
+    if gpu_clips:
+        check_gpu(db)
     for pid in {pid for pid, _, _ in clips}:
         if body.framing:
             recs = records(db)
@@ -739,6 +852,8 @@ def shot_generate(ctx: Ctx) -> dict:
     db, job = ctx.db, ctx.job
     pid, model = job.payload["pid"], job.payload["model"]
     p = records(db)[pid]
+    if model in GPU_MODELS:
+        return _generate_gpu(ctx, pid, model)
     m = MODELS[model]
     folder = ctx.folder("shot-compare", pid)
     framing = framing_of(p, model)
@@ -777,3 +892,93 @@ def shot_generate(ctx: Ctx) -> dict:
     except Exception as e:
         mark(status="failed", error=str(e)[:300])
         raise
+
+
+def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
+    """ONE self-hosted clip the owner approved: the same first frame (or this line's Kling clip, for lip-sync) and OUR
+    line audio go to our GPU worker as files; the worker's video gets our audio laid under it and the length check.
+    The GPU session is launched (cap-checked) or reused; it is checked at every poll and the clip stops at the cap or
+    the maximum lifetime. Cost = the clip's GPU seconds at the session's hourly price."""
+    from . import gpu
+    from .models import Asset
+    from .storage import storage
+    db, job = ctx.db, ctx.job
+    p = records(db)[pid]
+    m = GPU_MODELS[model]
+    folder = ctx.folder("shot-compare", pid)
+
+    def mark(**kw):
+        recs = records(db)
+        recs[pid]["results"][model] = {**recs[pid]["results"].get(model, {}), **kw}
+        save(db, recs)
+        db.commit()
+
+    w = None
+    # unique per submission: a long-lived worker (our own machine) may still hold an older job with the same studio job
+    # id and attempt (another studio, a restored database), and an idempotent repeat must never return that job's result
+    jid = f"j{job.id}-a{job.attempts}-{uuid.uuid4().hex[:10]}"
+    submitted = False
+    try:
+        why = gpu_blocked(view(db, p), model)
+        if why:
+            raise gpu.GpuUnavailable(why)
+        wf, wsha = workflow_of(model)
+        wav = storage().get_to_file(db.get(Asset, p["audio_asset_id"]).storage_key, folder / "line.wav")
+        if m["kind"] == "dub":
+            src = storage().get_to_file(db.get(Asset, p["results"][m["needs"]]["asset_id"]).storage_key, folder / f"{model}-in.mp4")
+            inputs = {"video.mp4": gpu.b64(src), "audio.wav": gpu.b64(wav)}
+        else:
+            framing = framing_of(p, model)
+            img = storage().get_to_file(db.get(Asset, (p.get("frame_assets") or {}).get(framing) or p["frame_asset_id"]).storage_key,
+                                        folder / f"{model}-frame.png")
+            inputs = {"image.png": gpu.b64(img), "audio.wav": gpu.b64(wav)}
+        mark(status="running", progress={"status": "starting the GPU worker"})
+        w = gpu.ensure_worker(db, ctx.log)
+        where = "our own machine" if w["session"] is None else f"GPU session {w['session']} (${w['price_per_hour']:.2f}/h)"
+        mark(session=w["session"], worker=where, progress={"status": "submitted"})
+        gpu.worker_submit(w["url"], w["token"], {"id": jid, "kind": "comfyui-workflow", "workflow": wf, "workflow_sha256": wsha,
+                                                 "params": gpu_params(model, p), "inputs": inputs})
+        submitted = True
+        ctx.log(f"GPU: {m['label']} submitted to {where}")
+        while True:
+            if w["session"]:
+                stop = gpu.check_session(db, w["session"])
+                if stop:
+                    gpu.worker_cancel(w["url"], w["token"], jid)
+                    raise gpu.GpuUnavailable(f"Stopped: {stop}. Retry it after raising the cap or next month" if "cap" in stop
+                                             else f"Stopped: {stop}. Retry it")
+            st = gpu.worker_status(w["url"], w["token"], jid)
+            mark(progress={"status": st["status"], "log_tail": (st.get("log_tail") or [])[-3:]})
+            if st["status"] in ("done", "failed", "cancelled"):
+                break
+            gpu.sleep(gpu.POLL_S)
+        if st["status"] != "done":
+            raise ProviderErrorNT(f"the GPU worker: {st['status']}: {st.get('error') or ''}"[:300])
+        out_meta = next((o for o in st.get("outputs") or [] if o["name"].startswith("video")), None)
+        if out_meta is None:
+            raise ProviderErrorNT("the GPU worker returned no video")
+        raw = gpu.worker_fetch(w["url"], w["token"], jid, out_meta, folder / f"{model}-raw{Path(out_meta['name']).suffix}")
+        out = folder / f"{model}.mp4"
+        check = finish(raw, wav, p["seconds"], out)
+        va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
+                         kind="video", label=f"Shot comparison: {m['label']}", content_type="video/mp4", job_id=job.id)
+        gsec = float(st.get("gpu_seconds") or 0)
+        actual = round(gsec * w["price_per_hour"] / 3600, 4)
+        mark(status="done", asset_id=va.id, actual_usd=actual, per_second_usd=round(actual / max(0.001, p["seconds"]), 4),
+             gpu_seconds=gsec, check=check, framing=framing_of(p, model), workflow_sha256=wsha, progress=None,
+             cost_note="GPU time of this clip at the session's price; boot and idle time are on the session")
+        gpu.worker_delete(w["url"], w["token"], jid)
+        gpu.touch(db, w["session"], clips=1)
+        return {"pid": pid, "model": model, "actual_usd": actual, "gpu_seconds": gsec, "check": check}
+    except Exception as e:
+        mark(status="failed", error=str(e)[:300], progress=None)
+        if w is not None:
+            if submitted:                      # the failed job's files do not stay on the worker
+                gpu.worker_cancel(w["url"], w["token"], jid)
+                gpu.worker_delete(w["url"], w["token"], jid)
+            gpu.touch(db, w["session"])
+        raise
+
+
+class ProviderErrorNT(RuntimeError):
+    """A self-hosted clip failed for a reason that is not worth an automatic retry."""

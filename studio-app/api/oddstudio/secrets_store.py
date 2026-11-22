@@ -29,6 +29,8 @@ SECRETS = {
     "youtube_client_secret": "YOUTUBE_CLIENT_SECRET",
     "youtube_refresh_token": "YOUTUBE_REFRESH_TOKEN",
     "comfyui_token": "COMFYUI_TOKEN",
+    "runpod_api_key": "RUNPOD_API_KEY",          # rented GPU sessions (gpu.py); used only by the studio, never sent to a pod
+    "gpu_worker_token": "GPU_WORKER_TOKEN",      # our own GPU machine's worker token (mode "own")
     "fal_key": "FAL_KEY",
 }
 _cache: tuple[float, dict] | None = None

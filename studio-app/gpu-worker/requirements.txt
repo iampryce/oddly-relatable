@@ -1,0 +1,2 @@
+# Extra Python packages for the worker image (ComfyUI's own requirements are installed from its pinned checkout).
+# The job API itself uses the standard library only.
