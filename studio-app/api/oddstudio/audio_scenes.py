@@ -357,7 +357,7 @@ def audio_scenes(ctx: Ctx) -> dict:
         try:
             ans = text_provider(get_section(db, "text")).complete_json(
                 SYSTEM, prompt(lines, [chars[k] for k in cast], [chars[k] for k in silent], tr.get("media_hints") or {},
-                               writer_environments(db), notes, scene_sets.sets_text(db, ep)))
+                               writer_environments(db, ep), notes, scene_sets.sets_text(db, ep)))
             build_script(ep.title, lines, cast, silent, ans, ep.format, set(chars))   # validate the plan first
             plan, how = ans, "AI writer"
         except (ProviderError, ProviderNotConfigured, ScriptError, ValueError, TypeError, KeyError) as e:

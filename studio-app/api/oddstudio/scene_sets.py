@@ -147,6 +147,11 @@ def put_scene_sets(eid: int, body: SceneSetsIn, db: Session = Depends(get_db)):
     bad = [s for s in body.set_ids if s not in ok]
     if bad:
         raise HTTPException(422, f"only approved sets can be used: {', '.join(bad)}")
+    from . import sets
+    allowed = sets.for_episode(db, ep)
+    other = [s for s in body.set_ids if s not in allowed]
+    if other:
+        raise HTTPException(409, f"not this episode's set and not kept for reuse: {', '.join(other)}")
     ep.scene_set_ids = [s for s in dict.fromkeys(body.set_ids) if s != ep.set_id]
     db.add(Event(episode_id=ep.id, kind="episode", message="Sets for scene changes: " + (", ".join(ep.scene_set_ids) or "none")))
     db.commit()

@@ -94,7 +94,8 @@ class EpisodeProposalTest(unittest.TestCase):
         self.assertTrue(v["text"].startswith("An original dining room with a long table, evening"), v)
         self.assertEqual(v["source"], "video notes")
         self.assertIn("about $0.05-0.20 per image", v["image_cost"])
-        self.assertTrue(v["prompt"].endswith("\nSetting: " + v["text"]), "the shown prompt ends with exactly the box text")
+        self.assertIn("\nSetting: " + v["text"] + "\n", v["prompt"], "the shown prompt carries exactly the box text")
+        self.assertEqual([p["part"] for p in v["parts"]][:3], ["studio style", "your description", "studio rules"])
         mine = "An original dining room at night with a long table, three people seated, one standing by the door."
         v = self.c.put(f"/api/episodes/{eid}/set-proposal", json={"text": mine}).json()
         self.assertEqual((v["text"], v["source"]), (mine, "edited"))

@@ -407,6 +407,26 @@ def decide_set(sid: str, body: SetDecisionIn, db: Session = Depends(get_db), use
     return {"id": sid, **r}
 
 
+class KeepIn(BaseModel):
+    keep: bool
+
+
+@app.post("/api/sets/{sid}/keep", dependencies=[Depends(current_user)])
+def keep_set(sid: str, body: KeepIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Keep this set for future episodes (reuse is an explicit choice; owner rule 2026-11-22), or stop offering it to
+    other episodes. Episodes that already use the set keep it either way."""
+    from . import sets
+    recs = sets.records(db)
+    if sid not in recs or recs[sid].get("status") in ("binned", "rejected"):
+        raise HTTPException(404, "no such set")
+    recs[sid]["kept"] = body.keep
+    sets.save(db, recs)
+    db.add(Event(episode_id=recs[sid].get("episode_id"), kind="episode",
+                 message=f"Set {recs[sid].get('label', sid)}: {'kept for future episodes' if body.keep else 'no longer offered to other episodes'} by {user}"))
+    db.commit()
+    return {"id": sid, "kept": body.keep}
+
+
 def time_now() -> float:
     import time as _t
     return _t.time()

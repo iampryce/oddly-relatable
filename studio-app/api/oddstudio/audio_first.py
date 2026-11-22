@@ -524,7 +524,14 @@ def notes_estimate(db: Session, seconds: float, fmt: str) -> dict:
         cfg = hints_vision_config(db)
     except ValueError as e:
         return {"configured": False, "frames": len(NV.frame_times(0.0, seconds, fmt)), "cap_usd": cap, "message": str(e)}
-    return NV.estimate(seconds, fmt, cfg["provider"], cfg.get("model", ""), cap)
+    est = NV.estimate(seconds, fmt, cfg["provider"], cfg.get("model", ""), cap)
+    if est.get("configured"):
+        # the set notes: one more call with a few frames per room (two rooms assumed before the upload)
+        from . import set_notes as SN
+        sn = SN.estimate(cfg["provider"])
+        est = {**est, "staging_usd": est["usd"], "set_notes": sn, "usd": round(est["usd"] + sn.get("usd", 0), 4)}
+        est["within_cap"] = est["usd"] <= cap
+    return est
 
 
 @router.get("/audio/video-notes/estimate")
@@ -1023,6 +1030,16 @@ def audio_video_notes(ctx: Ctx) -> dict:
             kept += got
         from . import beats as BT
         ranges, redacted = NV.to_ranges(kept, length, step)
+        # set notes: what each distinct room looks like, in words only (one more call, a few frames per room)
+        set_notes, sn_note = [], ""
+        try:
+            set_notes, sn_usage, sn_stripped = _set_notes(cfg, BT.smooth(ranges), kept, frames, times)
+            if sn_usage:
+                usages.append(sn_usage)
+            stripped += sn_stripped
+        except Exception as e:  # noqa: BLE001 -- the staging notes are kept; the set notes say why they are missing
+            sn_note = f"set notes could not be made: {str(e)[:160]}"
+            ctx.log(sn_note)
         usage = {"provider": (usages[0] if usages else {}).get("provider"), "model": (usages[0] if usages else {}).get("model"),
                  "input_tokens": sum(u.get("input_tokens") or 0 for u in usages),
                  "output_tokens": sum(u.get("output_tokens") or 0 for u in usages), "calls": len(usages)}
@@ -1032,7 +1049,7 @@ def audio_video_notes(ctx: Ctx) -> dict:
         notes = {"version": NV.VERSION, "ranges": ranges, "people_frames": kept, "quality": quality,
                  "base": float(p.get("base") or 0.0), "length": round(length, 3), "frames": len(frames),
                  "redacted": stripped + redacted, "usage": usage, "job_id": job.id, "edited": False,
-                 "source": "video frames (deleted)"}
+                 "source": "video frames (deleted)", "set_notes": set_notes, "set_notes_note": sn_note}
         # one setting per room (smoothed; the unsmoothed values stay as "was"), views, and the action beats
         tr["video_notes"] = BT.rebuild(notes, tr.get("lines", []), tr.get("person_map") or {})
         ranges = tr["video_notes"]["ranges"]
@@ -1050,6 +1067,33 @@ def audio_video_notes(ctx: Ctx) -> dict:
         return {"ranges": len(ranges), "frames": len(frames), "redacted": stripped + redacted, "usage": usage, "quality": quality}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def _set_notes(cfg: dict, ranges: list[dict], kept: list[dict], frames: list, times: list[float]):
+    """One vision call for the set notes of every distinct room (up to set_notes.FRAMES_PER_ROOM frames each). Returns
+    (rooms, usage, stripped): each room with its list-word fields, its sentence and its look signature."""
+    from . import analysis
+    from . import set_notes as SN
+    by_t = {round(t, 2): f for t, f in zip(times, frames)}
+    groups, files = [], []
+    for r in SN.rooms(ranges):
+        ts = [t for t in SN.pick_frames(r, kept) if round(t, 2) in by_t]
+        if ts:
+            groups.append((r, ts))
+            files += [by_t[round(t, 2)] for t in ts]
+    if not groups:
+        return [], None, 0
+    analysis.last_vision_usage.clear()
+    ans = analysis.analyse_images(cfg, files, SN.prompt([(r["room"], len(ts)) for r, ts in groups]))
+    usage = dict(analysis.last_vision_usage)
+    cleaned, stripped = SN.clean(ans, [r["room"] for r, _ in groups])
+    out = []
+    for e in cleaned:
+        r = next(g for g, _ in groups if g["room"] == e["room"])
+        out.append({"room": e["room"], "fields": e, "text": SN.room_text(e), "signature": SN.signature(e), "edited": False,
+                    "seats": max(e.get("seats") or 0, r["seated"]) or None, "people": r["people"],
+                    "seconds": round(r["seconds"], 1)})
+    return out, usage, stripped
 
 
 CAST_SYSTEM = ("You are the casting director of an adult 2D animated comedy (grown-up characters and situations). You read "

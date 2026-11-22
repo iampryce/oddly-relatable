@@ -24,6 +24,7 @@ ROW = "_sets"
 STYLE_REFERENCE = REPO_ROOT / "bible/concepts/lookdev-richenv/lookdev-room-empty-03.png"
 from .house_style import SET_STYLE as STYLE  # noqa: E402  (the locked house style)
 from .house_style import set_style  # noqa: E402
+from .house_style import SET_STYLE_FLAT  # noqa: E402
 
 
 def style_reference_for(db, version: str, folder: Path) -> Path | None:
@@ -62,15 +63,34 @@ def approved(db) -> dict:
     return {k: v for k, v in records(db).items() if v.get("status") == "approved"}
 
 
-def writer_environments(db) -> list[str]:
-    """Locations offered to the AI writer: the repository plates, plus approved studio sets when the acting renderer
-    (the only renderer that can stage them) is selected."""
+def writer_environments(db, ep=None) -> list[str]:
+    """Locations offered to the AI writer: the repository plates, plus the approved studio sets this episode may use
+    (its own sets and the sets kept for reuse) when the acting renderer (the only renderer that can stage them) is
+    selected. Another episode's set is never offered unless it was kept for future episodes."""
     from . import acting, engine
     envs = engine.environments()
     if acting.enabled(db):
         # only sets the acting renderer can stage: repository plates with blocking, plus approved studio sets
-        envs = [e for e in envs if (acting.ANIM / "sets" / f"{e}.json").exists()] + sorted(approved(db))
+        ok = [k for k, r in approved(db).items() if r.get("kept") or (ep is not None and r.get("episode_id") == ep.id)
+              or (ep is not None and k in {ep.set_id, *(ep.scene_set_ids or [])})]
+        envs = [e for e in envs if (acting.ANIM / "sets" / f"{e}.json").exists()] + sorted(ok)
     return envs
+
+
+def for_episode(db, ep) -> dict[str, dict]:
+    """The sets an episode may choose (owner rule 2026-11-22: every episode gets its own new set unless a set is kept
+    for reuse): its own approved sets, the sets kept for future episodes, the repository plates (the studio's kept
+    library), and whatever it already uses. Each with `own` / `kept` flags."""
+    recs = records(db)
+    mine = {ep.set_id, *(ep.scene_set_ids or [])}
+    out = {}
+    for k, s in usable(db).items():
+        r = recs.get(k, {})
+        own = r.get("episode_id") == ep.id
+        kept = s["source"] == "repository" or bool(r.get("kept"))
+        if own or kept or k in mine:
+            out[k] = {**s, "own": own, "kept": kept}
+    return out
 
 
 REPO_SETS = REPO_ROOT / "production" / "animation" / "sets"
@@ -171,22 +191,115 @@ def usage(db, exclude_episode: int | None = None) -> dict[str, list[dict]]:
     return out
 
 
-def suggest(db, word: str | None) -> str | None:
-    """A usable set whose id, label or description mentions the video notes' setting word (shown, never applied)."""
+def suggest(db, word: str | None, among: dict | None = None) -> str | None:
+    """A set whose id, label or description mentions the video notes' setting word (shown, never applied), among the
+    given sets (an episode's own and kept sets), else among all usable sets."""
     w = (word or "").strip().lower()
     if not w or w in ("other", "indoors", "outdoors"):
         return None
-    for k, s in usable(db).items():
+    for k, s in (among if among is not None else usable(db)).items():
         if w in f"{k} {s['label']} {s['description']}".lower().replace("-", " "):
             return k
     return None
 
 
-def prompt_for(db, description: str) -> str:
-    """The exact prompt a set candidate is generated from: the locked house style, then the owner's description.
-    The episode shows this same text before anything is sent."""
-    from .tasks import style_version
-    return f"{set_style(style_version(db))}\nSetting: {description}"
+RULES = ("Studio rules (always): an EMPTY room with no people, characters or animals; {seats}no written text, "
+         "letters, numbers, signs, posters, logos or brands anywhere (screens and boards are blank, frames are empty); "
+         "nothing copied from any existing show, film or place.")
+OLD_STYLE_LOOK = {"v1": "warm painted look, soft evening lamp light, cosy wood (old house style with a reference image)",
+                  "v2": "soft painted gradients, warm lamp light against a cool window (old house style with a reference image)"}
+# Palettes offered by the variety guard when the description fixes no colours (rotated per episode, skipping any whose
+# colours the recent sets already use).
+PALETTES = (("slate blue walls", "pale grey concrete floor", "cool white daylight"),
+            ("sage green walls", "light grey tile floor", "soft overcast daylight"),
+            ("dusty pink walls", "white tile floor", "bright daylight"),
+            ("charcoal walls", "black rubber floor", "cool white spotlights"),
+            ("pale yellow walls", "blue linoleum floor", "cool fluorescent light"),
+            ("teal walls", "light birch floor", "bright noon daylight"),
+            ("lilac walls", "grey carpet", "soft cool daylight"),
+            ("terracotta walls", "white stone floor", "clear morning light"),
+            ("navy walls", "pale grey carpet", "cool evening blue light"),
+            ("mint walls", "white vinyl floor", "even fluorescent light"))
+
+
+def rules_text(seats: int | None) -> str:
+    s = f"seating for at least {seats} {'person' if seats == 1 else 'people'} (chairs, stools or sofa places); " if seats else ""
+    return RULES.format(seats=s)
+
+
+def prompt_parts(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "") -> list[dict]:
+    """The exact prompt a set candidate is generated from, as labelled parts (what the page shows and what is sent):
+    the studio's set style, the description (yours, or the set notes verbatim), the studio rules, the variety guard,
+    and the view line for a two-sided room."""
+    parts = [{"part": "studio style", "text": SET_STYLE_FLAT},
+             {"part": "your description", "text": f"Setting: {description}"},
+             {"part": "studio rules", "text": rules_text(seats)}]
+    if variety.strip():
+        parts.append({"part": "variety guard", "text": variety.strip()})
+    if view_line:
+        parts.append({"part": "view", "text": view_line})
+    return parts
+
+
+def prompt_for(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "") -> str:
+    return "\n".join(p["text"] for p in prompt_parts(db, description, seats, variety, view_line))
+
+
+# ------------------------------------------------------------------ the variety guard
+def _scan(text: str) -> str:
+    """The look words found in an older set's description (colours, floor, light, room), for its signature."""
+    from . import set_notes as SN
+    t = (text or "").lower()
+    found = [w for w in sorted(SN.WORDS, key=len, reverse=True)
+             if len(w) > 3 and re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", t)]
+    keep, seen = [], set()
+    for w in found:
+        if not any(w in s for s in seen):
+            keep.append(w)
+            seen.add(w)
+    return ", ".join(keep[:8])
+
+
+def recent_signatures(db, exclude_episode: int | None = None, n: int = 5) -> list[str]:
+    """A short signature per recent studio set (newest first): its stored look, else the look words of its description,
+    plus the look the old house style gave every set."""
+    rs = [(k, r) for k, r in records(db).items() if r.get("status") in ("candidate", "approved")
+          and (exclude_episode is None or r.get("episode_id") != exclude_episode)]
+    rs.sort(key=lambda kv: -kv[1].get("created", 0))
+    out = []
+    for k, r in rs[:n]:
+        sig = r.get("signature") or _scan(r.get("description", ""))
+        old = OLD_STYLE_LOOK.get(r.get("style_version") or "v1") if not r.get("flat_style") else ""
+        out.append(f"{r.get('label', k)}: " + "; ".join(x for x in (sig, old) if x))
+    return out
+
+
+def palette_for(seed: int, avoid: str) -> tuple[str, ...]:
+    """The episode's palette: rotated by the episode id, skipping palettes whose wall colour the recent sets use."""
+    a = avoid.lower()
+    for i in range(len(PALETTES)):
+        p = PALETTES[(seed + i) % len(PALETTES)]
+        if p[0].removesuffix(" walls") not in a:
+            return p
+    return PALETTES[seed % len(PALETTES)]
+
+
+def variety_text(db, ep_id: int | None, description: str = "") -> str:
+    """The variety guard appended to a new set's prompt: the recent sets' look and the instruction to differ, plus a
+    palette for this episode when the description fixes no wall or floor colour."""
+    sigs = recent_signatures(db, ep_id)
+    if not sigs:
+        return ""
+    from . import set_notes as SN
+    d = description.lower()
+    has_colour = any(re.search(rf"(?<![\w-]){re.escape(c)}(?![\w-])", d) for c in SN.COLOURS)
+    text = ("Variety guard: the studio's recent sets look like this:\n- " + "\n- ".join(sigs) +
+            "\nWhere the setting above does not fix them, make this set clearly different from all of these: a different "
+            "wall and floor palette, a different floor material, different light and time of day, and a different "
+            "furniture layout. Avoid warm cosy painted-wood interiors.")
+    if not has_colour:
+        text += "\nPalette for this set: " + ", ".join(palette_for(ep_id or 0, " ".join(sigs))) + "."
+    return text
 
 
 def proposed_blocking(width: int, height: int) -> dict:
@@ -243,10 +356,12 @@ def set_candidate(ctx: Ctx) -> dict:
     out = folder / f"{p['set_id']}-job{job.id}.png"
     from .tasks import style_version
     version = style_version(db)
-    if version == "v2":
-        cfg["background"] = None   # a set plate is its own scenery: no flat background instruction
-    prompt = prompt_for(db, p["description"])
-    providers.image_generate(cfg, prompt, out, reference=style_reference_for(db, version, folder))
+    cfg["background"] = None       # a set plate is its own scenery: no flat background instruction
+    # text only (no style reference image: every set used to be an edit of the same plate and came out alike); the
+    # prompt is exactly the one the page showed when the owner clicked (stored in the job), else built the same way
+    cfg["use_reference"] = False
+    prompt = p.get("prompt") or prompt_for(db, p["description"], variety=variety_text(db, p.get("episode_id"), p["description"]))
+    providers.image_generate(cfg, prompt, out, reference=None)
     im = Image.open(out)
     w, h = im.size
     a = store_asset(db, ep_id=None, src=out, key=f"sets/{p['set_id']}/{out.name}", kind="set-candidate",
@@ -258,7 +373,11 @@ def set_candidate(ctx: Ctx) -> dict:
     recs = records(db)
     recs[p["set_id"]] = {"label": p["label"], "description": p["description"], "status": "candidate", "asset_id": a.id,
                          "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id,
-                         "style_version": version, "episode_id": p.get("episode_id"),
+                         "style_version": version, "episode_id": p.get("episode_id"), "flat_style": True, "prompt": prompt,
+                         "signature": p.get("signature") or _scan(p["description"]),
+                         # a set made for an episode stays that episode's until kept; one made in Settings > Sets
+                         # (no episode) is a deliberate library set, kept for reuse
+                         "kept": p.get("episode_id") is None,
                          **{k: p[k] for k in ("view", "room") if p.get(k)}}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")
