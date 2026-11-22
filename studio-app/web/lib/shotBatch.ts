@@ -6,7 +6,7 @@ export function toggleAll(lines: {scene_id: number; line: number}[], on: boolean
 }
 
 export type Cell = {url?: string; cost?: string; check?: string; lengthOk?: boolean; state?: string; failed?: string; estimate?: number;
-  assetId?: number; binned?: boolean};
+  assetId?: number; binned?: boolean; gpu?: string};
 
 // One cell of the grid: the rig render (free) or a model's clip with its actual cost per clip and per second, the
 // length check, its state while queued or running, or its failure reason (with a retry).
@@ -20,10 +20,10 @@ export function clipCell(plan: any, model: string): Cell {
   const est = (plan.requests || []).find((q: any) => q.model === model)?.estimate?.usd;
   if (!r) return {state: plan.status === 'ready' ? `not run (estimate $${(est ?? 0).toFixed(3)})` : 'preparing…', estimate: est};
   if (r.status === 'failed') return {failed: r.error || 'failed', estimate: est};
-  if (r.status !== 'done') return {state: `${r.status}…`};
+  if (r.status !== 'done') return {state: `${r.status}…${r.progress?.status ? ` (${r.progress.status})` : ''}`};
   if (r.binned) return {binned: true, cost: `$${r.actual_usd.toFixed(3)} · $${r.per_second_usd.toFixed(3)}/s`};   // deleted to the Bin
   return {url: r.url, cost: `$${r.actual_usd.toFixed(3)} · $${r.per_second_usd.toFixed(3)}/s`, check: lengthText(r.check), lengthOk: r.check?.length_ok,
-    assetId: r.asset_id};
+    assetId: r.asset_id, ...(r.gpu_seconds !== undefined ? {gpu: `${r.gpu_seconds} GPU s on ${r.worker}; boot and idle time are on the session`} : {})};
 }
 
 function lengthText(c: any): string {

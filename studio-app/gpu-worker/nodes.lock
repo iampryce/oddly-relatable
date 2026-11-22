@@ -1,0 +1,6 @@
+# ComfyUI custom nodes: <folder name> <git repository> <commit>. Every commit must be pinned before a build.
+# Pinned together with the workflows (studio-app/api/oddstudio/gpu_workflows/) in the $0 step before the PoC.
+# The repositories below are the candidates; each is confirmed (licence, maintained, nodes used) when it is pinned.
+ComfyUI-WanVideoWrapper https://github.com/kijai/ComfyUI-WanVideoWrapper PIN-ME
+ComfyUI-VideoHelperSuite https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite PIN-ME
+ComfyUI-LatentSyncWrapper https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper PIN-ME

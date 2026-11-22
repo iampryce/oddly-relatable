@@ -44,7 +44,8 @@ class ToneTest(unittest.TestCase):
             self.assertIn(t, SC.TONES)
 
 
-class ShotCompareTest(Base):
+class ShotBase(Base):
+    """The episode, the speaker's approved art and the recording every shot comparison test starts from."""
     with_ffmpeg = True
 
     def setUp(self):
@@ -121,6 +122,8 @@ class ShotCompareTest(Base):
         self.assertEqual((b["ready"], b["preparing"]), (2, 0))
         return b["plans"]
 
+
+class ShotCompareTest(ShotBase):
     def test_batch_auto_planning_with_toned_actions(self):
         plans = {p["line"]: p for p in self.batch_ready()}
         self.assertEqual(self.sent, [], "planning sends nothing")

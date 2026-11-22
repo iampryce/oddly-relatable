@@ -25,4 +25,8 @@ test('grid cells: rig, done clip, running, failed with its reason, not run', () 
   assert.deepEqual(clipCell(plan, 'b'), {failed: 'fal.ai: generation failed', estimate: 0.35});
   assert.equal(clipCell(plan, 'c').state, 'running…');
   assert.match(clipCell({...plan, results: {}}, 'a').state!, /not run \(estimate \$0\.170\)/);
+  const g = clipCell({...plan, results: {g: {status: 'done', url: '/g.mp4', actual_usd: 0.004, per_second_usd: 0.0013, gpu_seconds: 5.2,
+    worker: 'GPU session ab12 ($2.89/h)', check: {length_ok: true, video_seconds: 3, audio_seconds: 3}}}}, 'g');
+  assert.equal(g.gpu, '5.2 GPU s on GPU session ab12 ($2.89/h); boot and idle time are on the session', 'a self-hosted clip says where it ran');
+  assert.equal(clipCell({...plan, results: {g: {status: 'running', progress: {status: 'starting the GPU worker'}}}}, 'g').state, 'running… (starting the GPU worker)');
 });

@@ -25,6 +25,11 @@ DEFAULTS: dict[str, dict] = {
     "storage": {"backend": "", "bucket": "", "region": "", "prefix": "oddly-relatable/"},
     # AI video generation on a ComfyUI server (GPU). Empty URL: not connected.
     "comfyui": {"url": ""},
+    # Self-hosted GPU worker (docs/GPU-INFRASTRUCTURE.md §11; gpu.py). mode: off | own (worker_url, a machine we own) |
+    # rented (a RunPod Secure Cloud pod per session, terminated when idle). The monthly cap applies to rented sessions
+    # (separate from fal.ai's budget); the owner's accepted defaults: $50, warn at 80%, 5 min idle, 120 min lifetime.
+    "gpu": {"mode": "off", "worker_url": "", "provider": "runpod", "gpu_type": "NVIDIA H100 PCIe", "image": "",
+            "disk_gb": 150, "monthly_cap_usd": 50.0, "warn_at": 0.8, "idle_minutes": 5, "max_lifetime_minutes": 120},
     # Reference analysis (Create from Reference): speech-to-text with word timestamps, and frame analysis.
     "transcription": {"provider": "none", "model": "", "fallback": "none", "language": ""},
     # notes_cap_usd: the most one episode's video notes may cost (checked before the upload; owner default $0.50)
@@ -99,6 +104,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
             raise ValueError(f"creative.style_version must be one of {', '.join(STYLE_VERSIONS)}")
     if key == "production" and value.get("dialogue_display", "none") not in DIALOGUE_DISPLAYS:
         raise ValueError(f"production.dialogue_display must be one of {', '.join(DIALOGUE_DISPLAYS)}")
+    if key == "gpu":
+        check_gpu(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
@@ -110,6 +117,32 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         db.add(Setting(key=key, value=merged))
     db.commit()
     return merged
+
+
+def check_gpu(v: dict) -> None:
+    """Settings > GPU worker: refused values never reach the worker or the provider."""
+    from urllib.parse import urlparse
+    if v.get("mode", "off") not in ("off", "own", "rented"):
+        raise ValueError("gpu.mode must be off, own or rented")
+    if v.get("provider", "runpod") != "runpod":
+        raise ValueError("gpu.provider: only runpod has an adapter")
+    url = v.get("worker_url", "")
+    if url:
+        u = urlparse(url)
+        local = u.hostname in ("localhost", "127.0.0.1")
+        if not u.hostname or u.scheme not in ("https", "http") or (u.scheme == "http" and not local) or u.username or u.password:
+            raise ValueError("gpu.worker_url must be an https:// address (http only for localhost)")
+    img = v.get("image", "")
+    if img and ("@sha256:" not in img or any(ch.isspace() for ch in img)):
+        raise ValueError("gpu.image must be pinned by digest (name@sha256:…)")
+    rng = {"monthly_cap_usd": (0, 1000), "warn_at": (0.1, 1), "idle_minutes": (1, 60), "max_lifetime_minutes": (15, 480),
+           "disk_gb": (20, 500)}
+    for k, (lo, hi) in rng.items():
+        if k in v and not (isinstance(v[k], (int, float)) and not isinstance(v[k], bool) and lo <= v[k] <= hi):
+            raise ValueError(f"gpu.{k} must be between {lo} and {hi}")
+    gt = v.get("gpu_type", "")
+    if gt and (len(gt) > 60 or not all(ch.isalnum() or ch in " -_." for ch in gt)):
+        raise ValueError("gpu.gpu_type is not a GPU type name")
 
 
 def integrations_status() -> dict:

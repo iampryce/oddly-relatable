@@ -5,6 +5,7 @@ import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import {gpuLine, sessionLine, allInPerClip} from '@/lib/gpuView';
 
 // Capabilities come from the server's provider registry (capabilities.py): which providers exist, what they need,
 // whether they are integrated, configured and VERIFIED by a real worker test. Nothing here is assumed.
@@ -16,6 +17,7 @@ const CREDENTIALS: [string, string][] = [
   ['youtube_client_id', 'YouTube OAuth client ID'], ['youtube_client_secret', 'YouTube OAuth client secret'],
   ['youtube_refresh_token', 'YouTube refresh token (set by "Connect YouTube")'], ['comfyui_token', 'ComfyUI access token (optional)'],
   ['fal_key', 'fal.ai API key (hosted video models)'],
+  ['runpod_api_key', 'RunPod API key (rented GPU sessions; stays on the studio)'], ['gpu_worker_token', 'GPU worker token (our own GPU machine)'],
 ];
 const NEED_LABEL = (n: string) => n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :
   (CREDENTIALS.find(([k]) => k === n)?.[1] || n.replace(/_/g, ' '));
@@ -39,6 +41,44 @@ function SaveRow({s}: {s: ReturnType<typeof useSection>}) {
 function Section({name, title, value, children}: {name: string; title: string; value: any; children: (v: any, set: (k: string, x: any) => void) => React.ReactNode}) {
   const s = useSection(name, value);
   return <div className="card stack"><h2>{title}</h2><ErrorBox error={s.error} />{children(s.v, s.set)}<SaveRow s={s} /></div>;
+}
+
+// Self-hosted GPU worker (docs/GPU-INFRASTRUCTURE.md §11): the mode and its one address, the rented-session limits,
+// this month against the cap, the sessions (with a stop button) and, on request, the prepaid RunPod balance.
+function GpuCard({value}: {value: any}) {
+  const st = useApi<any>('/gpu', 5000);
+  const {busy, error, run} = useAction(st.reload);
+  const [balance, setBalance] = useState<string>('');
+  const s = useSection('gpu', value);
+  const v = s.v;
+  const num = (k: string) => (e: any) => s.set(k, Number(e.target.value));
+  return (
+    <div className="card stack" id="gpu-worker"><h2>GPU worker (self-hosted video)</h2>
+      <ErrorBox error={s.error || error || st.error} />
+      <p className="muted small">The same worker image runs on a rented pod or on our own machine. Rented sessions are billed per second, launched only for clips you approve, and terminated when idle. Off by default.</p>
+      <div className="grid cols-2">
+        <div><label htmlFor="gpu-mode">Mode</label><select id="gpu-mode" value={v.mode} onChange={e => s.set('mode', e.target.value)}>
+          <option value="off">Off</option><option value="rented">Rented (RunPod Secure Cloud)</option><option value="own">Our own machine</option></select></div>
+        {v.mode === 'own' && <div><label htmlFor="gpu-url">Worker address</label><input id="gpu-url" value={v.worker_url} placeholder="https://…:8000" onChange={e => s.set('worker_url', e.target.value)} /></div>}
+        {v.mode === 'rented' && <>
+          <div><label htmlFor="gpu-type">GPU type</label><input id="gpu-type" value={v.gpu_type} onChange={e => s.set('gpu_type', e.target.value)} /></div>
+          <div><label htmlFor="gpu-image">Worker image (pinned by digest)</label><input id="gpu-image" value={v.image} placeholder="registry/oddstudio-gpu-worker@sha256:…" onChange={e => s.set('image', e.target.value)} /></div>
+          <div><label htmlFor="gpu-cap">Monthly cap (USD)</label><input id="gpu-cap" type="number" min={0} step={5} value={v.monthly_cap_usd} onChange={num('monthly_cap_usd')} /></div>
+          <div><label htmlFor="gpu-warn">Warn at (share of the cap)</label><input id="gpu-warn" type="number" min={0.1} max={1} step={0.05} value={v.warn_at} onChange={num('warn_at')} /></div>
+          <div><label htmlFor="gpu-idle">Terminate after idle (minutes)</label><input id="gpu-idle" type="number" min={1} max={60} value={v.idle_minutes} onChange={num('idle_minutes')} /></div>
+          <div><label htmlFor="gpu-life">Maximum session length (minutes)</label><input id="gpu-life" type="number" min={15} max={480} value={v.max_lifetime_minutes} onChange={num('max_lifetime_minutes')} /></div>
+        </>}
+      </div>
+      <SaveRow s={s} />
+      {st.data && <div className="stack small">
+        <span className={st.data.ok ? '' : 'muted'}>{gpuLine(st.data)}</span>
+        {(st.data.sessions || []).map((x: any) => <div key={x.id} className="row" style={{gap: 6}}>
+          <span>{sessionLine(x)}{allInPerClip(x) !== null ? ` · all-in ${'$' + allInPerClip(x)!.toFixed(3)} per clip` : ''}</span>
+          {x.status !== 'ended' && <button className="btn sm" disabled={!!busy} onClick={() => window.confirm('Terminate this GPU session now? A clip still running on it fails and can be retried.') &&
+            run('stop', () => api(`/gpu/sessions/${x.id}/terminate`, {method: 'POST'}))}>Terminate now</button>}</div>)}
+        {v.mode === 'rented' && <div><button className="btn sm" onClick={async () => { const b = await api('/gpu/balance'); setBalance(b.balance_usd === null ? 'not readable' : `$${b.balance_usd.toFixed(2)}`); }}>Show RunPod balance</button> {balance}</div>}
+      </div>}
+    </div>);
 }
 
 function TestResult({t}: {t: any}) {
@@ -244,6 +284,7 @@ export default function Settings() {
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (
           <div><label htmlFor="comfyui-url">ComfyUI server URL</label><input id="comfyui-url" value={v.url} onChange={e => set('url', e.target.value)} placeholder="https://…" /></div>)}</Section>
+        <GpuCard value={s.gpu} />
         <Section name="production" title="Production" value={s.production}>{(v, set) => (
           <div className="grid cols-2">
             <div><label htmlFor="prod-set">Default set</label><select id="prod-set" value={v.environment} onChange={e => set('environment', e.target.value)}>{data.environments.map((x: string) => <option key={x}>{x}</option>)}</select></div>

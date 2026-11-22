@@ -36,6 +36,8 @@ def main() -> int:
         return poll_database()
     with new_session() as db:
         n = recover(db)
+    from .gpu import start_sweeper
+    start_sweeper(log=log.info)          # idle shutdown, lifetime, cap and orphan pods (self-hosted GPU)
     log.info("worker started (env=%s, storage=%s); re-announced %d queued job(s)", s.env, s.storage_backend, n)
     while not _stop:
         item = r.brpop(QUEUE_KEY, timeout=5)
@@ -57,6 +59,8 @@ def poll_database() -> int:
     log.warning("REDIS_URL is not set: development mode, polling the database for queued jobs")
     with new_session() as db:
         recover(db)
+    from .gpu import start_sweeper
+    start_sweeper(log=log.info)
     while not _stop:
         with new_session() as db:
             ids = [j.id for j in db.query(Job).filter_by(status="queued").order_by(Job.id).limit(10)]

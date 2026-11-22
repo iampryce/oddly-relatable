@@ -9,6 +9,7 @@ import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {DeleteButton} from '@/components/BinButtons';
 import {clipCell, lineKey, toggleAll} from '@/lib/shotBatch';
+import {gpuLine} from '@/lib/gpuView';
 
 const usd = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
 const PAID = ['kling-2.6-pro-i2v', 'kling-avatar-v2-standard'];
@@ -27,6 +28,9 @@ export function ShotComparison() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const lines: any[] = opts?.lines || [];
+  const gpuModels: any[] = opts?.gpu_models || [];
+  const ALL = [...PAID, ...gpuModels.map(m => m.id)];
+  const label = (m: string) => { const g = gpuModels.find(x => x.id === m); return LABEL[m] || (g ? `${g.short} (GPU)` : m); };
   const plans: any[] = batch.data?.plans || [];
   const planOf = (l: any) => plans.find(p => p.scene_id === l.scene_id && p.line === l.line);
   const chosen = lines.filter(l => picked.has(lineKey(l)));
@@ -43,7 +47,7 @@ export function ShotComparison() {
   }, [eid, picked, plans.length]);
 
   // the one summary (free): recomputed whenever the selection, models or plans change
-  const paidModels = PAID.filter(m => models.has(m));
+  const paidModels = ALL.filter(m => models.has(m));
   const ids = chosenPlans.map((p: any) => p.id).join(',');
   const statusSig = chosenPlans.map((p: any) => `${p.id}:${p.status}`).join(',');   // every selected plan's state
   useEffect(() => {
@@ -54,31 +58,34 @@ export function ShotComparison() {
 
   const runSelected = async () => {
     if (!summary?.clips) return;
-    if (!window.confirm(`Run ${summary.clips} clip(s): estimated ${usd(summary.total_usd)}. Budget: ${usd(summary.spent_usd)} spent + ${usd(summary.pending_usd)} approved, of ${usd(summary.budget_usd)}.`)) return;
+    const g = summary.gpu?.clips ? `\n${summary.gpu.clips} self-hosted clip(s), estimated ${usd(summary.gpu.estimate_usd, 3)} of GPU time. ${gpuLine(summary.gpu)}` : '';
+    if (!window.confirm(`Run ${summary.clips} clip(s): estimated ${usd(summary.total_usd)}. fal.ai budget: ${usd(summary.spent_usd)} spent + ${usd(summary.pending_usd)} approved, of ${usd(summary.budget_usd)}.${g}`)) return;
     setBusy(true); setErr('');
     try { await api('/motion/shot-batch/run', {body: {plan_ids: ids.split(','), models: [...models], framing, confirm: true, expected_usd: summary.total_usd}}); await batch.reload(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   const retry = async (p: any, model: string, est: number) => {
-    if (!window.confirm(`Retry ${LABEL[model]} for this line: estimated ${usd(est, 3)}?`)) return;
+    if (!window.confirm(`Retry ${label(model)} for this line: estimated ${usd(est, 3)}?`)) return;
     try { await api(`/motion/shot/${p.id}/run`, {body: {model}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
   const saveAction = async (p: any, action: string) => {
     if (action.trim() === p.action) return;
     try { await api(`/motion/shot/${p.id}/action`, {method: 'PUT', body: {action}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
-  const columns = useMemo(() => ['rig', ...PAID].filter(m => models.has(m)), [models]);
+  const columns = useMemo(() => ['rig', ...ALL].filter(m => models.has(m)), [models, ALL.join(',')]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="card stack" id="shot-comparison">
       <h2>Shot comparison: AI models vs the rig (batch)</h2>
+      {opts?.gpu && <p className="small muted">{gpuLine(opts.gpu)}</p>}
       <p className="muted small">Tick lines and models. The models get only our own approved art (the set plate with the speaker&apos;s approved neutral pose) and, for the avatar model, the line&apos;s own audio; nothing from the reference video. Planning is free and starts by itself; nothing paid runs until you click Run selected.</p>
       <ErrorBox error={err || batch.error} />
       <div className="row" style={{gap: 8, flexWrap: 'wrap'}}>
         <select aria-label="Episode" value={eid ?? ''} onChange={e => { setEid(e.target.value ? Number(e.target.value) : null); setPicked(new Set()); }}>
           <option value="">Choose an audio episode</option>{audioEps.map((e: any) => <option key={e.id} value={e.id}>{e.title}</option>)}</select>
-        {['rig', ...PAID].map(m => <label key={m} className="row small" style={{gap: 4}}><input type="checkbox" checked={models.has(m)}
-          onChange={e => { const n = new Set(models); if (e.target.checked) n.add(m); else n.delete(m); setModels(n); }} />{LABEL[m]}</label>)}
+        {['rig', ...ALL].map(m => <label key={m} className="row small" style={{gap: 4}}><input type="checkbox" checked={models.has(m)}
+          onChange={e => { const n = new Set(models); if (e.target.checked) n.add(m); else n.delete(m); setModels(n); }} />{label(m)}
+          {gpuModels.find(g => g.id === m && !g.pinned) && <span className="muted"> (workflow not pinned)</span>}</label>)}
         {PAID.map(m => <label key={m} className="small row" style={{gap: 4}}>{LABEL[m]} framing
           <select value={framing[m] || ''} onChange={e => setFraming(f => { const n = {...f}; if (e.target.value) n[m] = e.target.value; else delete n[m]; return n; })}>
             <option value="">default ({m.includes('avatar') ? 'medium' : 'wide'})</option><option value="wide">wide</option><option value="medium">medium</option></select></label>)}
@@ -101,7 +108,9 @@ export function ShotComparison() {
                 <div className="muted">Tone: {p.tone || '—'} · from {p.action_source || 'phrase matcher'}{p.action_cost ? ` · writer cost about ${usd(p.action_cost.usd, 4)}${p.action_cost.note ? ` (${p.action_cost.note})` : ''}` : ''}{p.action_note ? ` · ${p.action_note}` : ''}</div>
                 <textarea rows={2} defaultValue={p.action} onBlur={e => saveAction(p, e.target.value)} aria-label="action" />
                 {(p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
-                  <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}, {r.framing} frame)</summary>
+                  <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}{r.backend === 'gpu' ? `, about ${r.estimate.gpu_seconds} GPU s` : ''}, {r.framing} frame){r.blocked ? ` · cannot run: ${r.blocked}` : ''}</summary>
+                    {r.sends && <div className="muted">Sends: {r.sends.join('; ')}</div>}
+                    {r.estimate?.note && <div className="muted">{r.estimate.note}</div>}
                     {r.frame_url && <img src={r.frame_url} alt={`${r.framing} first frame`} style={{width: 100}} />}
                     <pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre></details>))}
               </details>}
@@ -110,19 +119,21 @@ export function ShotComparison() {
       </div>}
       {summary && <div className="card stack" style={{background: 'var(--panel, #f7f7f7)'}}>
         <strong>Summary: {summary.clips} paid clip(s){summary.rig ? ' + the rig renders (free)' : ''}, estimated {usd(summary.total_usd)}</strong>
-        <span className={`small ${summary.fits ? '' : 'bad'}`}>Budget: {usd(summary.spent_usd)} spent + {usd(summary.pending_usd)} approved, not yet charged, of {usd(summary.budget_usd)}{summary.fits ? '' : ': over the cap, so Run selected is refused'}</span>
+        <span className={`small ${summary.fits ? '' : 'bad'}`}>fal.ai budget: {usd(summary.spent_usd)} spent + {usd(summary.pending_usd)} approved, not yet charged, of {usd(summary.budget_usd)}{summary.fits ? '' : ': over a cap or the GPU cannot run, so Run selected is refused'}</span>
+        {summary.gpu?.clips > 0 && <span className={`small ${summary.gpu.ok ? '' : 'bad'}`}>{summary.gpu.clips} self-hosted clip(s), about {usd(summary.gpu.estimate_usd, 3)} of GPU time · {gpuLine(summary.gpu)}</span>}
         {summary.skipped?.length > 0 && <span className="muted small">Not included: {summary.skipped.join('; ')}</span>}
         <div><button className="btn primary" disabled={busy || !summary.clips || !summary.fits} onClick={runSelected}>Run selected</button></div>
       </div>}
       {chosenPlans.length > 0 && <div className="table-wrap"><table>
-        <thead><tr><th>Line</th>{columns.map(c => <th key={c}>{LABEL[c]}</th>)}</tr></thead>
+        <thead><tr><th>Line</th>{columns.map(c => <th key={c}>{label(c)}</th>)}</tr></thead>
         <tbody>{chosenPlans.map((p: any) => (
           <tr key={p.id}><td className="small">&ldquo;{p.text}&rdquo; ({p.seconds} s)</td>
             {columns.map(c => {
               const cell = clipCell(p, c);
               return <td key={c} className="small">
                 {cell.url && <video controls src={cell.url} style={{width: 140}} />}
-                {cell.url && cell.assetId != null && <div><DeleteButton kind="clip" id={cell.assetId} label={`the ${LABEL[c]} clip of "${p.text.slice(0, 40)}"`} onDone={batch.reload} /></div>}
+                {cell.url && cell.assetId != null && <div><DeleteButton kind="clip" id={cell.assetId} label={`the ${label(c)} clip of "${p.text.slice(0, 40)}"`} onDone={batch.reload} /></div>}
+                {cell.gpu && <div className="muted">{cell.gpu}</div>}
                 {cell.binned && <div className="muted">clip in the Bin</div>}
                 {cell.cost && <div>{cell.cost}</div>}
                 {cell.check && <div className={cell.lengthOk ? 'muted' : 'bad'}>{cell.check}</div>}
