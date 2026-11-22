@@ -8,8 +8,11 @@ vision model gave, a "used / ignored" toggle, and a note on anything the rendere
   seating   who is seated or standing and whom they face (each scene starts in that arrangement; speaker first)
   shot      shot size and camera movement (a strong suggestion to the scene writer; dialogue and timing stay locked)
   reactors  who reacts and how (silent reaction cutaways)
-The roles in the notes are anonymous: "speaker" is whoever says the range's first line; "reactor N" is the N-th other
-character (silent characters first, then the other speakers). Only the notes' fixed-list values are ever used.
+The roles in the notes are anonymous. With the per-person notes and the owner's "who is who" (People), each role is
+read back to its person and so to the confirmed character; a person nobody confirmed is LEFT OUT (never shown or
+staged as another character). Without them: "speaker" is whoever says the range's first line and "reactor N" the N-th
+other character (silent characters first, then the other speakers), and roles beyond the cast are left out (they never
+wrap around to a character already on screen). Only the notes' fixed-list values are ever used.
 
 Nothing is built until the owner accepts the plan; editing the notes or a toggle withdraws the acceptance.
 """
@@ -59,11 +62,46 @@ def needs_acceptance(tr: dict) -> bool:
     return bool(ranges_of(tr)) and not accepted(tr)
 
 
+def persons_of(frames: list[dict], r: dict) -> dict[str, int] | None:
+    """{role: person number} for one range, read from the per-person frames (notes v2): the first frame inside the
+    range whose people match the range's roles one to one (the ranges list roles in person order, with the same poses).
+    None when no frame matches (older notes, or notes edited since)."""
+    roles = r.get("roles", [])
+    for fr in frames:
+        if not r["start"] <= fr.get("t", -1) < r["end"]:
+            continue
+        people = fr.get("people", [])
+        if len(people) == len(roles) and all(ro.get("pose") in (None, p.get("pose")) and ro.get("position") in (None, p.get("position"))
+                                             for ro, p in zip(roles, people)):
+            return {ro["role"]: p["person"] for ro, p in zip(roles, people)}
+    return None
+
+
+def with_people(tr: dict, ranges: list[dict]) -> list[dict]:
+    """The ranges with each role's confirmed character as "who" (None: a person nobody confirmed, left out), when the
+    episode has per-person notes and a "who is who" map; otherwise unchanged."""
+    pm = tr.get("person_map") or {}
+    frames = ((tr.get("video_notes") or {}).get("people_frames")) or []
+    if not pm or not frames:
+        return ranges
+    inv = {int(n): k for k, n in pm.items() if isinstance(n, int) or str(n).isdigit()}
+    out = []
+    for r in ranges:
+        persons = persons_of(frames, r)
+        if persons is None:
+            out.append(r)
+            continue
+        out.append({**r, "roles": [{**ro, "who": inv.get(persons.get(ro.get("role")))} for ro in r.get("roles", [])]})
+    return out
+
+
 def effective(tr: dict) -> list[dict]:
-    """The notes as the builders use them: ignored items removed (never stored this way)."""
+    """The notes as the builders use them: ignored items removed, each role with its confirmed character when known
+    (never stored this way)."""
     ign = set(stored(tr).get("ignored", []))
     out = []
-    for i, r in enumerate(ranges_of(tr)):
+    all_ranges = ranges_of(tr)
+    for i, r in enumerate(with_people(tr, all_ranges)):
         r = {k: v for k, v in r.items() if k != "line_ids"}
         if f"{i}:set" in ign:
             r = {k: v for k, v in r.items() if k not in SET_KEYS}
@@ -83,6 +121,16 @@ def effective(tr: dict) -> list[dict]:
     return out
 
 
+def range_index(ranges: list[dict], t: float) -> int | None:
+    """The one range a moment belongs to: the latest range that has started by `t` and not ended. Neighbouring
+    ranges overlap by a hundredth of a second at a cut, so a beat at the cut belongs to the range starting there."""
+    best = None
+    for k, r in enumerate(ranges):
+        if r["start"] <= t < r["end"] and (best is None or r["start"] >= ranges[best]["start"]):
+            best = k
+    return best
+
+
 def effective_beats(tr: dict) -> list[dict]:
     """The beats the builders act: supported types only, without those in ranges whose Movement item is ignored."""
     from .beats import SUPPORTED
@@ -90,22 +138,36 @@ def effective_beats(tr: dict) -> list[dict]:
     ranges = ranges_of(tr)
     out = []
     for b in (tr.get("video_notes") or {}).get("beats") or []:
-        i = next((k for k, r in enumerate(ranges) if r["start"] <= b["t"] < r["end"]), None)
+        i = range_index(ranges, b["t"])
         if b["type"] in SUPPORTED and not (i is not None and f"{i}:movement" in ign):
             out.append(b)
     return out
 
 
-def role_map(range_lines: list[dict], cast: list[str], silent: list[str]) -> dict[str, str]:
-    """Anonymous role -> character key for one range: speaker = the first line's speaker; reactor N = the N-th other."""
+def role_map(range_lines: list[dict], cast: list[str], silent: list[str], r: dict | None = None) -> dict[str, str]:
+    """Anonymous role -> character key for one range. With the confirmed people ("who" on the roles): each role's own
+    character, speaker = the line's speaker; a role nobody confirmed is left out, and no character appears twice.
+    Otherwise: speaker = the first line's speaker; the k-th reactor present in the range = the k-th other character
+    (whatever its number), and reactors beyond the cast are left out (never wrapped around to a character already on
+    screen)."""
     if not range_lines:
         return {}
     speaker = range_lines[0]["speaker"]
-    others = [k for k in list(dict.fromkeys(silent + cast)) if k != speaker]
     out = {"speaker": speaker}
-    for n in range(1, 10):
-        if others:
-            out[f"reactor {n}"] = others[(n - 1) % len(others)]
+    roles = (r or {}).get("roles", [])
+    if any("who" in ro for ro in roles):
+        used = {speaker}
+        for ro in roles:
+            who = ro.get("who")
+            if ro.get("role") != "speaker" and who and who not in used:
+                out[ro["role"]] = who
+                used.add(who)
+        return out
+    others = [k for k in list(dict.fromkeys(silent + cast)) if k != speaker]
+    present = [ro["role"] for ro in roles if ro.get("role", "").startswith("reactor")]
+    labels = present or [f"reactor {n}" for n in range(1, 10)]
+    for label, k in zip(labels, others):      # the k-th reactor present is the k-th other character; extras left out
+        out[label] = k
     return out
 
 
@@ -113,7 +175,7 @@ def staging_for(range_lines: list[dict], r: dict | None, cast: list[str], silent
     """{character: seated | standing} in the note's arrangement, speaker first (insertion order is the seat order)."""
     if not r:
         return {}
-    roles = role_map(range_lines, cast, silent)
+    roles = role_map(range_lines, cast, silent, r)
     out = {}
     for ro in sorted(r.get("roles", []), key=lambda ro: 0 if ro.get("role") == "speaker" else 1):
         k = roles.get(ro.get("role", ""))
@@ -137,6 +199,8 @@ def _set_text(r: dict) -> str:
 def _seat_text(r: dict, names: dict, roles: dict) -> str:
     bits = []
     for ro in r.get("roles", []):
+        if ro.get("role") not in roles:
+            continue                      # unconfirmed or extra people are left out
         who = names.get(roles.get(ro.get("role", "")), ro.get("role", ""))
         if ro.get("pose"):
             bits.append(f"{who} {ro['pose']}" + (f", facing {names.get(roles.get(ro['facing']), ro['facing'])}" if ro.get("facing") else ""))
@@ -149,7 +213,7 @@ def _shot_text(r: dict) -> str:
 
 def _react_text(r: dict, names: dict, roles: dict) -> str:
     bits = [f"{names.get(roles.get(ro['role']), ro['role'])} ({ro.get('emotion') or 'neutral'})"
-            for ro in r.get("roles", []) if ro.get("role", "").startswith("reactor")]
+            for ro in r.get("roles", []) if ro.get("role", "").startswith("reactor") and ro["role"] in roles]
     return ", ".join(bits) or "-"
 
 
@@ -164,9 +228,10 @@ def view(db: Session, ep: Episode) -> dict:
     spec = sets.blocking_of(db, ep.set_id) if ep.set_id else None
     seats = len(sets.seats_of(spec)) if spec else 0
     out = []
-    for i, r in enumerate(ranges_of(tr)):
+    all_ranges = ranges_of(tr)
+    for i, r in enumerate(with_people(tr, all_ranges)):
         rl = [ln for ln in lines if ln["start"] < r["end"] and ln["end"] > r["start"]]
-        roles = role_map(rl, cast, silent)
+        roles = role_map(rl, cast, silent, r)
         o = _original_for(tr, r)
         seated = sum(1 for ro in r.get("roles", []) if ro.get("pose") == "seated")
         seat_note = []
@@ -176,10 +241,13 @@ def view(db: Session, ep: Episode) -> dict:
             seat_note.append("choose the episode's set to see how many seats it has")
         if any(ro.get("pose") not in (None, *POSE_OK) for ro in r.get("roles", [])):
             seat_note.append("lying down or kneeling will be skipped: they stand")
-        if any(ro.get("role", "").startswith("reactor") and ro["role"] not in roles for ro in r.get("roles", [])):
-            seat_note.append("more people than characters: the extra roles are left out")
+        left = [ro for ro in r.get("roles", []) if ro.get("role") != "speaker" and ro.get("role") not in roles]
+        if left:
+            unconfirmed = sum(1 for ro in left if "who" in ro and not ro["who"])
+            seat_note.append(f"{len(left)} person(s) left out" + (f" ({unconfirmed} not confirmed under People)" if unconfirmed else
+                                                                 " (more people than characters)"))
         from . import beats as BT
-        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if r["start"] <= b["t"] < r["end"]]
+        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if range_index(all_ranges, b["t"]) == i]
         pnames = BT.names_of(db, tr)
         skip = [b for b in in_range if b["type"] in BT.UNSUPPORTED]
         move_note = []
