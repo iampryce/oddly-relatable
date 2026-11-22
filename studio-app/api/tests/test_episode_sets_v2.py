@@ -146,8 +146,10 @@ class SetNotesFlowTest(Base):
         self.assertEqual(v["rooms"][0]["text"], sn[0]["text"])
         self.assertEqual(v["rooms"][1]["text"], mine, "the edited set notes, verbatim")
         parts = {p["part"]: p["text"] for p in v["rooms"][1]["parts"]}
-        self.assertEqual(parts["your description"], "Setting: " + mine)
-        self.assertTrue(parts["studio style"].startswith(house_style.SET_STYLE_FLAT[:40]))
+        from oddstudio import sets as studio_sets
+        self.assertEqual(parts["your description"], studio_sets.LAYOUT_LEAD + mine)
+        self.assertEqual(parts["studio style"], studio_sets.SET_STYLE_SHORT)
+        self.assertEqual(list(parts)[:2], ["your description", "studio style"], "the layout leads; the style follows")
         self.assertIn("seating for at least 8 people", parts["studio rules"])
         self.assertIn("EMPTY room with no people", parts["studio rules"])
         shown = v["rooms"][1]["prompt"]

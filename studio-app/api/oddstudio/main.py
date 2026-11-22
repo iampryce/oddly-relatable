@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, scene_sets, set_proposals, engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, room_read, scene_sets, workspace, set_proposals, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -76,6 +76,8 @@ app.include_router(routes_characters.router)
 app.include_router(audio_first.router)
 app.include_router(audio_scenes.router)
 app.include_router(set_proposals.router)
+app.include_router(room_read.router)
+app.include_router(workspace.router)
 app.include_router(reference_plan.router)
 app.include_router(scene_sets.router)
 app.include_router(beats.router)

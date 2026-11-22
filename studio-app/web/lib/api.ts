@@ -28,7 +28,8 @@ export async function api<T = any>(path: string, opts: {method?: string; body?: 
 // type. A video is only a carrier for its audio (Stage 1b); `hints` asks for the text-only video notes, and `window` is a
 // Short's 60 s window chosen before the upload (so only that part of the video is analysed).
 const MEDIA_EXT: Record<string, string> = {mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg',
-  webm: 'audio/webm', flac: 'audio/flac', mp4: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', m4v: 'video/x-m4v'};
+  webm: 'audio/webm', flac: 'audio/flac', mp4: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', m4v: 'video/x-m4v',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp'};
 export const mediaType = (file: File) => file.type || MEDIA_EXT[(file.name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
 export const isVideoFile = (file: File | null) => !!file && mediaType(file).startsWith('video/');
 export async function uploadAudio<T = any>(path: string, file: File, opts: {hints?: boolean; window?: {start: number; end: number} | null} = {}): Promise<T> {
@@ -38,6 +39,17 @@ export async function uploadAudio<T = any>(path: string, file: File, opts: {hint
   if (opts.window && type.startsWith('video/')) { q.set('start', String(opts.window.start)); q.set('end', String(opts.window.end)); }
   const url = `/api${path}${q.toString() ? `?${q}` : ''}`;
   const res = await fetch(url, {method: 'PUT', body: file, headers: {'Content-Type': type}, credentials: 'same-origin', cache: 'no-store'});
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new ApiError(res.status, typeof data?.detail === 'string' ? data.detail : res.statusText);
+  return data as T;
+}
+
+// Any raw file upload (a video to read the room from, the owner's own set reference): the file is the body.
+export async function uploadFile<T = any>(path: string, file: File, query: Record<string, string> = {}): Promise<T> {
+  const q = new URLSearchParams(query).toString();
+  const res = await fetch(`/api${path}${q ? `?${q}` : ''}`, {method: 'PUT', body: file, headers: {'Content-Type': mediaType(file)},
+    credentials: 'same-origin', cache: 'no-store'});
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) throw new ApiError(res.status, typeof data?.detail === 'string' ? data.detail : res.statusText);

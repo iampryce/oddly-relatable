@@ -1,5 +1,7 @@
 # Sets (backgrounds)
 
+The episode page (where sets are made, approved and staged) is described in [EPISODE-WORKSPACE.md](EPISODE-WORKSPACE.md).
+
 **Every episode gets a new set of its own.** An earlier set is used again only when you keep it for reuse and choose it (owner rule 2026-11-22). There is no silent default.
 
 ## Choosing the episode's set
@@ -10,7 +12,7 @@
   - **Kept for reuse:** sets you kept for future episodes, and the studio's repository plates.
   - Each set shows the other episodes that already use it, and reuse always asks for confirmation.
 - **Another episode's set is not offered** until it is kept. The card says how many are hidden. Choosing one through the API is refused with "Keep this set for future episodes" (`409`), and so is adding it for scene changes.
-- **Keep this set for future episodes** is a checkbox on the episode's own set cards and on each set in Settings › Sets (`POST /api/sets/{id}/keep {"keep": true|false}`). Un-keeping a set hides it from new episodes; episodes already using it keep it.
+- **Keep this set for future episodes** is a checkbox on each set in the episode's Set section and on each set in the Settings › Sets library (`POST /api/sets/{id}/keep {"keep": true|false}`). Un-keeping a set hides it from new episodes; episodes already using it keep it.
 - **The writer** is offered only this episode's sets and the kept ones.
 - **Production cannot start without a set.** The message is: "choose this episode's set first (Storyboard tab, Set): there is no default set".
 - A set that is withdrawn (rejected) after it was chosen also blocks production until another one is chosen.
@@ -45,15 +47,15 @@ The **A new set for this story** box sits on the same card. The studio proposes 
   - It asks that, where the description does not fix them, the new set clearly differs in palette, floor material, light, time of day and layout.
   - When the description names no colour, it adds a palette for this episode, avoiding wall colours the recent sets use. The reference video's own colours win when the set notes name them.
   - The guard is editable and saved per episode (`PUT /api/episodes/{id}/set-proposal/variety`); empty goes back to the automatic one.
-- **Generate this set.** The button shows the estimated image cost (about $0.05–0.20 per image) and asks you to confirm. The prompt shown is stored in the job and sent exactly as shown. The candidate keeps it (Settings › Sets, "Sent to the image API") along with its look signature for later variety guards.
-  - The candidate is linked to the episode, appears on the card and in Settings › Sets, and is used only after you approve it there. A set made for an episode is not kept for reuse until you say so; a set made in Settings › Sets (for no episode) is a library set and is kept.
+- **Generate this set.** The button shows the estimated image cost (about $0.05–0.20 per image) and asks you to confirm. The prompt shown is stored in the job and sent exactly as shown. The candidate keeps it ("The exact request sent to the image API", on its card) along with its look signature for later variety guards.
+  - The candidate is linked to the episode and appears in the episode's Set section, where you approve or reject it; it is used only after you approve it. A set made for an episode is not kept for reuse until you say so; a set made in Settings › Sets (for no episode) is a library set and is kept.
   - A second request never overwrites a queued one; each gets its own ID.
 - Nothing is generated or approved by itself.
 - Data: `episodes.set_proposal` (migration `0009`) holds the rooms, each with its text, source and seats, plus the variety guard; the set notes are part of the episode's video notes.
 
 ## Seats and the table front
 
-On the set approval screen (Settings › Sets) you mark the set's staging before approving it.
+On the set's card in the episode's Set section (or in the Settings › Sets library) you mark the set's staging, on the picture, before or after approving it.
 
 An **approved** set's staging can be edited later: **Edit staging (seats, table front, floor, standing area)**, then **Save staging** (`PUT /api/sets/{id}/staging`).
 - The picture and the approval never change. Only the staging and its preview are redrawn.
@@ -86,6 +88,6 @@ How seats are used in a render:
 When the notes show one room from two sides, the Set card offers **"Generate both sides of the room"**.
 
 - **What is generated:** two linked candidates with the same description plus one view line each ("View: the main side of the room…" / "View: the reverse side of the same room…"). Both exact prompts are shown, and the combined cost is confirmed first.
-- **Approval:** each candidate is approved, and its seats and table front are marked, in Settings › Sets. The pair shows as "main side" / "reverse side".
+- **Approval:** each candidate is approved, and its seats and table front are marked, in the episode's Set section. The pair shows as "main side" / "reverse side".
 - **In scenes:** add both to the episode's sets for scene changes. The simple split then cuts where the camera changes side, and each scene takes its side's set. On the reverse side the standing marks and seats are used in the opposite order, so who sits or stands where flips as it does in the video.
 - **Single-view episodes:** with one view, or only one side's set, nothing switches and nothing flips. The render is identical to before.

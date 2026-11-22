@@ -20,7 +20,7 @@ The uploaded audio is the voice track. No voice provider is used for these lines
    - The worker job `audio_transcribe` uses the transcription provider selected in Settings (OpenAI with word timestamps, or local Whisper).
    - The result is split into **timed lines**: a line ends at a pause (≥ 0.6 s), at the end of a sentence, or after 8 s / 24 words.
    - Without word timestamps, each transcription segment becomes one line.
-4. **Label speakers.** In the episode's **Audio** tab:
+4. **Label speakers.** In the episode page's **Lines and speakers** section:
    - Play each line and give it a speaker (any label, or an existing character's key).
    - Fix the text, split a line where the speaker changes (at a word boundary), or merge lines.
    - The server checks that the timing stays inside the audio, in order and without overlaps.
@@ -37,7 +37,7 @@ Data: `episodes.source` (`script` | `audio`), `audio_rights_confirmed`, `audio_r
 ## Video uploads (Stage 1b)
 
 - A video file (MP4, MOV, WebM, MKV, up to 250 MB) is only a carrier for its sound. The worker extracts the first audio track and deletes the video; its picture is never stored, shown, or sent to an image generator.
-- A Short longer than 60 s uses a 60 s window of the recording, chosen in the Audio tab (or with the upload when video notes are asked for, below).
+- A Short longer than 60 s uses a 60 s window of the recording, chosen in the Lines and speakers section (or with the upload when video notes are asked for, below).
 
 ## Video reference notes ("reference, not copy")
 
@@ -46,12 +46,12 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 - **Which frames (notes v2):** only from the part of the video the episode uses: the Short's 60 s window (so a Short longer than 60 s asks for its window with the upload), or the whole clip for a long episode. A Short: 1 frame per second (at most 60); a long episode: 1 frame every 2 s (at most 150), downscaled to 512 px wide and sent in batches of at most 50. Each later batch repeats the previous batch's last frame with its people listed in words, so everyone keeps their number; if the model renumbers them anyway, that overlap frame maps the numbers back.
 - **Who reads them:** the studio's API vision provider (Settings → Video and visual analysis: OpenAI or Anthropic with the studio's key). Never a Codex login: without an API vision provider the upload with notes is refused with a clear message. The form shows the number of frames, calls and the estimated cost, with the per-episode cap (Settings › Video and visual analysis, default $0.50), before anything is sent; an upload whose notes would cost more than the cap is refused; the actual token use is recorded with the notes.
 - **What is kept:** per frame, only: shot, camera movement, setting type, furniture, time of day, and numbered people (`person 1`..`person 6`, the same number for the same person in every frame) with position, pose, whom they face, a gesture, an emotion word and whether they seem to be talking. Every field is a fixed list. Anything else in the model's answer (names of people, actors or characters, faces, appearance, clothing, brands, logos, on-screen text, dialogue, free text) is removed and counted. The per-person frames stay on the server (for the cast mapping); the editable ranges are made from them (the speaker is the one person talking), as before. The notes' times are the audio's, so each range shows the recorded lines it covers; moving the Short's window moves the notes, and notes outside the new window are dropped.
-- **Notes quality:** the Audio tab shows the people found, how often each person number appears, the frames used and sent, the calls, the actual cost (from the tokens reported) and the items stripped, to judge the identity tracking before relying on it.
+- **Notes quality:** the Video notes section shows the people found, how often each person number appears, the frames used and sent, the calls, the actual cost (from the tokens reported) and the items stripped, to judge the identity tracking before relying on it.
 - **What is deleted:** the frames, right after the notes are made (whatever happens), and the video, right after its audio is extracted. Nothing visual is stored or backed up (`work/uploads` is temporary and left out of backups).
-- **"Inspired by video notes"** in the Audio tab: read the notes, change a range's shot, camera or setting, remove a range, or clear them all, before the scenes are built.
+- **"Inspired by video notes"** (the Video notes section): read the notes, change a range's shot, camera or setting, remove a range, or clear them all, before the scenes are built.
 - **How the scenes use them:** as strong suggestions (dialogue and timing stay locked). The AI writer gets each line's note (shot, who reacts, positions) and is told never to change the dialogue; the simple split takes the note's shot and adds reaction cutaways of the silent characters for its reactors. The dialogue is copied from the transcript in both cases, and the characters and sets stay the studio's own.
 - **Every field is editable** (shot, camera, setting, furniture, time of day, and each role's position, pose, facing and emotion). The first edit keeps the vision model's unedited notes, so the plan can show both values.
-- **Reference plan (accept before building).** The Audio tab lists, per time range, what the notes will drive:
+- **Reference plan (accept before building).** The Reference plan section lists, per time range, what the notes will drive:
   - **Set:** the set proposal.
   - **Seating:** who is seated or standing and whom they face. The first scene starts that way, speaker first.
     - **Scene continuity:** a cut to a close-up is the camera, not people leaving.
@@ -67,7 +67,7 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 
 ## Scenes and production (Stages 2 and 3)
 
-**Rebuild scenes from audio.** This builds the scenes again after the script was approved, for example so a later fix to how scenes start applies. It is on the Audio tab at "script approved", "storyboard review" and "storyboard approved" only.
+**Rebuild scenes from audio.** This builds the scenes again after the script was approved, for example so a later fix to how scenes start applies. It is in the Script section at "script approved", "storyboard review" and "storyboard approved" only.
 - **Before anything changes**, the confirmation lists what is discarded, what is kept, and the AI writer's estimated cost. The simple split is free.
 - **Discarded:** the storyboard scenes, which unlinks their stills (the images stay in storage); the approvals of the current script and storyboard (withdrawn, as a script revision request does); and per-scene edits on the storyboard.
 - **Kept:** every script version (the current one stays in the history), poses and sets with their approvals, the episode's chosen set, the Reference plan and its acceptance, and the recording, transcript, speakers and cast.
@@ -98,7 +98,7 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 ## People, views and action beats (from the video)
 
 - **One room, two views.** The notes record which side of the room the camera looks at (`view`: main side, reverse side, side-on, overhead, wide). One room filmed from two angles (shot / reverse shot) stays one setting with two views. Short setting flips (under 20 s) are smoothed to the room's setting; the unsmoothed value is shown in the Reference plan as "was". A real move of 20 s or more is kept.
-- **People in the video.** The numbered people are mapped to characters by you, on the Audio tab. The studio suggests a person only when the vision "talking" flag singles one person out often enough; it is never applied by itself.
+- **People in the video.** The numbered people are mapped to characters by you, in the People / who is who section. The studio suggests a person only when the vision "talking" flag singles one person out often enough; it is never applied by itself.
   - Once you confirm who is who, the speaker of each moment comes from the recorded lines (audio timing), in preference to the talking flag.
   - The ranges and beats are then rebuilt. If you have edited the ranges, use "Rebuild from the video frames" instead, which asks first.
 - **Action beats.** These are derived on the server from the per-person frames:

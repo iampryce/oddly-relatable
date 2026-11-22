@@ -1,4 +1,8 @@
 'use client';
+// The episode workspace (feat/episode-workspace, owner request 2026-11-22): everything about the episode on one page, in
+// collapsible sections with a status badge each. Finished sections start collapsed; a section that blocks the next
+// step is expanded and flagged, and the banner at the top says what is blocking the episode and where. Each section
+// shows its own jobs (queued / running / failed with the message). The statuses come from /episodes/{id}/workspace.
 import {use, useEffect, useState} from 'react';
 import {api, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
@@ -10,43 +14,85 @@ import CastPanel from '@/components/CastPanel';
 import {hookNote} from '@/lib/hookView';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
-import AudioPanel from '@/components/AudioPanel';
+import AudioPanel, {type AudioParts} from '@/components/AudioPanel';
 import EpisodeSetPicker from '@/components/EpisodeSetPicker';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
+import {bannerText, isOpen, jobLine, TONE, type Section} from '@/lib/workspace';
 
-const TABS = ['Audio', 'Outline', 'Script', 'Storyboard', 'Production', 'Review', 'Publishing', 'History'] as const;
-type Tab = typeof TABS[number];
-const tabsFor = (ep: any) => TABS.filter(t => (t !== 'Outline' || ep.format === 'long') && (t !== 'Audio' || ep.source === 'audio'));
 const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
+const AUDIO_ONLY = ['people', 'plan', 'lines', 'notes'];
 
-function defaultTab(stage: string): Tab {
-  if (stage.startsWith('audio')) return 'Audio';
-  if (stage.startsWith('outline')) return 'Outline';
-  if (stage.startsWith('script')) return stage === 'script_approved' ? 'Storyboard' : 'Script';
-  if (stage.startsWith('storyboard')) return stage === 'storyboard_approved' ? 'Production' : 'Storyboard';
-  if (stage === 'producing' || stage === 'production_failed') return 'Production';
-  if (stage === 'video_review') return 'Review';
-  return 'Publishing';
+function loadOpen(id: string): Record<string, boolean> {
+  try { return JSON.parse(window.localStorage.getItem(`episode-open-${id}`) || '{}') || {}; } catch { return {}; }
+}
+function saveOpen(id: string, v: Record<string, boolean>) {
+  try { window.localStorage.setItem(`episode-open-${id}`, JSON.stringify(v)); } catch { /* private window: not remembered */ }
 }
 
 export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   const {id} = use(params);
   const [poll, setPoll] = useState(5000);
   const {data: ep, error, reload} = useApi<any>(`/episodes/${id}`, poll);
+  const {data: ws, reload: reloadWs} = useApi<any>(`/episodes/${id}/workspace`, poll);
   const {data: characters} = useApi<any[]>('/characters');
   const {data: settings} = useApi<any>('/settings');
-  const [tab, setTab] = useState<Tab | null>(null);
-  const act = useAction(reload);
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [seen, setSeen] = useState<Set<string>>(new Set());
+  const reloadAll = async () => { await reload(); await reloadWs(); };
+  const act = useAction(reloadAll);
+  useEffect(() => { setOverrides(loadOpen(id)); }, [id]);
   useEffect(() => {
     if (!ep) return;
-    if (!tab) setTab(defaultTab(ep.stage));
     const active = BUSY.includes(ep.stage) || ep.jobs.some((j: any) => j.status === 'queued' || j.status === 'running');
     setPoll(active ? 3000 : 15000);
-  }, [ep, tab]);
+  }, [ep]);
+  // a section opened once stays mounted while collapsed (an unsaved edit in it survives closing it)
+  useEffect(() => {
+    if (!ws) return;
+    setSeen(prev => {
+      const next = new Set(prev);
+      for (const s of ws.sections as Section[]) if (isOpen(s, overrides)) next.add(s.key);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [ws, overrides]);
   if (error && !ep) return <ErrorBox error={error} />;
   if (!ep || !characters) return <p className="muted">Loading…</p>;
   const can = (a: string) => ep.allowed_actions.includes(a);
-  const ctx = {ep, can, act, characters, environments: settings?.environments || [], reload};
+  const ctx = {ep, can, act, characters, environments: settings?.environments || [], reload: reloadAll};
+  // functional update: several quick toggles in a row each keep the others' state
+  const toggle = (key: string, open: boolean) => setOverrides(prev => { const v = {...prev, [key]: open}; saveOpen(id, v); return v; });
+  const goTo = (key: string) => { toggle(key, true); setTimeout(() => document.getElementById(`ws-${key}`)?.scrollIntoView({behavior: 'smooth', block: 'start'}), 50); };
+  const banner = bannerText(ws);
+  const sections: Section[] = (ws?.sections || []).filter((s: Section) => ep.source === 'audio' || !AUDIO_ONLY.includes(s.key));
+
+  const body = (key: string, parts: AudioParts | null) => {
+    const p = parts || ({} as AudioParts);
+    switch (key) {
+      case 'set': return <EpisodeSetPicker ep={ep} act={act} />;
+      case 'people': return p.people || <p className="muted small">No per-person video notes: nobody to confirm.</p>;
+      case 'plan': return p.plan || <p className="muted small">No video notes, so there is no Reference plan.</p>;
+      case 'lines': return <>{p.recording}{p.lines}{p.tidy}</>;
+      case 'notes': return p.notes || <p className="muted small">No video notes. Upload a video with "notes" ticked (Lines and speakers) to get them.</p>;
+      case 'cast': return <>{p.cast}{ep.script ? <CastPanel episodeId={ep.id} onChange={reloadAll} />
+        : <p className="muted small">{ep.source === 'audio' ? 'The poses each character needs are listed once the scenes are built.' : 'The cast comes from the script.'}</p>}</>;
+      case 'script': return <>{ep.format === 'long' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}{p.scenes}<ScriptTab {...ctx} /></>;
+      case 'storyboard': return <StoryboardTab {...ctx} />;
+      case 'production': return <ProductionTab {...ctx} />;
+      case 'review': return <ReviewTab {...ctx} />;
+      case 'publishing': return <PublishTab {...ctx} />;
+      default: return null;
+    }
+  };
+  const render = (parts: AudioParts | null) => (
+    <div className="stack">
+      {sections.map(s => {
+        const open = isOpen(s, overrides);
+        const mounted = open || seen.has(s.key);
+        return <WsSection key={s.key} s={s} open={open} onToggle={() => toggle(s.key, !open)} act={act}>{mounted ? body(s.key, parts) : null}</WsSection>;
+      })}
+      <WsSection s={{key: 'history', title: 'History', status: 'waiting', label: 'log', note: 'Decisions, script versions, activity and every file.', blocking: false, open: false, jobs: []}}
+        open={!!overrides.history} onToggle={() => toggle('history', !overrides.history)} act={act}>{overrides.history ? <HistoryTab {...ctx} /> : null}</WsSection>
+    </div>);
   return (
     <>
       <div className="spread">
@@ -54,22 +100,35 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <DialogueDisplay ep={ep} act={act} /><HookBanner ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
-      <EpisodeSetPicker ep={ep} act={act} />
-      <div className="tabs" role="tablist">
-        {tabsFor(ep).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
-      </div>
+      {ws && <div className={`alert ${banner.tone} ws-banner`} role="status">
+        <strong>{ws.blocker ? 'What is blocking this episode' : ws.running?.length ? 'In progress' : 'Status'}:</strong> {banner.text}
+        {ws.blocker && <> <button className="btn sm" onClick={() => goTo(ws.blocker.section)}>Go to {ws.blocker.title}</button></>}</div>}
       <ErrorBox error={act.error} />
       {ep.last_error && <div className="alert bad">{ep.last_error}</div>}
-      {tab === 'Audio' && <AudioPanel episodeId={ep.id} onChange={reload} />}
-      {tab === 'Outline' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}
-      {tab === 'Script' && <ScriptTab {...ctx} />}
-      {tab === 'Storyboard' && <StoryboardTab {...ctx} />}
-      {tab === 'Production' && <ProductionTab {...ctx} />}
-      {tab === 'Review' && <ReviewTab {...ctx} />}
-      {tab === 'Publishing' && <PublishTab {...ctx} />}
-      {tab === 'History' && <HistoryTab {...ctx} />}
+      {!ws ? <p className="muted">Loading the sections…</p>
+        : ep.source === 'audio' ? <AudioPanel episodeId={ep.id} onChange={reloadAll} render={parts => render(parts)} /> : render(null)}
     </>
   );
+}
+
+// One collapsible section: its title, status badge, "blocking" flag and note in the header; its jobs at the top.
+function WsSection({s, open, onToggle, act, children}: {s: Section; open: boolean; onToggle: () => void; act: ReturnType<typeof useAction>; children: React.ReactNode}) {
+  return (
+    <section id={`ws-${s.key}`} className={`card ws-section${s.blocking ? ' ws-blocking' : ''}`} aria-label={s.title}>
+      <button type="button" className="ws-head" aria-expanded={open} onClick={onToggle}>
+        <span className="ws-caret" aria-hidden>{open ? '▾' : '▸'}</span>
+        <h2>{s.title}</h2>
+        <span className={`badge ${TONE[s.status] || ''}`}>{s.label}</span>
+        {s.blocking && <span className="badge bad">blocking</span>}
+        <span className="muted small ws-note">{s.note}</span>
+      </button>
+      {s.jobs?.length > 0 && <div className="stack" style={{marginTop: 8}}>{s.jobs.map((j: any) => (
+        <div key={j.id} className={`alert small ${j.status === 'failed' ? 'bad' : 'info'} row`} style={{justifyContent: 'space-between'}}>
+          <span>{jobLine(j)}</span>
+          {j.status === 'failed' && <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('retry', () => api(`/jobs/${j.id}/retry`, {method: 'POST'}))}>Retry</button>}
+        </div>))}</div>}
+      <div className="ws-body" hidden={!open}>{children}</div>
+    </section>);
 }
 
 // What the viewer sees of the dialogue in the next render (bubbles | none | captions).
@@ -205,7 +264,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
       ) : !s && audio ? (
         <div className="card stack">
           <h2>No scenes yet</h2>
-          <p className="muted">An audio episode's scenes are built around the recorded lines: label the speakers, set up the cast, then build the scenes in the Audio tab.</p>
+          <p className="muted">An audio episode's scenes are built around the recorded lines: label the speakers, set up the cast, then build the scenes (above).</p>
         </div>
       ) : !s ? (
         <div className="card stack">
@@ -250,7 +309,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
               <SceneView scene={sc} characters={characters} />
             </div>
             </div>))}
-          {audio && <div className="alert info small">The dialogue comes from the recording. Scenes are runs of recorded lines (a cut falls only between two lines). Edit to change headings, expressions and shots or to join scenes; to rebuild the scenes from the recording, use the Audio tab ("Rebuild scenes from audio" after the script is approved: it discards the storyboard and the script approval; poses, sets and the Reference plan stay).</div>}
+          {audio && <div className="alert info small">The dialogue comes from the recording. Scenes are runs of recorded lines (a cut falls only between two lines). Edit to change headings, expressions and shots or to join scenes; to rebuild the scenes from the recording, use "Rebuild scenes from audio" above (after the script is approved: it discards the storyboard and the script approval; poses, sets and the Reference plan stay).</div>}
           {can('regenerate_section') && !audio && (
             <div className="card row">
               <input style={{flex: 1, minWidth: 220}} placeholder="Instruction for regeneration, e.g. 'make the twist darker'" value={instruction} onChange={e => setInstruction(e.target.value)} />
@@ -265,8 +324,7 @@ function ScriptTab({ep, can, act, characters, environments}: Ctx) {
                 <button className="btn danger" disabled={!!act.busy || !comment} onClick={() => act.run('reject', () => api(`/episodes/${ep.id}/script/reject`, {body: {comment}}))}>Reject (keep editing)</button>
               </div>
             </div>)}
-          <CastPanel episodeId={ep.id} />
-          {ep.stage === 'script_approved' && <div className="alert good">Script approved. Continue in the Storyboard tab.</div>}
+          {ep.stage === 'script_approved' && <div className="alert good">Script approved. Continue in the Storyboard section.</div>}
         </>)}
     </div>
   );
@@ -283,7 +341,6 @@ function StoryboardTab({ep, can, act, characters, environments, reload}: Ctx) {
   return (
     <div className="stack">
       <JobNote job={gen} />
-      {ep.script && <CastPanel episodeId={ep.id} />}
       {can('generate_storyboard') && (
         <div className="card spread"><div><h2 style={{marginBottom: 2}}>{ep.scenes.length ? 'Rebuild storyboard' : 'Build the storyboard'}</h2>
           <span className="muted">Scene breakdown from the approved script, with renderer stills for each scene.</span></div>
@@ -331,7 +388,7 @@ function StoryboardTab({ep, can, act, characters, environments, reload}: Ctx) {
             <button className="btn danger" disabled={!!act.busy || !comment || !marked.length} onClick={() => act.run('no', async () => { await api(`/episodes/${ep.id}/storyboard/reject`, {body: {comment, scene_ids: marked}}); setMarked([]); })}>Send marked scenes back ({marked.length})</button>
           </div>
         </div>)}
-      {ep.stage === 'storyboard_approved' && <div className="alert good">Storyboard approved. Start production in the Production tab.</div>}
+      {ep.stage === 'storyboard_approved' && <div className="alert good">Storyboard approved. Start production in the Production section.</div>}
     </div>
   );
 }
@@ -366,7 +423,7 @@ function ProductionTab({ep, can, act}: Ctx) {
       {can('start_production') && (<>
         <div className="card spread"><div><h2 style={{marginBottom: 2}}>Start production</h2><span className="muted">Scene preparation, voice, then the full render with QA.</span></div>
           <button className="btn primary" disabled={!!act.busy || !ep.set_id} title={ep.set_id ? '' : 'Choose the episode\'s set first'} onClick={() => act.run('start', () => api(`/episodes/${ep.id}/production/start`, {method: 'POST'}))}>Start production</button></div>
-        {!ep.set_id && <div className="alert warn small">Choose this episode's set first (Set, above): there is no default set.</div>}</>)}
+        {!ep.set_id && <div className="alert warn small">Choose this episode's set first (the Set section): there is no default set.</div>}</>)}
       {ep.stage === 'production_failed' && <div className="alert bad">A production job failed. Fix the cause (see the error and log), then retry only that job.</div>}
       {ep.format === 'long' && <SegmentsPanel ep={ep} act={act} />}
       {ep.scenes.length > 0 && (

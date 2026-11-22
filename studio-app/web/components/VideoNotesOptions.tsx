@@ -11,7 +11,7 @@ import {setNotesCost} from '@/lib/setView';
 
 export type NotesChoice = {notes: boolean; window: {start: number; end: number} | null; ready: boolean};
 
-function videoSeconds(file: File): Promise<number | null> {
+export function videoSeconds(file: File): Promise<number | null> {
   return new Promise(resolve => {
     const v = document.createElement('video');
     const url = URL.createObjectURL(file);

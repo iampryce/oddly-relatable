@@ -26,7 +26,12 @@ const RIGHTS: Record<string, string> = {own_recording: 'Own recording', licensed
 const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').replace(/^[^a-z]+/, '').slice(0, 41);
 
-export default function AudioPanel({episodeId, onChange}: {episodeId: number; onChange?: () => unknown}) {
+// The workspace places each card in its own section (feat/episode-workspace): `render` receives the cards by name and
+// the audio state, so they keep one shared state (the unsaved lines, the selection). Without `render` they stack.
+export type AudioParts = {recording: React.ReactNode; lines: React.ReactNode; tidy: React.ReactNode; notes: React.ReactNode;
+  people: React.ReactNode; plan: React.ReactNode; cast: React.ReactNode; scenes: React.ReactNode};
+export default function AudioPanel({episodeId, onChange, render}: {episodeId: number; onChange?: () => unknown;
+  render?: (parts: AudioParts, st: any) => React.ReactNode}) {
   const [poll, setPoll] = useState(4000);
   const {data: st, error, reload} = useApi<any>(`/episodes/${episodeId}/audio`, poll);
   const act = useAction(async () => { await reload(); await onChange?.(); });
@@ -47,7 +52,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
     if (!dirty) setLines(st.lines || []);
   }, [st, dirty]);
 
-  if (!st) return error ? <ErrorBox error={error} /> : <p className="muted">Loading…</p>;
+  if (!st) return error ? <ErrorBox error={error} /> : (render ? render({} as AudioParts, null) : <p className="muted">Loading…</p>);
   const editable = st.allowed_actions.includes('label_audio');
   const update = (next: Line[]) => { setLines(next); setDirty(true); };
   const setLine = (i: number, patch: Partial<Line>) => update(lines!.map((l, k) => (k === i ? {...l, ...patch} : l)));
@@ -87,8 +92,7 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
   };
   const speakerOptions = [...new Set([...(lines || []).map(l => l.speaker).filter(Boolean), ...st.characters.map((c: any) => c.key)])];
 
-  return (
-    <div className="stack">
+  const recording = (<>
       <div className="card stack">
         <div className="spread"><h2 style={{margin: 0}}>Audio</h2>
           <span className="badge good">Rights confirmed · {RIGHTS[st.rights.source] || st.rights.source}</span></div>
@@ -117,8 +121,11 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
           {st.transcript.words_available ? ' word timings' : ' segment timings only (no word-level split)'}
           {st.allowed_actions.includes('transcribe_audio') && st.audio && <> · <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe again</button></>}</p>}
       </div>
+      {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
+        <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
+    </>);
 
-      {lines && lines.length > 0 && <div className="card stack">
+  const linesCard = lines && lines.length > 0 && <div className="card stack">
         <div className="spread"><h2 style={{margin: 0}}>Lines and speakers</h2>
           <div className="row">
             {st.cast_suggestion?.line_speakers && Object.keys(st.cast_suggestion.line_speakers).length > 0 && editable &&
@@ -153,20 +160,25 @@ export default function AudioPanel({episodeId, onChange}: {episodeId: number; on
             </tr>))}</tbody>
         </table></div>
         {!dirty && st.unlabelled_lines > 0 && <p className="muted small">{st.unlabelled_lines} line(s) have no speaker yet.</p>}
-      </div>}
+      </div>;
 
-      {st.video_notes && <VideoNotesPanel st={st} episodeId={episodeId} act={act} />}
-      {st.video_notes?.version === 2 && <PeoplePanel episodeId={episodeId} editable={st.allowed_actions.includes('edit_video_notes')}
-        characters={st.characters.filter((c: any) => new Set([...(st.lines || []).map((l: any) => l.speaker), ...(st.silent_cast || []).map((m: any) => m.character_key)]).has(c.key))} />}
-      {st.video_notes?.ranges?.length > 0 && <ReferencePlan episodeId={episodeId} notesKey={JSON.stringify(st.video_notes.ranges)} />}
-      {st.format === 'short' && st.full_audio && (st.needs_trim || st.allowed_actions.includes('trim_audio')) &&
-        <TrimCard st={st} episodeId={episodeId} act={act} hasLines={!!lines?.length} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
-      {st.stage === 'audio_labelling' && <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} />}
-
-      {st.stage === 'audio_labelling' && <CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />}
-      {st.stage === 'audio_labelling' && <SilentCastCard st={st} episodeId={episodeId} act={act} />}
-      {(st.stage === 'audio_labelling' || st.stage === 'script_review') && <ScenesCard st={st} episodeId={episodeId} act={act} dirty={dirty} />}
-      {(st.allowed_actions || []).includes('rebuild_audio_scenes') && <RebuildCard episodeId={episodeId} act={act} />}
+  const parts: AudioParts = {
+    recording,
+    lines: linesCard || null,
+    tidy: st.stage === 'audio_labelling' ? <LineQuality st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => { setDirty(false); setSelected(new Set()); }} /> : null,
+    notes: st.video_notes ? <VideoNotesPanel st={st} episodeId={episodeId} act={act} /> : null,
+    people: st.video_notes?.version === 2 ? <PeoplePanel episodeId={episodeId} editable={st.allowed_actions.includes('edit_video_notes')}
+      characters={st.characters.filter((c: any) => new Set([...(st.lines || []).map((l: any) => l.speaker), ...(st.silent_cast || []).map((m: any) => m.character_key)]).has(c.key))} /> : null,
+    plan: st.video_notes?.ranges?.length > 0 ? <ReferencePlan episodeId={episodeId} notesKey={JSON.stringify(st.video_notes.ranges)} /> : null,
+    cast: st.stage === 'audio_labelling' ? <><CastCard st={st} episodeId={episodeId} act={act} dirty={dirty} onApplied={() => setDirty(false)} />
+      <SilentCastCard st={st} episodeId={episodeId} act={act} /></> : null,
+    scenes: <>{(st.stage === 'audio_labelling' || st.stage === 'script_review') && <ScenesCard st={st} episodeId={episodeId} act={act} dirty={dirty} />}
+      {(st.allowed_actions || []).includes('rebuild_audio_scenes') && <RebuildCard episodeId={episodeId} act={act} />}</>,
+  };
+  if (render) return <>{render(parts, st)}</>;
+  return (
+    <div className="stack">
+      {parts.recording}{parts.lines}{parts.notes}{parts.people}{parts.plan}{parts.tidy}{parts.cast}{parts.scenes}
     </div>
   );
 }
