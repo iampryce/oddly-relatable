@@ -8,6 +8,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import SetProposal from './SetProposal';
+import {pickerGroups, reuseLabel} from '@/lib/setView';
 
 export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
   const {data, error, reload} = useApi<any>(`/episodes/${ep.id}/set-options`);
@@ -15,6 +16,8 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
   if (!data) return error ? <ErrorBox error={error} /> : null;
   const current = data.options.find((o: any) => o.id === data.current);
   const locked = ['producing', 'publishing'].includes(ep.stage);
+  const groups = pickerGroups(data.options);
+  const keep = (o: any, on: boolean) => act.run('keep', async () => { await api(`/sets/${o.id}/keep`, {method: 'POST', body: {keep: on}}); await reload(); });
   const pick = (o: any) => {
     if (o.used_in.length && !window.confirm(`"${o.label}" is already used in ${o.used_in.length} earlier episode(s): ${o.used_in.map((e: any) => e.title).join(', ')}. Use it again for this story?`)) return;
     act.run('set', async () => { await api(`/episodes/${ep.id}/set`, {method: 'PUT', body: {set_id: o.id}}); await reload(); setOpen(false); });
@@ -30,16 +33,18 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
         </div>
       </div>
       {data.suggestion && <p className="small">The video notes describe the place as <b>{data.suggestion.word}</b>{data.suggestion.set_id
-        ? <>; the approved set <b>{data.options.find((o: any) => o.id === data.suggestion.set_id)?.label}</b> matches (a suggestion: nothing is applied until you choose it).</>
-        : '; no approved set matches yet. Generate one for this story.'}</p>}
+        ? <>; <b>{data.options.find((o: any) => o.id === data.suggestion.set_id)?.label}</b> ({reuseLabel(data.options.find((o: any) => o.id === data.suggestion.set_id) || {})}) matches (a suggestion: nothing is applied until you choose it).</>
+        : '; generate a new set for this story below.'}</p>}
+      {data.hidden_other_episodes > 0 && <p className="muted small">{data.hidden_other_episodes} set(s) made for other episodes are not offered here: keep one for future episodes (Settings › Sets) to reuse it.</p>}
       {data.candidates.length > 0 && <p className="muted small">Waiting for approval in Settings › <Link href="/settings#sets">Sets</Link>: {data.candidates.map((c: any) => c.label).join(', ')}.</p>}
       <SetProposal ep={ep} candidates={data.candidates} onChange={reload} />
-      {open && <div className="grid cols-3">
-        {data.options.map((o: any) => (
+      {open && [['This episode\'s sets', groups.own], ['Kept for reuse', groups.kept]].map(([title, list]: any) => list.length > 0 && <div key={title} className="stack">
+        <strong className="small">{title}</strong><div className="grid cols-3">
+        {list.map((o: any) => (
           <div key={o.id} className="card stack" style={{padding: 10, outline: o.id === data.current ? '2px solid var(--accent, #36c)' : undefined}}>
             {o.thumbnail && <img src={o.thumbnail} alt={o.label} style={{width: '100%', aspectRatio: '9 / 16', objectFit: 'cover', borderRadius: 6}} />}
             <strong>{o.label}</strong>
-            <span className="muted small">{o.source === 'repository' ? 'studio plate' : 'approved set'} · {o.style_version}{o.seat ? ' · has a seat' : ''}</span>
+            <span className="muted small">{reuseLabel(o)} · {o.style_version}{o.seat ? ' · has a seat' : ''}</span>
             <span className="small">{o.used_in.length ? `Used in ${o.used_in.length} earlier episode(s): ${o.used_in.map((e: any) => e.title).join(', ')}` : 'Not used in any other episode'}</span>
             <button className="btn sm" disabled={!!act.busy || o.id === data.current || locked} onClick={() => pick(o)}>{o.id === data.current ? 'Chosen' : 'Use this set'}</button>
             {data.current && o.id !== data.current && <label className="small row" style={{gap: 4}}>
@@ -47,8 +52,10 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
                 onChange={e => act.run('scene-sets', () => api(`/episodes/${ep.id}/scene-sets`, {method: 'PUT', body: {set_ids: e.target.checked
                   ? [...(ep.scene_set_ids || []), o.id] : (ep.scene_set_ids || []).filter((x: string) => x !== o.id)}}))} />
               Also for scene changes</label>}
+            {o.own && o.source !== 'repository' && <label className="small row" style={{gap: 4}}><input type="checkbox" checked={!!o.kept} disabled={!!act.busy}
+              onChange={e => keep(o, e.target.checked)} />Keep this set for future episodes</label>}
           </div>))}
-      </div>}
+      </div></div>)}
     </div>
   );
 }

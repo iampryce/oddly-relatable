@@ -16,8 +16,9 @@ from oddstudio import engine, providers
 LIVING = "living-room-empty-03"
 
 
-def add_studio_set(set_id, status="approved", label=None, description=""):
-    """A studio set record (as Settings > Sets stores it), with a tiny real image as its asset."""
+def add_studio_set(set_id, status="approved", label=None, description="", kept=True, episode_id=None):
+    """A studio set record (as Settings > Sets stores it), with a tiny real image as its asset. Kept for reuse by
+    default (a library set); kept=False with an episode id is a set made for that episode only."""
     from PIL import Image
     from oddstudio import sets
     from oddstudio.db import new_session
@@ -30,7 +31,7 @@ def add_studio_set(set_id, status="approved", label=None, description=""):
         recs = sets.records(db)
         recs[set_id] = {"label": label or set_id.title(), "description": description, "status": status, "asset_id": a.id,
                         "width": 60, "height": 100, "blocking": {"floor_y": 90, "stand_min_x": 5, "stand_max_x": 55},
-                        "style_version": "v1"}
+                        "style_version": "v1", "kept": kept, **({"episode_id": episode_id} if episode_id else {})}
         sets.save(db, recs)
         db.commit()
 

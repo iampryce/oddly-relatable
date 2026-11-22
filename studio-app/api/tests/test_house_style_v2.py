@@ -198,12 +198,12 @@ class HouseStyleV2Test(unittest.TestCase):
             ran = self.env.run_jobs(["set_candidate"])
             self.assertEqual(ran[0][1], "succeeded", ran)
             prompt, ref = self.prompts[0]
-            if version == "v1":
-                self.assertIn("storybook texture", prompt)
-                self.assertEqual(ref, sets.STYLE_REFERENCE)
-            else:
-                self.assertIn(house_style.SET_STYLE_V2, prompt)
-                self.assertIsNone(ref, "no approved v2 set yet: text only")
+            # feat/episode-sets: one deliberate flat set style for every version, and no reference image (every set
+            # used to be an edit of the same plate and came out alike)
+            self.assertTrue(prompt.startswith(house_style.SET_STYLE_FLAT), prompt[:80])
+            self.assertIsNone(ref, "text only: no style reference image")
+            for biased in ("storybook", "cozy", "cosy", "warm painted", "painted gradients", "lamp light"):
+                self.assertNotIn(biased, house_style.SET_STYLE_FLAT)
         from oddstudio.db import new_session
         with new_session() as s:
             self.assertEqual(sets.records(s)["room-v2"]["style_version"], "v2")

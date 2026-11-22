@@ -64,7 +64,7 @@ def generate_outline(ctx: Ctx) -> dict:
     provider = text_provider(get_section(db, "text"))
     ctx.log(f"Writing the three-act outline with provider {provider.name}")
     from . import sets
-    prompt = writer.outline_prompt(idea, chars, sets.writer_environments(db), continued_short(db, ep))
+    prompt = writer.outline_prompt(idea, chars, sets.writer_environments(db, ep), continued_short(db, ep))
     if job.payload.get("instruction"):
         prompt += f"\n\nOWNER INSTRUCTION FOR THIS VERSION: {job.payload['instruction']}"
     answer = provider.complete_json(writer.system_prompt(get_section(db, "creative")), prompt)

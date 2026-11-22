@@ -203,7 +203,11 @@ class VideoNotesFlowTest(Base):
         eid = self.create(fmt="long")
         self.assertEqual(self.notes_upload(eid, make_media(self.media, "long.mp4", 120)).status_code, 200)
         self.env.run_jobs(["audio_media_prepare", "audio_video_notes"])
-        self.assertEqual([len(c["images"]) for c in self.calls], [50, 11], "1 frame every 2 s; batches of 50, one frame of overlap")
+        self.assertEqual([len(c["images"]) for c in self.calls][:2], [50, 11], "1 frame every 2 s; batches of 50, one frame of overlap")
+        self.assertLessEqual(len(self.calls), 3, "then at most one set-notes call")
+        if len(self.calls) == 3:
+            self.assertIn("ORIGINAL, EMPTY 2D cartoon set", self.calls[2]["question"])
+            self.assertLessEqual(len(self.calls[2]["images"]), 3 * 4, "a few frames per room")
         self.assertIn("Frame 1 repeats the last frame of the previous batch", self.calls[1]["question"])
         self.assertNotIn("Frame 1 repeats", self.calls[0]["question"])
         self.no_media_left()
