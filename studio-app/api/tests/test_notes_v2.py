@@ -84,8 +84,9 @@ class CleanTest(unittest.TestCase):
                   for t in (0.5, 1.5, 2.5, 3.5)]
         ranges, _ = NV.to_ranges(frames, 4.0, 1.0)
         self.assertEqual([(r["start"], r["end"]) for r in ranges], [(0.0, 2.0), (2.0, 4.0)], "merged while unchanged")
-        self.assertEqual(ranges[0]["roles"][0], {"role": "speaker", "pose": "seated", "facing": "reactor 1"})
-        self.assertEqual(ranges[1]["roles"][1], {"role": "speaker", "pose": "standing", "facing": "reactor 1"})
+        self.assertEqual(ranges[0]["roles"][0], {"role": "speaker", "pose": "seated", "facing": "reactor 1", "person": 1},
+                         "each role keeps its anonymous person number (for who is who)")
+        self.assertEqual(ranges[1]["roles"][1], {"role": "speaker", "pose": "standing", "facing": "reactor 1", "person": 2})
 
     def test_quality_readout(self):
         frames = [{"t": 0.5, "people": [{"person": 1, "talking": True}, {"person": 2}]}, {"t": 1.5, "people": [{"person": 1}]},

@@ -41,7 +41,7 @@ VIEWS = ("main side", "reverse side", "side-on", "overhead", "wide")
 ROLE = re.compile(r"^(speaker|reactor ([1-9]))$")
 TOP_KEYS = {"ranges"}
 RANGE_KEYS = {"start", "end", "shot", "camera", "setting", "furniture", "time", "view", "roles"}
-ROLE_KEYS = {"role", "position", "pose", "facing", "emotion"}
+ROLE_KEYS = {"role", "position", "pose", "facing", "emotion", "person"}   # person: the anonymous number (notes v2)
 
 # Emotion words -> the rig's expressions (used by the deterministic scene split for reactions)
 EMOTION_EXPRESSION = {"happy": "happy", "amused": "happy", "excited": "happy", "proud": "smug", "smug": "smug",
@@ -171,6 +171,12 @@ def clean_notes(raw, duration: float) -> tuple[list[dict], int]:
                         entry[key] = v
                     else:
                         redacted += 1
+            if "person" in ro:
+                n = ro["person"]
+                if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= MAX_ROLES:
+                    entry["person"] = n
+                else:
+                    redacted += 1
             if "facing" in ro:
                 v = str(ro["facing"] or "").strip().lower()
                 if v in FACING_FIXED or (_role_label(v) and v != label):

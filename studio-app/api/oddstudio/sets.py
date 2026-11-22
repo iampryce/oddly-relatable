@@ -182,12 +182,15 @@ def thumbnail_url(db, set_id: str) -> str | None:
 
 
 def usage(db, exclude_episode: int | None = None) -> dict[str, list[dict]]:
-    """Which episodes use each set (so repeats are visible in the picker)."""
+    """Which episodes use each set, as their set or for scene changes (so repeats are visible in the picker)."""
     from .models import Episode
     out: dict[str, list[dict]] = {}
-    for e in db.query(Episode).filter(Episode.set_id.isnot(None)).order_by(Episode.id):
-        if e.id != exclude_episode:
-            out.setdefault(e.set_id, []).append({"id": e.id, "title": e.title})
+    for e in db.query(Episode).order_by(Episode.id):
+        if e.id == exclude_episode:
+            continue
+        for sid in dict.fromkeys([e.set_id, *(e.scene_set_ids or [])]):
+            if sid:
+                out.setdefault(sid, []).append({"id": e.id, "title": e.title})
     return out
 
 
@@ -378,6 +381,8 @@ def set_candidate(ctx: Ctx) -> dict:
                          # a set made for an episode stays that episode's until kept; one made in Settings > Sets
                          # (no episode) is a deliberate library set, kept for reuse
                          "kept": p.get("episode_id") is None,
+                         # the seats the proposal asked for: the approval screen asks for at least this many to be marked
+                         **({"seats_wanted": int(p["seats"])} if p.get("seats") else {}),
                          **{k: p[k] for k in ("view", "room") if p.get(k)}}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")

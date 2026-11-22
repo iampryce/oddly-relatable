@@ -216,6 +216,7 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         {x.preview_url && <div className="stack"><img src={x.preview_url} alt="staging" style={{width: 150, borderRadius: 6}} /><span className="muted">red: floor line · blue: standing area</span></div>}
       </div>
       {x.status === 'candidate' && <>
+        {x.seats_wanted > (b.seats || (b.seat ? [b.seat] : [])).length && <span className="alert warn">Made for at least {x.seats_wanted} seated people: mark {x.seats_wanted} seat(s) ("Add a seat") before approving, or the extra people will stand.</span>}
         <div className="grid cols-2">{field('floor_y', 'Floor line (px from top)')}{field('stand_min_x', 'Standing area from x')}{field('stand_max_x', 'Standing area to x')}</div>
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>

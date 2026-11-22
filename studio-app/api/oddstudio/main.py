@@ -383,9 +383,10 @@ def decide_set(sid: str, body: SetDecisionIn, db: Session = Depends(get_db), use
     return {"id": sid, **r}
 
 
-def apply_blocking(r: dict, blocking: dict) -> None:
+def apply_blocking(r: dict, blocking: dict, strict: bool = False) -> None:
     """Validate and apply a set's staging (floor line, standing area, seats, table front) to its record. Refused
-    values raise 422; nothing else in the record changes."""
+    values raise 422; nothing else in the record changes. strict (staging edits): the standing area is also checked
+    to run left to right inside the picture (the approval keeps its earlier checks)."""
     try:
         b = {k: int(blocking[k]) for k in ("floor_y", "stand_min_x", "stand_max_x") if k in blocking}
     except (TypeError, ValueError):
@@ -394,7 +395,7 @@ def apply_blocking(r: dict, blocking: dict) -> None:
     if not (0 < b.get("floor_y", blk["floor_y"]) <= r["height"]):
         raise HTTPException(422, "floor_y must be inside the image")
     lo, hi = b.get("stand_min_x", blk.get("stand_min_x", 0)), b.get("stand_max_x", blk.get("stand_max_x", r["width"]))
-    if not (0 <= lo < hi <= r["width"]):
+    if strict and not (0 <= lo < hi <= r["width"]):
         raise HTTPException(422, "the standing area must be inside the image, from left to right")
     blk.update(b)
     try:
@@ -440,7 +441,7 @@ def edit_set_staging(sid: str, body: StagingIn, db: Session = Depends(get_db), u
         raise HTTPException(404, "no such set (only candidates and approved sets have staging to edit)")
     before = len(sets.seats_of(r["blocking"]))
     status, asset_id = r.get("status"), r.get("asset_id")
-    apply_blocking(r, body.blocking)
+    apply_blocking(r, body.blocking, strict=True)
     r["staging_edited_by"], r["staging_edited_at"] = user, time_now()
     # the preview with the staging drawn on it (the picture itself is not touched)
     a = db.get(Asset, asset_id) if asset_id else None
