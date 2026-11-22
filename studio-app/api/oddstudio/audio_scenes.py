@@ -188,6 +188,8 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
                 set_views.append((r or {}).get("view"))
         if fmt == "long":   # a long episode's scenes belong to acts 1-3: the recording's order, split in thirds
             scenes[-1]["act"] = 1 + (i * 3) // len(runs)
+    if notes:
+        carry_staging(scenes, runs, by_id, notes, cast, silent, actions or [])
     # the video's beats as timed actions, each in the scene whose time span holds it (dialogue and timing untouched)
     if actions:
         starts = [by_id[run[0]]["start"] for run in runs]
@@ -199,6 +201,48 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
            "characters": [{"key": k, "role": "silent" if k in silent else ""} for k in list(dict.fromkeys(cast + silent))],
            "scenes": scenes}
     return validate_script(doc, known, fmt=fmt)
+
+
+def carry_staging(scenes: list[dict], runs: list[list[str]], by_id: dict, notes: list[dict], cast: list[str],
+                  silent: list[str], actions: list[dict]) -> None:
+    """Scene continuity (owner decision 2026-11-22, Episode 14): a cut to a close-up is the camera, not people leaving.
+    - Scene 1 starts with its own staging plus everyone the notes show anywhere inside its time span (so a close-up
+      first line does not leave the others out); a scene 1 without a staging of its own (Seating ignored) stays so.
+    - Every later scene starts from the previous scene's staging, in the same seat order (nobody changes seats at a
+      cut); its own first-line notes only update the people they show (e.g. someone now standing).
+    - Someone leaves only when the accepted plan has an exit beat for them between the two scene starts (and no later
+      enter); an accepted enter beat brings them back (standing, unless the notes seat them)."""
+    from . import video_notes as VN
+    from .reference_plan import staging_for
+    if not scenes:
+        return
+    starts = [by_id[run[0]]["start"] for run in runs]
+    ends = [by_id[run[-1]]["end"] for run in runs]
+    # scene 1: its first line's staging, then anyone seated or standing in the notes inside its span (first seen first)
+    first = dict(scenes[0].get("staging") or {})
+    # only to complete a first-line staging that exists (a close-up): when the first range's Seating is ignored in the
+    # plan (or empty), scene 1 stays without a starting arrangement, as before
+    for r in sorted((r for r in notes if first and r["start"] < ends[0] and r["end"] > starts[0]), key=lambda r: r["start"]):
+        ln = next((by_id[x] for x in runs[0] if by_id[x]["start"] < r["end"] and by_id[x]["end"] > r["start"]), by_id[runs[0][0]])
+        for k, v in staging_for([ln], r, cast, silent).items():
+            first.setdefault(k, v)
+    if first:
+        scenes[0]["staging"] = first
+    prev = first
+    events = sorted(a for a in ((x["t"], x["type"], x["character"]) for x in actions) if a[1] in ("enter", "exit"))
+    for i in range(1, len(scenes)):
+        st = dict(prev)
+        for t, kind, k in events:
+            if starts[i - 1] <= t < starts[i]:
+                if kind == "exit":
+                    st.pop(k, None)
+                elif k not in st:
+                    st[k] = "standing"
+        for k, v in (scenes[i].get("staging") or {}).items():
+            st[k] = v                        # the scene's own notes update the people they show (existing seats kept)
+        if st:
+            scenes[i]["staging"] = st
+        prev = st
 
 
 def dialogue_of(script_or_lines) -> list[tuple]:

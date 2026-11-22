@@ -163,7 +163,8 @@ def generate_storyboard(ctx: Ctx) -> dict:
     for i, s in enumerate(sv.content["scenes"], 1):
         from .acting import referenced
         cast = list(dict.fromkeys([k for ln in s["lines"] for k in referenced(ln)]
-                                  + [a["character"] for a in s.get("actions") or []]))   # speakers, look-at, reactors, actors
+                                  + [a["character"] for a in s.get("actions") or []]
+                                  + list((s.get("staging") or {}).keys())))   # speakers, look-at, reactors, actors, the staged
         db.add(StoryboardScene(episode_id=ep.id, position=i, scene_key=s["id"], heading=s["heading"], location=s.get("location", ""),
                                description=s.get("description", ""), action=s.get("action", ""), camera=s.get("camera", ""),
                                characters=cast, lines=s["lines"], staging=s.get("staging"), set_id=s.get("set"), actions=s.get("actions"), status="draft"))
@@ -205,8 +206,14 @@ def regenerate_scene(ctx: Ctx) -> dict:
     return {"scene": sc.position}
 
 
+STILLS = 6   # frames on a scene's stills sheet
+
+
 def _scene_preview(ctx: Ctx, ep: Episode, sc: StoryboardScene, kind: str) -> Asset:
     db = ctx.db
+    from . import acting
+    if acting.enabled(db):
+        return _acting_stills(ctx, ep, sc, kind)
     script = current_script(db, ep)
     story = engine.build_story(episode_id=ep.id, revision=ep.revision, title=ep.title, script={**script, "hook": "", "interactive": {"type": "none"}},
                                scenes=list(ep.scenes), chars_by_key=prepare_characters(ctx), production=get_section(db, "production"),
@@ -215,6 +222,43 @@ def _scene_preview(ctx: Ctx, ep: Episode, sc: StoryboardScene, kind: str) -> Ass
     sheet = engine.preview(story, folder, ctx.log)
     key = f"episodes/{ep.id}/r{ep.revision}/scenes/{sc.position}/{kind}-job{ctx.job.id}.png"
     return store_asset(db, ep_id=ep.id, src=sheet, key=key, kind=kind, label=f"Scene {sc.position} stills",
+                       content_type="image/png", scene_id=sc.id, job_id=ctx.job.id, revision=ep.revision)
+
+
+def _acting_stills(ctx: Ctx, ep: Episode, sc: StoryboardScene, kind: str) -> Asset:
+    """Stills from the renderer the video will use (Settings > Motion = studio rig animator): the scene rendered by the
+    acting renderer, on the episode's own set and seats, with the episode's dialogue display, and a few of its frames
+    on one sheet. CPU only; no paid call."""
+    from PIL import Image, ImageDraw
+    from . import acting
+    from .tasks_long import clip_map
+    db = ctx.db
+    folder = ctx.folder("episodes", ep.id, f"r{ep.revision}", f"scene-{sc.position}", kind, "acting")
+    try:
+        clips = clip_map(db, ep)
+    except engine.EngineInputError:
+        clips = {}                                   # stills need no voice (a changed line keeps a closed mouth)
+    _, _, rep = acting.render(ctx, ep, [[(sc.id, i) for i in range(len(sc.lines))]], clips, prepare_characters(ctx),
+                              folder, stills=STILLS)
+    shots = [s for s in rep.get("stills") or [] if s]
+    if not shots:
+        raise engine.EngineRunError("the acting renderer made no stills")
+    tw, th = 360, 640
+    cols = min(3, len(shots))
+    rows = (len(shots) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * tw + (cols + 1) * 12, rows * (th + 36) + 12), (24, 24, 24))
+    d = ImageDraw.Draw(sheet)
+    for k, s in enumerate(shots):
+        with Image.open(s["file"]) as im:
+            thumb = im.convert("RGB").resize((tw, th))
+        x, y = 12 + (k % cols) * (tw + 12), 12 + (k // cols) * (th + 36)
+        sheet.paste(thumb, (x, y))
+        d.text((x, y + th + 8), f"{s['t']:.2f} s", fill=(230, 230, 230))
+    out = folder / "stills-sheet.png"
+    sheet.save(out)
+    key = f"episodes/{ep.id}/r{ep.revision}/scenes/{sc.position}/{kind}-job{ctx.job.id}.png"
+    ctx.log(f"stills: {len(shots)} frame(s) from the acting renderer on the set {ep.set_id} ({rep.get('render_seconds')} s)")
+    return store_asset(db, ep_id=ep.id, src=out, key=key, kind=kind, label=f"Scene {sc.position} stills (acting renderer)",
                        content_type="image/png", scene_id=sc.id, job_id=ctx.job.id, revision=ep.revision)
 
 

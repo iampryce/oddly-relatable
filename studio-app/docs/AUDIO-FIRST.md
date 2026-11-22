@@ -53,7 +53,12 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 - **Every field is editable** (shot, camera, setting, furniture, time of day, and each role's position, pose, facing and emotion). The first edit keeps the vision model's unedited notes, so the plan can show both values.
 - **Reference plan (accept before building).** The Audio tab lists, per time range, what the notes will drive:
   - **Set:** the set proposal.
-  - **Seating:** who is seated or standing and whom they face. Each scene starts that way, speaker first.
+  - **Seating:** who is seated or standing and whom they face. The first scene starts that way, speaker first.
+    - **Scene continuity:** a cut to a close-up is the camera, not people leaving.
+    - Every later scene starts with the same people on the same seats as the scene before. Its own notes only update the people they show, for example someone now standing.
+    - Someone leaves only when the accepted plan has an exit beat for them between the two scenes, and comes back with an enter beat.
+    - The first scene also stages everyone the notes show within its span, so a first line in close-up doesn't leave the others out.
+    - Everyone staged is in the storyboard scene (seated, never off stage).
   - **Shot:** a strong suggestion to the scene writer.
   - **Reactors:** silent reaction cutaways.
 
@@ -61,6 +66,12 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 - **Existing episodes** have no notes: re-upload the video with the box ticked to get them.
 
 ## Scenes and production (Stages 2 and 3)
+
+**Storyboard stills.** With the studio rig animator as the motion provider (every audio episode), "Refresh stills" renders the scene with the acting renderer, which also makes the video.
+- **What they show:** the episode's own set and its seats, and the episode's dialogue display (no bubble when "Dialogue on screen" is None).
+- **The sheet:** up to six frames, the first just after the scene's first line starts and the rest spread over its lines.
+- **How they are made:** the frames are drawn in order exactly as for the video, up to the last still. No video is encoded and no audio is needed (a line whose recording slice does not exist yet keeps a closed mouth). It runs on the CPU; nothing is paid.
+- **Script-first episodes on the old pose engine** keep the pose engine's stills.
 
 - **Stage 2:** the scenes are runs of consecutive recorded lines (a cut only between two lines); the writer adds staging and acting, the dialogue is locked, and the result goes through the usual script and storyboard approvals.
 - **Stage 3:** each line plays at its recorded time; lip sync comes from the recording, cut per line; the original audio goes into the video unchanged; the render must pass the audio QA (video length equals audio length; first mouth cue within 80 ms of the first word).
