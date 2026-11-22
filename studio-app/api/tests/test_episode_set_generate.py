@@ -125,6 +125,37 @@ class EpisodeProposalTest(unittest.TestCase):
         self.assertEqual(sets[g["set_id"]]["description"], text)
         self.assertNotIn(g["set_id"], [o["id"] for o in opts["options"]], "a candidate cannot be chosen until approved")
 
+    def test_the_jobs_reach_the_worker_queue_after_the_commit(self):
+        """Job 327 (2026-11-22): this route built its jobs itself and never announced them, so they waited in the
+        database until the worker restarted. Each job must reach the worker queue exactly as enqueue() sends it, and
+        only once it is committed (a worker that receives the id must find the job queued)."""
+        from oddstudio import queue
+        from oddstudio.db import new_session
+        from oddstudio.models import Job
+        pushed = []
+
+        class FakeRedis:
+            def lpush(self, key, value):
+                with new_session() as s:                     # what a worker sees the moment the id arrives
+                    j = s.get(Job, int(value))
+                    pushed.append((key, value, j.status if j else None, (j.payload or {}).get("set_id") if j else None))
+                return len(pushed)
+        real = queue.redis_client
+        queue.redis_client = lambda: FakeRedis()
+        try:
+            eid = self.audio_episode()
+            text = "An original rooftop garden with a bench, evening, 2 people seated facing each other."
+            g = self.c.post(f"/api/episodes/{eid}/set-proposal/generate", json={"text": text}).json()
+            self.assertEqual(pushed, [(queue.QUEUE_KEY, g["job"]["id"], "queued", g["set_id"])],
+                             "announced once, in enqueue's format, committed and with its set id")
+            # the shared enqueue() sends exactly the same message
+            pushed.clear()
+            with new_session() as s:
+                j = queue.enqueue(s, "set_candidate", payload={"set_id": "x", "label": "x", "description": "x"})
+            self.assertEqual(pushed[0][:3], (queue.QUEUE_KEY, j.id, "queued"))
+        finally:
+            queue.redis_client = real
+
     def test_without_notes_or_while_producing(self):
         eid = self.audio_episode(notes=False)
         self.assertFalse(self.c.get(f"/api/episodes/{eid}/set-proposal").json()["can_propose"])

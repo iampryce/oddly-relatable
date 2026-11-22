@@ -178,6 +178,11 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     db.add(Event(episode_id=ep.id, kind="episode", message=f"Set candidate(s) requested ({', '.join(m['set_id'] for m in made)}, "
                                                           f"{TWO_COST if body.views else IMAGE_COST}); approve in Settings > Sets"))
     db.commit()
+    # the jobs are built here (not with enqueue) so each set id carries its job id; like enqueue, announce each one to
+    # the worker queue only after the commit (job 327, 2026-11-22: without this the job stayed queued until a restart)
+    from .queue import announce
+    for m in made:
+        announce(m["job"]["id"])
     first = made[0]
     return {"set_id": first["set_id"], "job": first["job"], "prompt": first["prompt"], "sets": made}
 
