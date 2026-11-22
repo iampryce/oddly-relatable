@@ -41,7 +41,7 @@ def two_views_for(ep: Episode) -> bool:
     from .beats import two_views
     from .reference_plan import effective
     return two_views(effective(ep.audio_transcript or {}))
-MIN_TEXT, MAX_TEXT = 10, 400
+MIN_TEXT, MAX_TEXT = 10, 1000      # richer set notes (layout, windows, doors) run longer than one sentence
 MAX_VARIETY = 1500
 LOCKED_STAGES = ("producing", "publishing")
 
@@ -73,8 +73,24 @@ def clean_text(text: str, names: list[str]) -> str:
 
 
 def set_notes_of(ep: Episode) -> list[dict]:
-    """The video's set notes, one per distinct room (words only; owner-editable)."""
+    """The set notes, one per distinct room (words only; owner-editable): those read from a video for the room alone
+    ("Read the room from a video", kept on the proposal), else those made with the video notes."""
+    own = (ep.set_proposal or {}).get("set_notes")
+    if own:
+        return list(own)
     return list((((ep.audio_transcript or {}).get("video_notes") or {}).get("set_notes")) or [])
+
+
+def set_notes_from(ep: Episode) -> str:
+    """Where the set notes come from, in words."""
+    if (ep.set_proposal or {}).get("set_notes"):
+        return ((ep.set_proposal or {}).get("set_notes_source") or {}).get("from") or "a video read for the room"
+    return "the video notes" if set_notes_of(ep) else ""
+
+
+def reference_of(ep: Episode) -> dict | None:
+    """The owner's own reference picture for this episode's sets (None: text only)."""
+    return (ep.set_proposal or {}).get("reference") or None
 
 
 def cast_size(ep: Episode) -> int | None:
@@ -82,7 +98,15 @@ def cast_size(ep: Episode) -> int | None:
     speakers in the recording or the script."""
     tr = ep.audio_transcript or {}
     ranges = ((tr.get("video_notes") or {}).get("ranges")) or []
-    n = max((len(r.get("roles", [])) for r in ranges), default=0)
+    if ranges:
+        from .reference_plan import effective
+        ranges = effective(tr)
+
+    def on_screen(r: dict) -> list:
+        # with "who is who" confirmed, a person nobody confirmed is left out of the scenes: they need no seat
+        roles = r.get("roles", [])
+        return [ro for ro in roles if ro.get("who")] if any("who" in ro for ro in roles) else roles
+    n = max((len(on_screen(r)) for r in ranges), default=0)
     if not n:
         n = len({ln.get("speaker") for ln in tr.get("lines", []) if ln.get("speaker")})
     return n or None
@@ -109,10 +133,13 @@ def room_view(db: Session, ep: Episode, r: dict, two: bool) -> dict:
     from . import sets
     seats = r.get("seats") or cast_size(ep)
     variety, vsrc = variety_of(db, ep, r["text"])
-    parts = sets.prompt_parts(db, r["text"], seats, variety)
-    return {**r, "seats": seats, "variety_source": vsrc, "parts": parts,
-            "prompt": sets.prompt_for(db, r["text"], seats, variety),
-            "view_prompts": {v: sets.prompt_for(db, r["text"], seats, variety, line) for v, line in VIEW_LINES.items()} if two else {}}
+    ref = reference_of(ep)
+    parts = sets.prompt_parts(db, r["text"], seats, variety, reference=bool(ref))
+    prompt = sets.prompt_for(db, r["text"], seats, variety, reference=bool(ref))
+    req = sets.request_view(db, prompt, ref["label"] if ref else None)
+    return {**r, "seats": seats, "variety_source": vsrc, "parts": parts, "prompt": prompt, "request": req,
+            "request_text": sets.request_text(req),
+            "view_prompts": {v: sets.prompt_for(db, r["text"], seats, variety, line, bool(ref)) for v, line in VIEW_LINES.items()} if two else {}}
 
 
 def view(db: Session, ep: Episode) -> dict:
@@ -124,13 +151,22 @@ def view(db: Session, ep: Episode) -> dict:
     variety, vsrc = variety_of(db, ep, first["text"] if first else "")
     return {"text": first["text"] if first else "", "source": first.get("source") if first else None, "updated": p.get("updated"),
             "prompt": first["prompt"] if first else "", "parts": first["parts"] if first else [], "rooms": rooms,
-            "image_cost": IMAGE_COST, "two_views": two, "two_cost": TWO_COST,
+            "image_cost": IMAGE_COST, "two_views": two, "two_cost": TWO_COST, "seat_cost": _seat_cost(db),
             "view_prompts": first["view_prompts"] if first else {},
             "variety": variety, "variety_source": vsrc, "recent_sets": sets.recent_signatures(db, ep.id),
             "set_notes": set_notes_of(ep), "set_notes_note": ((ep.audio_transcript or {}).get("video_notes") or {}).get("set_notes_note", ""),
-            "propose_with": "video notes" if ep.source == "audio" else "writer",
-            "can_propose": bool(((ep.audio_transcript or {}).get("video_notes") or {}).get("ranges"))
-            if ep.source == "audio" else bool(ep.script_version)}
+            "set_notes_from": set_notes_from(ep), "set_notes_source": (p.get("set_notes_source") if p.get("set_notes") else None),
+            "reference": {**reference_of(ep), "url": _asset_url(db, reference_of(ep)["asset_id"])} if reference_of(ep) else None,
+            "propose_with": "set notes" if set_notes_of(ep) else ("video notes" if ep.source == "audio" else "writer"),
+            "can_propose": bool(set_notes_of(ep)) or (bool(((ep.audio_transcript or {}).get("video_notes") or {}).get("ranges"))
+                                                     if ep.source == "audio" else bool(ep.script_version))}
+
+
+def _asset_url(db: Session, aid) -> str | None:
+    from .models import Asset
+    from .storage import storage
+    a = db.get(Asset, aid) if aid else None
+    return storage().url(a.storage_key) if a else None
 
 
 def normalized(text: str) -> str:
@@ -203,10 +239,22 @@ class SetNotesIn(BaseModel):
 
 @router.put("/episodes/{eid}/set-notes")
 def edit_set_notes(eid: int, body: SetNotesIn, db: Session = Depends(get_db)):
-    """The owner's edit of one room's set notes (your words; "Propose from the video notes" then uses them verbatim)."""
+    """The owner's edit of one room's set notes (your words; "Propose" then uses them verbatim). The notes are edited
+    where they live: on the proposal (read from a video for the room) or in the video notes."""
     ep = _episode(db, eid)
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
+    if (ep.set_proposal or {}).get("set_notes"):
+        sp = dict(ep.set_proposal)
+        sn = [dict(x) for x in sp["set_notes"]]
+        if not 0 <= body.room < len(sn):
+            raise HTTPException(404, "no such room in the set notes")
+        sn[body.room].update(text=normalized(body.text), edited=True)
+        sp["set_notes"] = sn
+        ep.set_proposal = sp
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"Set notes edited ({sn[body.room]['room']})"))
+        db.commit()
+        return view(db, ep)
     tr = dict(ep.audio_transcript or {})
     notes = dict(tr.get("video_notes") or {})
     sn = [dict(x) for x in notes.get("set_notes") or []]
@@ -223,15 +271,16 @@ def edit_set_notes(eid: int, body: SetNotesIn, db: Session = Depends(get_db)):
 
 @router.post("/episodes/{eid}/set-proposal/propose")
 def propose(eid: int, db: Session = Depends(get_db)):
-    """Audio: the set notes verbatim, one proposal per room (or, for older notes without set notes, the fixed sentence
-    from the staging notes); free and immediate. Script-first: the AI writer proposes one sentence from the story."""
+    """The set notes verbatim when there are any (from the video notes, or read from a video for the room), one
+    proposal per room; else audio: the fixed sentence from the staging notes (older notes); free and immediate.
+    Script-first without set notes: the AI writer proposes one sentence from the story."""
     from . import video_notes as VN
     ep = _episode(db, eid)
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
-    if ep.source == "audio":
+    sn = set_notes_of(ep)
+    if ep.source == "audio" or sn:
         from .reference_plan import effective
-        sn = set_notes_of(ep)
         if sn:
             p = dict(ep.set_proposal or {})
             rooms = [{"room": x["room"], "text": x["text"], "source": "set notes", "seats": x.get("seats"),
@@ -257,9 +306,10 @@ def propose(eid: int, db: Session = Depends(get_db)):
 
 
 class GenerateIn(BaseModel):
-    text: str = Field(min_length=MIN_TEXT, max_length=MAX_TEXT)
+    text: str = Field(default="", max_length=MAX_TEXT)
     views: bool = False      # both sides of the room (only when the notes show two views of one room)
     room: int = Field(default=0, ge=0, le=7)
+    again_of: str | None = Field(default=None, max_length=80)   # "Generate another": the same request as this candidate
 
 
 @router.post("/episodes/{eid}/set-proposal/generate")
@@ -270,6 +320,8 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     ep = _episode(db, eid)
     if ep.stage in LOCKED_STAGES:
         raise HTTPException(409, f"not while the episode is {ep.stage}")
+    if body.again_of:
+        return _again(db, ep, body.again_of)
     text = normalized(body.text)
     rooms = rooms_of(ep)
     if body.room >= max(1, len(rooms)):
@@ -290,11 +342,13 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     want = list(VIEW_LINES.items()) if body.views else [(None, None)]
     made, linked = [], None
     sig = r.get("signature") if r.get("source") == "set notes" else ""
+    ref = reference_of(ep)
     for view_name, line in want:
-        prompt = sets.prompt_for(db, text, seats, variety, line or "")
+        prompt = sets.prompt_for(db, text, seats, variety, line or "", bool(ref))
         job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
                   payload={"label": label + (f", {view_name}" if view_name else ""), "description": text, "episode_id": ep.id,
-                           "prompt": prompt, "seats": seats, **({"signature": sig} if sig else {})})
+                           "prompt": prompt, "seats": seats, "room_index": body.room, **({"signature": sig} if sig else {}),
+                           **({"reference_asset_id": ref["asset_id"], "reference_label": ref["label"]} if ref else {})})
         db.add(job)
         db.flush()
         set_id = f"{sets.slug(ep.title)[:30]}-ep{ep.id}-{job.id}"
@@ -312,6 +366,33 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
         announce(m["job"]["id"])
     first = made[0]
     return {"set_id": first["set_id"], "job": first["job"], "prompt": first["prompt"], "sets": made}
+
+
+def _again(db: Session, ep: Episode, sid: str) -> dict:
+    """"Generate another": one more candidate from exactly the request an earlier candidate of this episode was made
+    from (its stored prompt, seats and reference), whatever the boxes say now."""
+    from . import sets
+    from .models import Job
+    from .queue import announce
+    rec = sets.records(db).get(sid)
+    if not rec or rec.get("episode_id") != ep.id or not rec.get("prompt"):
+        raise HTTPException(404, "no set candidate of this episode with a stored request")
+    ref_id = rec.get("reference_asset_id")
+    job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
+              payload={"label": rec.get("label", sid), "description": rec.get("description", ""), "episode_id": ep.id,
+                       "prompt": rec["prompt"], "seats": rec.get("seats_wanted"), "room_index": rec.get("room_index", 0),
+                       "again_of": sid, **({"signature": rec["signature"]} if rec.get("signature") else {}),
+                       **({"reference_asset_id": ref_id, "reference_label": (rec.get("request") or {}).get("reference_image")}
+                          if ref_id else {})})
+    db.add(job)
+    db.flush()
+    set_id = f"{sets.slug(ep.title)[:30]}-ep{ep.id}-{job.id}"
+    job.payload = {**job.payload, "set_id": set_id}
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Another set candidate requested ({set_id}, same request as "
+                                                          f"{sid}, {IMAGE_COST})"))
+    db.commit()
+    announce(job.id)
+    return {"set_id": set_id, "job": S.job(job), "prompt": rec["prompt"], "sets": [{"set_id": set_id, "job": S.job(job)}]}
 
 
 # ------------------------------------------------------------------ the writer's proposal (script-first)
@@ -342,3 +423,78 @@ def set_proposal(ctx: Ctx) -> dict:
     db.add(Event(episode_id=ep.id, kind="episode", message="Proposed set written by the AI writer from the story"))
     db.commit()
     return {"text": text}
+
+
+# ------------------------------------------------------------------ the set panel on the episode page
+PANEL_JOBS = ("set_candidate", "set_seat_suggest", "set_notes_read_video", "set_proposal")
+
+
+def panel_jobs(db: Session, ep: Episode, set_ids: set[str]) -> list[dict]:
+    """The latest set jobs of this episode (set candidates carry the episode in their payload, not on the job)."""
+    from .models import Job
+    out = []
+    for j in db.query(Job).filter(Job.kind.in_(PANEL_JOBS)).order_by(Job.id.desc()).limit(300):
+        p = j.payload or {}
+        if j.episode_id == ep.id or p.get("episode_id") == ep.id or p.get("set_id") in set_ids:
+            out.append({"id": j.id, "kind": j.kind, "status": j.status, "error": j.error, "set_id": p.get("set_id"),
+                        "created_at": S.ts(j.created_at), "finished_at": S.ts(j.finished_at)})
+        if len(out) >= 12:
+            break
+    return out
+
+
+@router.get("/episodes/{eid}/set-panel")
+def set_panel(eid: int, db: Session = Depends(get_db)):
+    """Every set made for this episode (and the sets it uses), each with its picture, status, staging, the suggested
+    seats, the exact request it was made from and its cost; the set jobs with their errors; the seat-suggestion cost."""
+    from . import seat_suggest, sets
+    from .models import Asset
+    from .storage import storage
+    ep = _episode(db, eid)
+    people = cast_size(ep) or 0
+    items = []
+    for sid, r in sorted(sets.records(db).items(), key=lambda kv: -kv[1].get("created", 0)):
+        if r.get("status") == "binned" or not (r.get("episode_id") == ep.id or sid == ep.set_id or sid in (ep.scene_set_ids or [])):
+            continue
+        a, pv = db.get(Asset, r.get("asset_id")), db.get(Asset, r.get("preview_asset_id"))
+        want = int(r.get("seats_wanted") or people or 0)
+        sug = r.get("suggested") or None
+        items.append({"id": sid, "label": r.get("label", sid), "status": r.get("status"), "chosen": sid == ep.set_id,
+                      "for_this_episode": r.get("episode_id") == ep.id, "kept": bool(r.get("kept")),
+                      "url": storage().url(a.storage_key) if a else None, "preview_url": storage().url(pv.storage_key) if pv else None,
+                      "width": r.get("width"), "height": r.get("height"), "blocking": r.get("blocking") or {},
+                      "seats": len(sets.seats_of(r.get("blocking") or {})), "people": want,
+                      "suggested": {k: sug[k] for k in ("blocking", "info", "summary", "usage", "estimated_usd", "at") if k in sug} if sug else None,
+                      "suggest_error": r.get("suggest_error"), "staging_edited": bool(r.get("staging_edited_at")),
+                      "request": r.get("request") or ({"prompt": r["prompt"]} if r.get("prompt") else None),
+                      "request_text": sets.request_text(r["request"]) if r.get("request") else r.get("prompt"),
+                      "estimated_usd": r.get("estimated_usd"), "cost": IMAGE_COST, "room": r.get("room"), "view": r.get("view"),
+                      "room_index": r.get("room_index", 0), "created": r.get("created"), "description": r.get("description")})
+    return {"sets": items, "people": people, "jobs": panel_jobs(db, ep, {x["id"] for x in items}),
+            "suggest_cost": seat_suggest.cost_view(db), "image_cost": IMAGE_COST, "chosen": ep.set_id}
+
+
+@router.post("/sets/{sid}/suggest-seats")
+def suggest_seats(sid: str, db: Session = Depends(get_db)):
+    """"Suggest seats again": one vision call on the set's own picture (cost shown first; refused over the cap). The
+    suggestion is stored and, on a candidate nobody has edited, used as its staging; nothing is approved."""
+    from . import seat_suggest, sets
+    r = sets.records(db).get(sid)
+    if not r or r.get("status") not in ("candidate", "approved"):
+        raise HTTPException(404, "no such set")
+    cost = seat_suggest.cost_view(db)
+    if not cost.get("configured"):
+        raise HTTPException(409, cost.get("message") or "no API vision provider")
+    if not cost["within_cap"]:
+        raise HTTPException(409, f"about ${cost['usd']:.3f}, over the ${cost['cap_usd']:.2f} cap")
+    job = enqueue(db, "set_seat_suggest", payload={"set_id": sid, "episode_id": r.get("episode_id")})
+    if r.get("episode_id"):
+        db.add(Event(episode_id=r["episode_id"], kind="job", message=f"Seat suggestion requested for {r.get('label', sid)} "
+                                                                     f"(about ${cost['usd']:.3f})"))
+        db.commit()
+    return {"job": S.job(job), "cost": cost}
+
+
+def _seat_cost(db: Session) -> dict:
+    from . import seat_suggest
+    return seat_suggest.cost_view(db)

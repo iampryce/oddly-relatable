@@ -11,6 +11,11 @@ deleted after the job; no frame ever goes to an image generator.
 Each room's notes become one sentence assembled only from those list words (`room_text`). The owner can edit it in
 the episode page; "Propose from the video notes" uses it verbatim, one proposal per room.
 
+Richer notes (feat/episode-workspace): the room's size feel, the windows, doors and bookcases with their places, and the
+ROLES LAYOUT: anonymous groups of people as positions only (the main speaker seated behind the desk, the others seated
+in a row facing it, one standing by the door), from fixed lists, never what anyone looks like. "Read the room from a
+video" (room_read.py) makes these notes alone from a separate upload, without the staging notes.
+
 Pure functions on plain data, so the rules are tested directly.
 """
 from __future__ import annotations
@@ -26,12 +31,13 @@ MAX_ITEMS = 10
 OUT_PER_ROOM = 320            # output tokens per room (estimate)
 
 SIZES = ("small", "medium", "large")
+FEELS = ("cramped", "snug", "roomy", "spacious", "vast")
 ARRANGEMENTS = ("around a table", "side by side", "facing each other", "in a row facing the camera", "behind a desk",
                 "scattered", "none")
 ITEMS = ("desk", "long table", "round table", "meeting table", "dining table", "coffee table", "side table", "chair",
          "office chair", "armchair", "sofa", "stool", "bench", "bookshelf", "shelf", "cabinet", "filing cabinet",
          "counter", "bar counter", "kitchen counter", "bed", "wardrobe", "dresser", "lamp", "floor lamp", "ceiling light",
-         "pendant light", "plant", "window", "door", "rug", "whiteboard", "screen", "picture frame", "curtains", "blinds",
+         "pendant light", "plant", "window", "door", "bookcase", "rug", "whiteboard", "screen", "picture frame", "curtains", "blinds",
          "fridge", "sink", "stove", "mirror", "clock", "radiator", "coat stand", "water cooler", "printer")
 # items whose real content could be text or artwork: always drawn blank
 BLANK = {"whiteboard": "a blank whiteboard", "screen": "a blank dark screen", "picture frame": "a plain empty frame",
@@ -50,9 +56,18 @@ LIGHTS = ("bright daylight", "soft daylight", "overcast daylight", "cool fluores
           "dim light", "evening light", "night with city light", "neon light", "spotlights")
 MOODS = ("tidy", "cluttered", "corporate", "homely", "shabby", "sterile", "busy", "quiet", "tense", "cheerful", "gloomy",
          "modern", "old-fashioned", "luxurious", "cramped", "spacious")
-ROOM_KEYS = {"room", "size", "seats", "arrangement", "main", "furniture", "walls", "floor", "ceiling", "light", "mood"}
+# the roles layout: anonymous groups by position only (who sits behind the desk, who sits in a row, who stands)
+LAYOUT_WHO = ("the main speaker", "one other person", "the others")
+LAYOUT_POSES = ("seated", "standing")
+LAYOUT_PLACES = ("behind the main furniture", "in a row facing the main furniture", "in a row facing the camera",
+                 "around the main furniture", "beside the main furniture", "on the sofa", "by the door",
+                 "by the window", "in the open floor")
+MAX_LAYOUT = 4
+ROOM_KEYS = {"room", "size", "feel", "seats", "arrangement", "main", "furniture", "walls", "floor", "ceiling", "light",
+             "mood", "layout"}
+LAYOUT_KEYS = {"who", "count", "pose", "place"}
 ITEM_KEYS = {"item", "shape", "material", "colour", "place"}
-WORDS = (set(SIZES) | set(ARRANGEMENTS) | set(ITEMS) | set(SHAPES) | set(MATERIALS) | set(COLOURS) | set(PLACES)
+WORDS = (set(SIZES) | set(FEELS) | set(LAYOUT_WHO) | set(LAYOUT_POSES) | set(LAYOUT_PLACES) | set(ARRANGEMENTS) | set(ITEMS) | set(SHAPES) | set(MATERIALS) | set(COLOURS) | set(PLACES)
          | set(FLOORS) | set(LIGHTS) | set(MOODS) | set(VN.SETTINGS) | set(BLANK.values()))
 
 
@@ -88,11 +103,11 @@ def pick_frames(room: dict, frames: list[dict], k: int = FRAMES_PER_ROOM) -> lis
 
 
 # ------------------------------------------------------------------ cost
-def estimate(provider: str, rooms_n: int = 2) -> dict:
+def estimate(provider: str, rooms_n: int = 2, frames: int | None = None) -> dict:
     """The extra vision call for the set notes: frames, tokens and USD (list prices, upper estimate). Before an upload
-    the number of rooms is unknown: two rooms are assumed."""
+    the number of rooms is unknown: two rooms are assumed. `frames`: the frames actually sent (Read the room)."""
     from .notes_v2 import CALIBRATION
-    frames = rooms_n * FRAMES_PER_ROOM
+    frames = frames if frames is not None else rooms_n * FRAMES_PER_ROOM
     p = VN.PRICES.get(provider)
     if not p:
         return {"frames": frames, "configured": False}
@@ -103,28 +118,67 @@ def estimate(provider: str, rooms_n: int = 2) -> dict:
 
 
 # ------------------------------------------------------------------ the prompt
+def _schema_text(room_line: str, extra_keys: str = "") -> str:
+    L = lambda xs: ", ".join(xs)     # noqa: E731
+    return (
+        "You are helping design an ORIGINAL, EMPTY 2D cartoon set inspired by the kind of room in a reference video that "
+        "we will never copy. Describe the room itself, in words from the lists below, and where people are placed in "
+        "it (positions only: never what anyone looks like, wears or does).\n" + room_line + "\n"
+        'Return JSON only: {"rooms": [{"room": 1, ' + extra_keys + '"size": ..., "feel": ..., "seats": 0, '
+        '"arrangement": ..., "main": {"item": ..., "place": ...}, "furniture": [{"item": ..., "shape": ..., '
+        '"material": ..., "colour": ..., "place": ...}], "walls": ..., "floor": {"colour": ..., "material": ...}, '
+        '"ceiling": ..., "light": ..., "mood": [...], "layout": [{"who": ..., "count": 1, "pose": ..., "place": ...}]}]}\n'
+        f"One entry per room, at most {MAX_ITEMS} furniture items each. Always list every window, door and bookcase "
+        "with its place, and the main desk or table with its shape, material and colour. Allowed values ONLY:\n"
+        f"- size: {L(SIZES)}\n- feel (how big the room feels): {L(FEELS)}\n"
+        f"- seats: a whole number (chairs, stools and sofa places)\n- arrangement: {L(ARRANGEMENTS)}\n"
+        f"- item: {L(ITEMS)}\n- shape: {L(SHAPES)}\n- material: {L(MATERIALS)}\n- colour (also walls, ceiling, floor "
+        f"colour): {L(COLOURS)}\n- place: {L(PLACES)}\n- floor material: {L(FLOORS)}\n- light: {L(LIGHTS)}\n"
+        f"- mood (at most 2): {L(MOODS)}\n"
+        f"- layout (at most {MAX_LAYOUT} groups; who sits behind the desk, who sits in a row, who stands): who: "
+        f"{L(LAYOUT_WHO)}; count: a whole number; pose: {L(LAYOUT_POSES)}; place: {L(LAYOUT_PLACES)}\n"
+        "Never output names, brands, logos, any written text or signs, artwork or pictures on walls, screens' content, "
+        "or anything about how the people look. If unsure of a value, leave the field out.")
+
+
 def prompt(groups: list[tuple[str, int]]) -> str:
     """groups: (room word, number of frames) in the order the frames are attached."""
     n, parts = 0, []
     for i, (word, k) in enumerate(groups):
         parts.append(f"room {i + 1} ({word}): frames {n + 1}-{n + k}" if k > 1 else f"room {i + 1} ({word}): frame {n + 1}")
         n += k
-    L = lambda xs: ", ".join(xs)
-    return (
-        "You are helping design an ORIGINAL, EMPTY 2D cartoon set inspired by the kind of room in a reference video that "
-        "we will never copy. Describe only the room itself, in words from the lists below. Ignore all people.\n"
-        f"The frames show these rooms: {'; '.join(parts)}.\n"
-        'Return JSON only: {"rooms": [{"room": 1, "size": ..., "seats": 0, "arrangement": ..., "main": {"item": ..., '
-        '"place": ...}, "furniture": [{"item": ..., "shape": ..., "material": ..., "colour": ..., "place": ...}], '
-        '"walls": ..., "floor": {"colour": ..., "material": ...}, "ceiling": ..., "light": ..., "mood": [...]}]}\n'
-        f"One entry per room, at most {MAX_ITEMS} furniture items each (windows, doors, shelves, plants and lamps count as "
-        "furniture with their place). Allowed values ONLY:\n"
-        f"- size: {L(SIZES)}\n- seats: a whole number (chairs, stools and sofa places)\n- arrangement: {L(ARRANGEMENTS)}\n"
-        f"- item: {L(ITEMS)}\n- shape: {L(SHAPES)}\n- material: {L(MATERIALS)}\n- colour (also walls, ceiling, floor "
-        f"colour): {L(COLOURS)}\n- place: {L(PLACES)}\n- floor material: {L(FLOORS)}\n- light: {L(LIGHTS)}\n"
-        f"- mood (at most 2): {L(MOODS)}\n"
-        "Never output names, brands, logos, any written text or signs, artwork or pictures on walls, screens' content, "
-        "or anything about the people. If unsure of a value, leave the field out.")
+    return _schema_text(f"The frames show these rooms: {'; '.join(parts)}.")
+
+
+def scan_prompt(frames: int) -> str:
+    """Read the room from a video: the frames are not grouped yet; the model groups them into rooms and names each
+    room's kind with a setting word."""
+    return _schema_text(
+        f"The {frames} frames come from one reference video, in time order. Group them into the distinct rooms they show "
+        f"(at most {MAX_ROOMS}; the same room from another angle is the same room) and give each room's kind as "
+        f"\"setting\", one of: {', '.join(s for s in VN.SETTINGS if s not in ('indoors', 'outdoors', 'other'))}.",
+        '"setting": ..., ')
+
+
+def clean_scan(raw) -> tuple[list[dict], int]:
+    """The scan's rooms through the same checks as the grouped notes: each room's setting word from the list (else
+    "room"; two rooms of one kind are numbered), then `clean`."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("rooms"), list):
+        return [], 1
+    rooms_in, words, stripped = [], [], len(set(raw) - {"rooms"}) if isinstance(raw, dict) else 0
+    for r in raw["rooms"][:MAX_ROOMS * 2]:
+        if not isinstance(r, dict):
+            stripped += 1
+            continue
+        w = _pick(r.get("setting"), [s for s in VN.SETTINGS if s not in ("indoors", "outdoors", "other")]) or "room"
+        stripped += 1 if r.get("setting") is not None and w == "room" else 0
+        n = sum(1 for x in words if x == w or x.startswith(w + " "))
+        words.append(w if not n else f"{w} {n + 1}")
+        rooms_in.append({**{k: v for k, v in r.items() if k != "setting"}, "room": len(words)})
+        if len(words) >= MAX_ROOMS:
+            break
+    out, s2 = clean({"rooms": rooms_in}, words)
+    return out, stripped + s2
 
 
 # ------------------------------------------------------------------ validation (redaction)
@@ -153,8 +207,8 @@ def clean(raw, words: list[str]) -> tuple[list[dict], int]:
             continue
         seen.add(k)
         e: dict = {"room": words[k - 1]}
-        for key, allowed in (("size", SIZES), ("arrangement", ARRANGEMENTS), ("walls", COLOURS), ("ceiling", COLOURS),
-                             ("light", LIGHTS)):
+        for key, allowed in (("size", SIZES), ("feel", FEELS), ("arrangement", ARRANGEMENTS), ("walls", COLOURS),
+                             ("ceiling", COLOURS), ("light", LIGHTS)):
             if key in r:
                 v = _pick(r[key], allowed)
                 if v:
@@ -204,6 +258,25 @@ def clean(raw, words: list[str]) -> tuple[list[dict], int]:
                 break
         if items:
             e["furniture"] = items
+        if "layout" in r:
+            groups = []
+            for g in (r["layout"] if isinstance(r["layout"], list) else [r["layout"]])[: MAX_LAYOUT * 2]:
+                if not isinstance(g, dict):
+                    stripped += 1
+                    continue
+                stripped += len(set(g) - LAYOUT_KEYS)
+                who, pose, place = _pick(g.get("who"), LAYOUT_WHO), _pick(g.get("pose"), LAYOUT_POSES), _pick(g.get("place"), LAYOUT_PLACES)
+                c = g.get("count", 1)
+                ok_count = isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) and 1 <= c <= 12
+                if not (who and pose and place and ok_count):
+                    stripped += 1
+                    continue
+                groups.append({"who": who, "count": 1 if who in ("the main speaker", "one other person") else int(c),
+                               "pose": pose, "place": place})
+                if len(groups) >= MAX_LAYOUT:
+                    break
+            if groups:
+                e["layout"] = groups
         if "mood" in r:
             ms = r["mood"] if isinstance(r["mood"], list) else [r["mood"]]
             keep = [m for m in (_pick(x, MOODS) for x in ms) if m][:2]
@@ -261,9 +334,24 @@ def room_text(e: dict) -> str:
     items = [it for it in e.get("furniture", []) if not (m and it["item"] == m["item"] and not it.get("colour"))]
     if items:
         s += " Furniture: " + "; ".join(_item(it) for it in items) + "."
+    if e.get("layout"):
+        s += " " + layout_text(e["layout"], (e.get("main") or {}).get("item"))
+    if e.get("feel"):
+        s += f" The room feels {e['feel']}."
     if e.get("mood"):
         s += f" Mood: {', '.join(e['mood'])}."
     return s
+
+
+def layout_text(groups: list[dict], main: str | None) -> str:
+    """The roles layout in words: "Layout: the main speaker seated behind the desk; 3 others seated in a row facing
+    the desk; one other person standing by the door." (positions only)."""
+    thing = main or "main furniture"
+    bits = []
+    for g in groups:
+        who = g["who"] if g["who"] != "the others" else (f"{g['count']} others" if g["count"] > 1 else "one other")
+        bits.append(f"{who} {g['pose']} {g['place'].replace('main furniture', thing)}")
+    return "Layout: " + "; ".join(bits) + "."
 
 
 def signature(e: dict) -> str:

@@ -210,7 +210,7 @@ class UnconfirmedPeopleTest(unittest.TestCase):
         tr = {"video_notes": {"ranges": ranges, "beats": [{"id": "b1", "t": 3.97, "type": "exit", "person": 3},
                                                           {"id": "b2", "t": 19.87, "type": "enter", "person": 1},
                                                           {"id": "b3", "t": 49.66, "type": "turn_to", "person": 2, "target": "person 3"}]},
-              "reference_plan": {"ignored": ["1:movement", "2:movement"]}}
+              "reference_plan": {"ignored": ["1:movement", "2:movement"]}, "person_map": {"a": 1, "b": 2, "c": 3}}
         self.assertEqual([b["id"] for b in effective_beats(tr)], ["b3"], "unticking the cut's ranges keeps the turn at 49.66 s")
 
     def test_without_confirmed_people_the_reactors_never_wrap_around(self):

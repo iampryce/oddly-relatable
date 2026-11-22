@@ -2,12 +2,14 @@
 // The episode's own set (owner decision 2026-11-21): no silent default. Production starts only once an APPROVED set is
 // chosen here. Generating a new set for the story is the main action; reusing a set is a deliberate pick that shows
 // which other episodes already use it. The video notes' setting word is a suggestion only, never applied by itself.
+// feat/episode-workspace: the episode's own candidates are decided here, in the set panel (Settings › Sets is only the
+// library of sets kept for reuse).
 import {useState} from 'react';
-import Link from 'next/link';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import SetProposal from './SetProposal';
+import SetPanel from './SetPanel';
 import {pickerGroups, reuseLabel} from '@/lib/setView';
 
 export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
@@ -23,9 +25,9 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
     act.run('set', async () => { await api(`/episodes/${ep.id}/set`, {method: 'PUT', body: {set_id: o.id}}); await reload(); setOpen(false); });
   };
   return (
-    <div className="card stack">
+    <div className="stack">
       <div className="spread">
-        <div><h2 style={{margin: 0}}>Set</h2>
+        <div>
           {current ? <span className="small">{current.label}{current.used_in.length ? ` · also in ${current.used_in.length} other episode(s)` : ' · only in this episode'}</span>
             : <span className="small" style={{color: 'var(--bad, #b00)'}}>No set chosen yet: production cannot start until you choose one (there is no default).</span>}</div>
         <div className="row">
@@ -35,8 +37,8 @@ export default function EpisodeSetPicker({ep, act}: {ep: any; act: ReturnType<ty
       {data.suggestion && <p className="small">The video notes describe the place as <b>{data.suggestion.word}</b>{data.suggestion.set_id
         ? <>; <b>{data.options.find((o: any) => o.id === data.suggestion.set_id)?.label}</b> ({reuseLabel(data.options.find((o: any) => o.id === data.suggestion.set_id) || {})}) matches (a suggestion: nothing is applied until you choose it).</>
         : '; generate a new set for this story below.'}</p>}
-      {data.hidden_other_episodes > 0 && <p className="muted small">{data.hidden_other_episodes} set(s) made for other episodes are not offered here: keep one for future episodes (Settings › Sets) to reuse it.</p>}
-      {data.candidates.length > 0 && <p className="muted small">Waiting for approval in Settings › <Link href="/settings#sets">Sets</Link>: {data.candidates.map((c: any) => c.label).join(', ')}.</p>}
+      {data.hidden_other_episodes > 0 && <p className="muted small">{data.hidden_other_episodes} set(s) made for other episodes are not offered here: keep one for future episodes (on its episode) to reuse it.</p>}
+      <SetPanel ep={ep} onChange={reload} />
       <SetProposal ep={ep} candidates={data.candidates} onChange={reload} />
       {open && [['This episode\'s sets', groups.own], ['Kept for reuse', groups.kept]].map(([title, list]: any) => list.length > 0 && <div key={title} className="stack">
         <strong className="small">{title}</strong><div className="grid cols-3">

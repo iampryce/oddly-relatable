@@ -139,15 +139,41 @@ def range_index(ranges: list[dict], t: float) -> int | None:
     return best
 
 
+def confirmed_persons(tr: dict) -> set[int]:
+    """The person numbers someone confirmed as a character under People ("who is who")."""
+    out = set()
+    for v in (tr.get("person_map") or {}).values():
+        try:
+            if v is not None and str(v).strip() != "":
+                out.add(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def beat_confirmed(b: dict, people: set[int]) -> bool:
+    """A beat is acted only when its person is confirmed (and, for a turn, the person turned to as well)."""
+    if b.get("person") not in people:
+        return False
+    if b.get("type") == "turn_to":
+        try:
+            return int(str(b.get("target", "")).split()[1]) in people
+        except (IndexError, ValueError):
+            return False
+    return True
+
+
 def effective_beats(tr: dict) -> list[dict]:
-    """The beats the builders act: supported types only, without those in ranges whose Movement item is ignored."""
+    """The beats the builders act: supported types only, of confirmed people only (owner rule 2026-11-22: a person
+    nobody confirmed under People is never acted), without those in ranges whose Movement item is ignored."""
     from .beats import SUPPORTED
     ign = set(stored(tr).get("ignored", []))
     ranges = ranges_of(tr)
+    people = confirmed_persons(tr)
     out = []
     for b in (tr.get("video_notes") or {}).get("beats") or []:
         i = range_index(ranges, b["t"])
-        if b["type"] in SUPPORTED and not (i is not None and f"{i}:movement" in ign):
+        if b["type"] in SUPPORTED and beat_confirmed(b, people) and not (i is not None and f"{i}:movement" in ign):
             out.append(b)
     return out
 
@@ -243,7 +269,9 @@ def view(db: Session, ep: Episode) -> dict:
         rl = [ln for ln in lines if ln["start"] < r["end"] and ln["end"] > r["start"]]
         roles = role_map(rl, cast, silent, r)
         o = _original_for(tr, r)
-        seated = sum(1 for ro in r.get("roles", []) if ro.get("pose") == "seated")
+        # only the people who will be on screen count (owner rule 2026-11-22): a role nobody confirmed under People, or
+        # one beyond the cast, is left out of the scene, so it never takes a seat
+        seated = sum(1 for ro in r.get("roles", []) if ro.get("pose") == "seated" and ro.get("role") in roles)
         seat_note = []
         if seated and spec is not None and seated > seats:
             seat_note.append(f"the episode's set has {seats} seat(s): {seated - seats} seated person(s) will stand")
@@ -263,14 +291,19 @@ def view(db: Session, ep: Episode) -> dict:
             seat_note.append(f"{len(left)} person(s) left out" + (f" ({unconfirmed} not confirmed under People)" if unconfirmed else
                                                                  " (more people than characters)"))
         from . import beats as BT
-        in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if range_index(all_ranges, b["t"]) == i]
+        all_in_range = [b for b in (tr.get("video_notes") or {}).get("beats") or [] if range_index(all_ranges, b["t"]) == i]
+        # the beats of people nobody confirmed are not acted, so the plan does not list them (only how many)
+        confirmed = confirmed_persons(tr)
+        in_range = [b for b in all_in_range if beat_confirmed(b, confirmed)]
+        unconfirmed_beats = len(all_in_range) - len(in_range)
         pnames = BT.names_of(db, tr)
         skip = [b for b in in_range if b["type"] in BT.UNSUPPORTED]
         move_note = []
         if skip:
             move_note.append("lying down and kneeling will be skipped (they stand)")
-        if in_range and not tr.get("person_map"):
-            move_note.append("confirm who is who (People) so the beats can be acted")
+        if unconfirmed_beats:
+            move_note.append(f"{unconfirmed_beats} beat(s) of people not confirmed under People are skipped"
+                             + ("" if tr.get("person_map") else ": confirm who is who so they can be acted"))
         two = BT.two_views(ranges_of(tr))
         items = {
             "set": {"value": _set_text(r), "original": _set_text(o) if o else None,

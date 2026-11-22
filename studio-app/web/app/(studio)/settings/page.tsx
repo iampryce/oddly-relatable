@@ -219,12 +219,13 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         {x.seats_wanted > (b.seats || (b.seat ? [b.seat] : [])).length && <span className="alert warn">Made for at least {x.seats_wanted} seated people: mark {x.seats_wanted} seat(s) ("Add a seat") before approving, or the extra people will stand.</span>}
         <div className="grid cols-2">{field('floor_y', 'Floor line (px from top)')}{field('stand_min_x', 'Standing area from x')}{field('stand_max_x', 'Standing area to x')}</div>
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
+        {x.suggested && <span className="small">Suggested by the vision model: {x.suggested.summary}</span>}
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>
           <button className="btn" disabled={!!busy} onClick={() => run('no', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'reject'}}))}>Reject</button></div></>}
       {x.status !== 'rejected' && <label className="small row" style={{gap: 4}}><input type="checkbox" checked={!!x.kept} disabled={!!busy}
         onChange={e => run('keep', () => api(`/sets/${x.id}/keep`, {method: 'POST', body: {keep: e.target.checked}}))} />
         Keep this set for future episodes (otherwise only {x.episode_id ? 'its own episode' : 'episodes that already use it'} can use it)</label>}
-      {x.prompt && <details><summary className="small">Sent to the image API</summary><pre className="small" style={{whiteSpace: 'pre-wrap'}}>{x.prompt}</pre></details>}
+      {x.prompt && <details><summary className="small">The exact request sent to the image API</summary><pre className="small" style={{whiteSpace: 'pre-wrap'}}>{x.request ? `endpoint: ${x.request.endpoint}\nmodel: ${x.request.model}\nsize: ${x.request.size}\nreference image: ${x.request.reference_image}\nprompt:\n${x.request.prompt}` : x.prompt}</pre></details>}
       <div><DeleteButton kind="set" id={x.id} label={`the set ${x.label} (${x.status})`} onDone={reload} /></div>
     </div>);
 }
@@ -233,21 +234,26 @@ function SetsCard() {
   const {data, reload} = useApi<any>('/sets', 5000);
   const [label, setLabel] = useState(''), [desc, setDesc] = useState('');
   const {busy, error, run} = useAction(reload);
-  const active = (data?.jobs || []).filter((j: any) => ['queued', 'running'].includes(j.status));
+  const active = (data?.jobs || []).filter((j: any) => ['queued', 'running'].includes(j.status) && !j.payload?.episode_id);
+  // feat/episode-workspace: only the library here (sets kept for reuse, and sets made on this page); an episode's own
+  // candidates are approved, staged and kept on that episode's page (its Set section)
+  const library = (data?.sets || []).filter((x: any) => x.kept || !x.episode_id);
+  const elsewhere = (data?.sets || []).length - library.length;
   return (
     <div className="card stack" id="sets">
-      <div className="spread"><h2>Sets (background environments)</h2><BulkDelete what="sets" label="Delete unused candidates" onDone={reload} /></div>
-      <p className="muted small">New sets are generated as candidates in the flat set style (text only, no reference image, with a variety guard against the recent sets) and are used in production only after you approve them. Each episode gets its own set: a set is offered to other episodes only when you keep it for future episodes.</p>
+      <div className="spread"><h2>Sets library (kept for reuse)</h2><BulkDelete what="sets" label="Delete unused candidates" onDone={reload} /></div>
+      <p className="muted small">The sets kept for future episodes, and library sets made here. Each episode makes, approves and stages its own set on its own page (Set section); keep one there to see it here and offer it to other episodes.{elsewhere > 0 ? ` ${elsewhere} set(s) belong to a single episode and are managed on that episode's page.` : ''}</p>
       <ErrorBox error={error} />
-      {(data?.sets || []).map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} />)}
+      {library.map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} />)}
+      {!library.length && <p className="muted small">No set kept for reuse yet.</p>}
       {active.length > 0 && <span className="badge busy">generating {active.length} candidate(s)…</span>}
-      {(data?.jobs || []).filter((j: any) => j.status === 'failed').slice(0, 2).map((j: any) => <div key={j.id} className="small" style={{color: 'var(--bad)'}}>{j.error}</div>)}
+      {(data?.jobs || []).filter((j: any) => j.status === 'failed' && !j.payload?.episode_id).slice(0, 2).map((j: any) => <div key={j.id} className="small" style={{color: 'var(--bad)'}}>{j.error}</div>)}
       <div className="grid cols-2">
         <div><label htmlFor="set-label">New set name</label><input id="set-label" value={label} onChange={e => setLabel(e.target.value)} placeholder="Office" /></div>
         <div><label htmlFor="set-desc">Description</label><input id="set-desc" value={desc} onChange={e => setDesc(e.target.value)} placeholder="a small open-plan office…" /></div>
       </div>
       <div className="row"><button className="btn" disabled={!!busy || label.length < 2 || desc.length < 10} onClick={() => run('gen', async () => { await api('/sets/generate', {method: 'POST', body: {label, description: desc}}); setLabel(''); setDesc(''); })}>Generate candidate</button>
-        <span className="muted small">Uses the OpenAI key (about $0.05–0.20 per image).</span></div>
+        <span className="muted small">A library set (kept for reuse). Uses the OpenAI key (about $0.05–0.20 per image, plus a vision call of about $0.01 for the suggested seats).</span></div>
     </div>);
 }
 

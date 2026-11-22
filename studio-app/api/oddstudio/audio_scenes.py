@@ -268,7 +268,8 @@ SYSTEM = ("You direct an adult 2D animated comedy. The dialogue was RECORDED: yo
 
 
 def beat_actions(beats: list[dict], person_map: dict, keys: set[str]) -> list[dict]:
-    """The beats of CONFIRMED people as actions on character keys (unconfirmed people's beats are not acted)."""
+    """The beats of CONFIRMED people as actions on character keys (unconfirmed people's beats are not acted; the
+    builders already pass reference_plan.effective_beats, which leaves them out too)."""
     who = {int(v): k for k, v in (person_map or {}).items() if v and k in keys}
     out = []
     for b in beats:

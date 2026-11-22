@@ -232,22 +232,57 @@ def rules_text(seats: int | None) -> str:
     return RULES.format(seats=s)
 
 
-def prompt_parts(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "") -> list[dict]:
+# The studio's set style, kept SHORT and placed AFTER the description (feat/episode-workspace, owner rule 2026-11-22:
+# "the studio's style wording must not drown the layout"). The long SET_STYLE_FLAT came first and was twice the length
+# of most descriptions; the image model followed the style (an open empty floor) and dropped the described layout.
+SET_STYLE_SHORT = ("Drawing style: flat-colour 2D cartoon background plate, vertical 2:3; clean geometric shapes, flat "
+                   "fills with at most one shadow tone, thin crisp outlines, no gradients or texture, not a photo or 3D "
+                   "render; clear even light; camera at a standing adult's eye height.")
+LAYOUT_LEAD = "Room and layout (follow this exactly; where anything below differs, this description wins): "
+REFERENCE_LINE = ("Your reference image (attached by the owner, their own picture): follow its room layout and the "
+                  "positions of the furniture; draw everything new in the drawing style above, with no text or logos.")
+
+
+def prompt_parts(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "",
+                 reference: bool = False) -> list[dict]:
     """The exact prompt a set candidate is generated from, as labelled parts (what the page shows and what is sent):
-    the studio's set style, the description (yours, or the set notes verbatim), the studio rules, the variety guard,
-    and the view line for a two-sided room."""
-    parts = [{"part": "studio style", "text": SET_STYLE_FLAT},
-             {"part": "your description", "text": f"Setting: {description}"},
+    the description FIRST (yours, or the set notes verbatim: the layout leads), then the short studio style, the
+    studio rules, the variety guard, the view line for a two-sided room, and the line for the owner's own reference
+    image when one is attached."""
+    parts = [{"part": "your description", "text": LAYOUT_LEAD + description},
+             {"part": "studio style", "text": SET_STYLE_SHORT},
              {"part": "studio rules", "text": rules_text(seats)}]
     if variety.strip():
         parts.append({"part": "variety guard", "text": variety.strip()})
     if view_line:
         parts.append({"part": "view", "text": view_line})
+    if reference:
+        parts.append({"part": "your reference image", "text": REFERENCE_LINE})
     return parts
 
 
-def prompt_for(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "") -> str:
-    return "\n".join(p["text"] for p in prompt_parts(db, description, seats, variety, view_line))
+def prompt_for(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "",
+               reference: bool = False) -> str:
+    return "\n".join(p["text"] for p in prompt_parts(db, description, seats, variety, view_line, reference))
+
+
+IMAGE_MODEL_DEFAULT = "gpt-image-2"
+SET_SIZE = "1024x1536"
+
+
+def request_view(db, prompt: str, reference_label: str | None = None) -> dict:
+    """The exact request a set candidate sends to the image API, as the page shows it in one box: the endpoint, the
+    model, the size, the reference image (none unless the owner attached their own) and the full prompt."""
+    from .settings_store import get_section
+    img = get_section(db, "image")
+    model = (img.get("model") if img.get("provider") == "openai" else "") or IMAGE_MODEL_DEFAULT
+    return {"endpoint": "OpenAI images/edits" if reference_label else "OpenAI images/generations", "model": model,
+            "size": SET_SIZE, "reference_image": reference_label or "none (text only)", "prompt": prompt}
+
+
+def request_text(req: dict) -> str:
+    return (f"endpoint: {req['endpoint']}\nmodel: {req['model']}\nsize: {req['size']}\n"
+            f"reference image: {req['reference_image']}\nprompt:\n{req['prompt']}")
 
 
 # ------------------------------------------------------------------ the variety guard
@@ -354,7 +389,7 @@ def set_candidate(ctx: Ctx) -> dict:
     from .settings_store import get_section
     db, job = ctx.db, ctx.job
     p = job.payload
-    cfg = {**get_section(db, "image"), "provider": "openai", "fallback": "none", "size": "1024x1536", "use_reference": True}
+    cfg = {**get_section(db, "image"), "provider": "openai", "fallback": "none", "size": SET_SIZE, "use_reference": True}
     if get_section(db, "image").get("provider") != "openai":
         cfg["model"] = ""
     folder = ctx.folder("sets", p["set_id"])
@@ -362,11 +397,15 @@ def set_candidate(ctx: Ctx) -> dict:
     from .tasks import style_version
     version = style_version(db)
     cfg["background"] = None       # a set plate is its own scenery: no flat background instruction
-    # text only (no style reference image: every set used to be an edit of the same plate and came out alike); the
-    # prompt is exactly the one the page showed when the owner clicked (stored in the job), else built the same way
-    cfg["use_reference"] = False
+    # text only (no style reference image: every set used to be an edit of the same plate and came out alike), unless
+    # the OWNER attached a reference image of their own for this set (never a video frame or a third-party image);
+    # the prompt is exactly the one the page showed when the owner clicked (stored in the job), else built the same way
+    ref = own_reference(db, p, folder)
+    cfg["use_reference"] = ref is not None
     prompt = p.get("prompt") or prompt_for(db, p["description"], variety=variety_text(db, p.get("episode_id"), p["description"]))
-    providers.image_generate(cfg, prompt, out, reference=None)
+    req = request_view(db, prompt, p.get("reference_label") if ref is not None else None)
+    ctx.log("request: " + request_text(req).replace("\n", " | ")[:600])
+    providers.image_generate(cfg, prompt, out, reference=ref)
     im = Image.open(out)
     w, h = im.size
     a = store_asset(db, ep_id=None, src=out, key=f"sets/{p['set_id']}/{out.name}", kind="set-candidate",
@@ -379,13 +418,45 @@ def set_candidate(ctx: Ctx) -> dict:
     recs[p["set_id"]] = {"label": p["label"], "description": p["description"], "status": "candidate", "asset_id": a.id,
                          "preview_asset_id": pa.id, "width": w, "height": h, "blocking": blk, "created": time.time(), "job_id": job.id,
                          "style_version": version, "episode_id": p.get("episode_id"), "flat_style": True, "prompt": prompt,
+                         "request": req, "estimated_usd": IMAGE_USD,
                          "signature": p.get("signature") or _scan(p["description"]),
                          # a set made for an episode stays that episode's until kept; one made in Settings > Sets
                          # (no episode) is a deliberate library set, kept for reuse
                          "kept": p.get("episode_id") is None,
                          # the seats the proposal asked for: the approval screen asks for at least this many to be marked
                          **({"seats_wanted": int(p["seats"])} if p.get("seats") else {}),
-                         **{k: p[k] for k in ("view", "room") if p.get(k)}}
+                         **{k: p[k] for k in ("view", "room", "reference_asset_id", "again_of") if p.get(k)},
+                         "room_index": int(p.get("room_index") or 0)}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")
+    # suggested seats from the generated picture (our own image; a vision model places the seats, the desk front and
+    # the floor line); the owner adjusts them on the picture. A failure keeps the default staging.
+    if p.get("suggest_seats", True):
+        from . import seat_suggest
+        try:
+            got = seat_suggest.run(db, p["set_id"], out, ctx.log)
+            if got:
+                ctx.log(f"suggested staging: {got['summary']}")
+        except Exception as e:  # noqa: BLE001 -- the candidate stands; the panel offers "Suggest seats again"
+            ctx.log(f"no suggested seats: {str(e)[:200]}")
+            recs = records(db)
+            recs[p["set_id"]]["suggest_error"] = str(e)[:300]
+            save(db, recs)
     return {"set_id": p["set_id"], "asset_id": a.id, "width": w, "height": h}
+
+
+IMAGE_USD = 0.17     # one 1024x1536 set image (upper list-price estimate; the page shows "about $0.05-0.20")
+
+
+def own_reference(db, p: dict, folder: Path) -> Path | None:
+    """The owner's own reference image for this set (an upload the owner attached with "Attach your own reference"),
+    else None. Only an asset of kind set-own-reference is ever used: no video frame, no other picture."""
+    aid = p.get("reference_asset_id")
+    if not aid:
+        return None
+    from .models import Asset
+    from .storage import storage
+    a = db.get(Asset, int(aid))
+    if a is None or a.kind != "set-own-reference":
+        raise ValueError("the attached reference image is missing or is not the owner's own upload")
+    return storage().get_to_file(a.storage_key, folder / Path(a.storage_key).name)
