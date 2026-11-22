@@ -191,7 +191,15 @@ class EpisodeTest(unittest.TestCase):
         v = self.c.put(f"/api/episodes/{self.eid}/set-proposal", json={"text": text}).json()
         self.assertTrue(v["two_views"])
         self.assertEqual(v["two_cost"], "2 images, about $0.10-0.40")
-        g = self.c.post(f"/api/episodes/{self.eid}/set-proposal/generate", json={"text": text, "views": True}).json()
+        from oddstudio import queue
+        pushed = []
+        real = queue.redis_client
+        queue.redis_client = lambda: type("R", (), {"lpush": lambda self, k, v: pushed.append(v)})()
+        try:
+            g = self.c.post(f"/api/episodes/{self.eid}/set-proposal/generate", json={"text": text, "views": True}).json()
+        finally:
+            queue.redis_client = real
+        self.assertEqual(pushed, [x["job"]["id"] for x in g["sets"]], "both sides' jobs reach the worker queue")
         self.assertEqual([x["view"] for x in g["sets"]], ["main side", "reverse side"])
         self.assertEqual([x["prompt"] for x in g["sets"]], [v["view_prompts"]["main side"], v["view_prompts"]["reverse side"]])
         self.env.run_jobs(["set_candidate"])
