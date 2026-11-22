@@ -63,16 +63,22 @@ def needs_acceptance(tr: dict) -> bool:
 
 
 def persons_of(frames: list[dict], r: dict) -> dict[str, int] | None:
-    """{role: person number} for one range, read from the per-person frames (notes v2): the first frame inside the
-    range whose people match the range's roles one to one (the ranges list roles in person order, with the same poses).
-    None when no frame matches (older notes, or notes edited since)."""
+    """{role: person number} for one range: the person number each role carries (notes made from now on), else read
+    from the per-person frames (notes v2): the first frame inside the range whose people match the range's roles one
+    to one in person order, with the same poses and positions. None when nothing matches."""
     roles = r.get("roles", [])
+    if roles and all(isinstance(ro.get("person"), int) for ro in roles):
+        return {ro["role"]: ro["person"] for ro in roles}      # the person number the notes recorded for each role
     for fr in frames:
         if not r["start"] <= fr.get("t", -1) < r["end"]:
             continue
         people = fr.get("people", [])
-        if len(people) == len(roles) and all(ro.get("pose") in (None, p.get("pose")) and ro.get("position") in (None, p.get("position"))
-                                             for ro, p in zip(roles, people)):
+        if len(people) != len(roles):
+            continue
+        # notes made before roles carried their person number: unedited ranges list the roles in the frames' person
+        # order (by construction), checked against the poses and positions
+        if all(ro.get("pose") in (None, p.get("pose")) and ro.get("position") in (None, p.get("position"))
+               for ro, p in zip(roles, people)):
             return {ro["role"]: p["person"] for ro, p in zip(roles, people)}
     return None
 
@@ -81,9 +87,10 @@ def with_people(tr: dict, ranges: list[dict]) -> list[dict]:
     """The ranges with each role's confirmed character as "who" (None: a person nobody confirmed, left out), when the
     episode has per-person notes and a "who is who" map; otherwise unchanged."""
     pm = tr.get("person_map") or {}
-    frames = ((tr.get("video_notes") or {}).get("people_frames")) or []
-    if not pm or not frames:
-        return ranges
+    vn = tr.get("video_notes") or {}
+    frames = vn.get("people_frames") or []
+    if not pm or not frames or vn.get("edited"):
+        return ranges          # edited notes no longer follow the frames: the plain mapping is used
     inv = {int(n): k for k, n in pm.items() if isinstance(n, int) or str(n).isdigit()}
     out = []
     for r in ranges:
@@ -153,16 +160,18 @@ def role_map(range_lines: list[dict], cast: list[str], silent: list[str], r: dic
     if not range_lines:
         return {}
     speaker = range_lines[0]["speaker"]
-    out = {"speaker": speaker}
     roles = (r or {}).get("roles", [])
     if any("who" in ro for ro in roles):
-        used = {speaker}
-        for ro in roles:
+        # each role is its own confirmed person, the speaker role included (the person talking in the video); a role
+        # nobody confirmed is left out, and no character appears twice
+        out, used = {}, set()
+        for ro in sorted(roles, key=lambda x: 0 if x.get("role") == "speaker" else 1):
             who = ro.get("who")
-            if ro.get("role") != "speaker" and who and who not in used:
+            if who and who not in used:
                 out[ro["role"]] = who
                 used.add(who)
         return out
+    out = {"speaker": speaker}
     others = [k for k in list(dict.fromkeys(silent + cast)) if k != speaker]
     present = [ro["role"] for ro in roles if ro.get("role", "").startswith("reactor")]
     labels = present or [f"reactor {n}" for n in range(1, 10)]

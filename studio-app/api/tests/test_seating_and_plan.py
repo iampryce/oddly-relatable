@@ -187,6 +187,22 @@ class UnconfirmedPeopleTest(unittest.TestCase):
         self.assertEqual(len(reacts), len(set(reacts)), "no character reacts twice")
         self.assertTrue(set(reacts) <= {"ralph", "sidney", "winifred"})
 
+    def test_the_speaker_role_is_its_confirmed_person_and_ambiguous_or_edited_notes_fall_back(self):
+        from oddstudio.reference_plan import persons_of, role_map, with_people
+        r = {"start": 0, "end": 4, "roles": [{"role": "speaker", "who": "sidney", "pose": "seated"},
+                                             {"role": "reactor 1", "who": "uncle-mortimer", "pose": "seated"},
+                                             {"role": "reactor 2", "who": None, "pose": "standing"}]}
+        m = role_map([{"speaker": "uncle-mortimer"}], ["uncle-mortimer", "sidney"], [], r)
+        self.assertEqual(m, {"speaker": "sidney", "reactor 1": "uncle-mortimer"},
+                         "the person talking in the video, not the first line's speaker; the unconfirmed one left out")
+        frames = [{"t": 1.0, "people": [{"person": 1, "position": "left", "pose": "seated"},
+                                        {"person": 2, "position": "left", "pose": "seated"}]}]
+        self.assertEqual(persons_of(frames, {"start": 0, "end": 4, "roles": [{"role": "speaker", "person": 2}, {"role": "reactor 1", "person": 1}]}),
+                         {"speaker": 2, "reactor 1": 1}, "the person number each role carries, whatever the order")
+        tr = {"person_map": {"a": 1}, "video_notes": {"edited": True, "people_frames": frames}}
+        rs = [{"start": 0, "end": 4, "roles": [{"role": "speaker"}]}]
+        self.assertEqual(with_people(tr, rs), rs, "edited notes use the plain mapping")
+
     def test_a_beat_at_a_cut_belongs_to_the_range_that_starts_there(self):
         from oddstudio.reference_plan import effective_beats, range_index
         ranges = [{"start": 0.0, "end": 3.98}, {"start": 3.97, "end": 7.95}, {"start": 19.86, "end": 49.67}, {"start": 49.66, "end": 52.65}]

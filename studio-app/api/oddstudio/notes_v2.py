@@ -259,7 +259,7 @@ def to_ranges(frames: list[dict], length: float, step: float) -> tuple[list[dict
                 label[p["person"]] = f"reactor {n}"
         roles = []
         for p in people:
-            r = {"role": label[p["person"]]}
+            r = {"role": label[p["person"]], "person": p["person"]}   # the anonymous number, for "who is who"
             for k in ("position", "pose", "emotion"):
                 if p.get(k):
                     r[k] = p[k]
