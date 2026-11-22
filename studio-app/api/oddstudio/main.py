@@ -376,35 +376,120 @@ def decide_set(sid: str, body: SetDecisionIn, db: Session = Depends(get_db), use
         raise HTTPException(404, "no such set")
     r = recs[sid]
     if body.blocking:
-        b = {k: int(body.blocking[k]) for k in ("floor_y", "stand_min_x", "stand_max_x") if k in body.blocking}
-        if not (0 < b.get("floor_y", r["blocking"]["floor_y"]) <= r["height"]):
-            raise HTTPException(422, "floor_y must be inside the image")
-        r["blocking"].update(b)
-        if isinstance(body.blocking.get("seat"), dict):
-            r["blocking"]["seat"] = {k: int(body.blocking["seat"][k]) for k in ("x", "hip_y", "feet_y")}
-        if isinstance(body.blocking.get("seats"), list):
-            # several seats (feat/seating): each inside the image, the hips above the feet
-            seats = []
-            for s in body.blocking["seats"][:8]:
-                v = {k: int(s[k]) for k in ("x", "hip_y", "feet_y")}
-                if not (0 <= v["x"] <= r["width"] and 0 <= v["hip_y"] < v["feet_y"] <= r["height"]):
-                    raise HTTPException(422, "each seat must be inside the image, with the hips above the feet")
-                seats.append(v)
-            r["blocking"]["seats"] = seats
-            r["blocking"].pop("seat", None)
-        if "table_front" in body.blocking:
-            tf = body.blocking["table_front"]
-            if tf:
-                v = {k: int(tf[k]) for k in ("x0", "y0", "x1", "y1")}
-                if not (0 <= v["x0"] < v["x1"] <= r["width"] and 0 <= v["y0"] < v["y1"] <= r["height"]):
-                    raise HTTPException(422, "the table front must be a box inside the image")
-                r["blocking"]["table_front"] = v
-            else:
-                r["blocking"].pop("table_front", None)
+        apply_blocking(r, body.blocking)
     r["status"] = "approved" if body.decision == "approve" else "rejected"
     r["decided_by"], r["decided_at"] = user, time_now()
     sets.save(db, recs)
     return {"id": sid, **r}
+
+
+def apply_blocking(r: dict, blocking: dict) -> None:
+    """Validate and apply a set's staging (floor line, standing area, seats, table front) to its record. Refused
+    values raise 422; nothing else in the record changes."""
+    try:
+        b = {k: int(blocking[k]) for k in ("floor_y", "stand_min_x", "stand_max_x") if k in blocking}
+    except (TypeError, ValueError):
+        raise HTTPException(422, "the floor line and the standing area are whole numbers of pixels")
+    blk = dict(r["blocking"])
+    if not (0 < b.get("floor_y", blk["floor_y"]) <= r["height"]):
+        raise HTTPException(422, "floor_y must be inside the image")
+    lo, hi = b.get("stand_min_x", blk.get("stand_min_x", 0)), b.get("stand_max_x", blk.get("stand_max_x", r["width"]))
+    if not (0 <= lo < hi <= r["width"]):
+        raise HTTPException(422, "the standing area must be inside the image, from left to right")
+    blk.update(b)
+    try:
+        if isinstance(blocking.get("seat"), dict):
+            blk["seat"] = {k: int(blocking["seat"][k]) for k in ("x", "hip_y", "feet_y")}
+        if isinstance(blocking.get("seats"), list):
+            # several seats (feat/seating): each inside the image, the hips above the feet
+            seats = []
+            for s in blocking["seats"][:8]:
+                v = {k: int(s[k]) for k in ("x", "hip_y", "feet_y")}
+                if not (0 <= v["x"] <= r["width"] and 0 <= v["hip_y"] < v["feet_y"] <= r["height"]):
+                    raise HTTPException(422, "each seat must be inside the image, with the hips above the feet")
+                seats.append(v)
+            blk["seats"] = seats
+            blk.pop("seat", None)
+        if "table_front" in blocking:
+            tf = blocking["table_front"]
+            if tf:
+                v = {k: int(tf[k]) for k in ("x0", "y0", "x1", "y1")}
+                if not (0 <= v["x0"] < v["x1"] <= r["width"] and 0 <= v["y0"] < v["y1"] <= r["height"]):
+                    raise HTTPException(422, "the table front must be a box inside the image")
+                blk["table_front"] = v
+            else:
+                blk.pop("table_front", None)
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(422, "a seat needs x, hip_y and feet_y; the table front needs x0, y0, x1 and y1 (whole pixels)")
+    r["blocking"] = blk
+
+
+class StagingIn(BaseModel):
+    blocking: dict
+
+
+@app.put("/api/sets/{sid}/staging", dependencies=[Depends(current_user)])
+def edit_set_staging(sid: str, body: StagingIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Edit the staging of a set, approved or not (seats, table front, floor line, standing area). It never changes
+    the set's picture or its approval. The staging preview is redrawn, and every episode using the set is re-checked:
+    its seats against the most people the video notes seat at once, with an event on the episode."""
+    from . import sets
+    recs = sets.records(db)
+    r = recs.get(sid)
+    if r is None or r.get("status") not in ("candidate", "approved"):
+        raise HTTPException(404, "no such set (only candidates and approved sets have staging to edit)")
+    before = len(sets.seats_of(r["blocking"]))
+    status, asset_id = r.get("status"), r.get("asset_id")
+    apply_blocking(r, body.blocking)
+    r["staging_edited_by"], r["staging_edited_at"] = user, time_now()
+    # the preview with the staging drawn on it (the picture itself is not touched)
+    a = db.get(Asset, asset_id) if asset_id else None
+    if a is not None:
+        import tempfile
+        from pathlib import Path
+        from .tasks import store_asset
+        folder = Path(tempfile.mkdtemp(prefix="set-staging-"))
+        src = storage().get_to_file(a.storage_key, folder / Path(a.storage_key).name)
+        pv = sets.preview(src, r["blocking"], folder / f"{sid}-staging-{int(time_now())}.png")
+        pa = store_asset(db, ep_id=None, src=pv, key=f"sets/{sid}/{pv.name}", kind="set-candidate-preview",
+                         label=f"Set staging: {r.get('label', sid)}", content_type="image/png")
+        r["preview_asset_id"] = pa.id
+    if r.get("status") != status or r.get("asset_id") != asset_id:   # never the approval, never the art
+        raise HTTPException(500, "the staging edit would have changed the set's approval or picture")
+    recs[sid] = r
+    sets.save(db, recs)
+    checks = recheck_set_users(db, sid, r)
+    after = len(sets.seats_of(r["blocking"]))
+    for c in checks:
+        db.add(Event(episode_id=c["id"], kind="episode", message=f"Set {r.get('label', sid)}: staging edited by {user} "
+                                                                   f"({before} -> {after} seat(s)); {c['note']}"))
+    db.commit()
+    return {"id": sid, **{k: v for k, v in r.items() if k not in ("asset_id", "preview_asset_id")},
+            "preview_url": storage().url(db.get(Asset, r["preview_asset_id"]).storage_key) if r.get("preview_asset_id") else None,
+            "episodes": checks}
+
+
+def recheck_set_users(db: Session, sid: str, r: dict) -> list[dict]:
+    """Every episode using the set (as its set or for scene changes): its seats against the most people its video
+    notes seat at once."""
+    from . import sets
+    from .models import Episode
+    seats = len(sets.seats_of(r["blocking"]))
+    out = []
+    for ep in db.query(Episode).order_by(Episode.id):
+        if ep.set_id != sid and sid not in (ep.scene_set_ids or []):
+            continue
+        ranges = ((ep.audio_transcript or {}).get("video_notes") or {}).get("ranges") or []
+        seated = max((sum(1 for ro in x.get("roles", []) if ro.get("pose") == "seated") for x in ranges), default=0)
+        if seated > seats:
+            note = f"the notes seat up to {seated} at once: {seated - seats} will stand"
+        elif seated:
+            note = f"enough seats for the {seated} seated at once"
+        else:
+            note = "the notes seat nobody"
+        out.append({"id": ep.id, "title": ep.title, "seats": seats, "seated_at_once": seated, "ok": seated <= seats,
+                    "note": note + ("; render again to use the new staging" if ep.stage in ("ready", "publishing", "published") else "")})
+    return out
 
 
 def time_now() -> float:

@@ -5,6 +5,7 @@ import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import {stagingSummary} from '@/lib/setStaging';
 import {gpuLine, sessionLine, allInPerClip} from '@/lib/gpuView';
 
 // Capabilities come from the server's provider registry (capabilities.py): which providers exist, what they need,
@@ -201,7 +202,10 @@ function VoiceCompare() {
 
 function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
   const [b, setB] = useState<any>(x.blocking);
+  const [editing, setEditing] = useState(false);
+  const [checked, setChecked] = useState<any[] | null>(null);
   const {busy, error, run} = useAction(reload);
+  const saveStaging = () => run('staging', async () => { const r: any = await api(`/sets/${x.id}/staging`, {method: 'PUT', body: {blocking: b}}); setChecked(r.episodes); setEditing(false); });
   const field = (k: string, label: string) => <div><label htmlFor={`${x.id}-${k}`}>{label}</label><input id={`${x.id}-${k}`} type="number" value={b[k]} onChange={e => setB((o: any) => ({...o, [k]: Number(e.target.value)}))} /></div>;
   return (
     <div className="stack small" style={{borderTop: '1px solid var(--line, #ddd)', paddingTop: 8}}>
@@ -216,6 +220,17 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>
           <button className="btn" disabled={!!busy} onClick={() => run('no', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'reject'}}))}>Reject</button></div></>}
+      {x.status === 'approved' && <div className="stack">
+        <div className="row" style={{gap: 6}}><span className="muted">{stagingSummary(x.blocking)}</span>
+          <button className="btn sm" disabled={!!busy} onClick={() => { setB(x.blocking); setEditing(!editing); }}>{editing ? 'Close' : 'Edit staging (seats, table front, floor, standing area)'}</button></div>
+        {editing && <>
+          <span className="muted">Changes only the staging: the picture and the approval stay as they are. Episodes using this set are re-checked.</span>
+          <div className="grid cols-2">{field('floor_y', 'Floor line (px from top)')}{field('stand_min_x', 'Standing area from x')}{field('stand_max_x', 'Standing area to x')}</div>
+          {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
+          <div><button className="btn primary" disabled={!!busy} onClick={saveStaging}>Save staging</button></div></>}
+        {checked && (checked.length ? checked.map((c: any) => <span key={c.id} className={c.ok ? 'muted' : 'bad'}>{c.title}: {c.seats} seat(s); {c.note}</span>)
+          : <span className="muted">No episode uses this set yet.</span>)}
+      </div>}
       <div><DeleteButton kind="set" id={x.id} label={`the set ${x.label} (${x.status})`} onDone={reload} /></div>
     </div>);
 }
