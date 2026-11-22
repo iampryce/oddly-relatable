@@ -36,7 +36,7 @@ The **A new set for this story** box sits on the same card. The studio proposes 
 - **Exactly what is sent.** "Sent to the image API (exactly), part by part" lists each part:
   - **studio style:** one flat-colour set style that matches the stickman cast. It sets no palette, light, material or mood, and has no warm, cosy, painted-wood wording.
   - **your description:** "Setting:" and the room's text.
-  - **studio rules:** always added. An empty room with no people; seating for at least the cast (the most people the notes show at once, else the number of speakers); no text, signs, logos or brands; nothing copied.
+  - **studio rules:** always added. An empty room with no people; seating for at least the cast (the most people the notes show at once, else the number of speakers); chairs and sofas facing the camera or seen from the side, never with their backs to the camera; seats at least a chair's width apart (the cast are stick figures with big heads); no text, signs, logos or brands; nothing copied.
   - **variety guard.**
   - **view:** for two-sided rooms.
 - **No reference image.** Sets are generated from text only. Every set used to be an edit of the same reference plate, which is why they looked alike.

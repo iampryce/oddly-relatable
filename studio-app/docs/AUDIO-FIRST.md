@@ -74,6 +74,18 @@ Ticking **"Use the video as a reference for staging notes"** when uploading a vi
 - **Afterwards**, the episode is back at script review with the new scenes. You approve the script, then generate the storyboard and refresh the stills as usual. Nothing is approved for you.
 - **API:** `GET /api/episodes/{id}/audio/rebuild-scenes` for the preview; `POST` with `{"mode": "writer"|"simple", "confirm": true}` to rebuild. Without `confirm`, the POST returns the preview only.
 
+**Hook banner.** Each episode has its own "Hook banner" switch next to "Dialogue on screen".
+- **When on**, the banner shows the episode's own text, or the script's hook when the text is empty.
+- **When off**, no banner in the stills or the video, from either renderer.
+- **Defaults:** audio episodes start with it off. Script-first episodes start with it on.
+- **Existing episodes** (migration `0014`): on for script-first episodes and for audio episodes already rendered; off for audio episodes not rendered yet.
+- **API:** `PUT /api/episodes/{id}/hook {"enabled": true|false, "text": "..."}`.
+
+**Character size and seated poses.**
+- **Size:** the cast is drawn 530 px tall (in the set picture's pixels) unless the set's seats are close together. Then everyone is drawn smaller, at the largest height where seated neighbours' heads overlap by at most a quarter. The Reference plan's Seating note says so.
+- **Seated limbs:** legs hang almost straight below the seat, with each knee towards its own side and the feet apart like the character's hips. Hands rest on the thighs.
+- **Eyes:** the rig's face finder takes the eyes to be the pair of white shapes most alike in size and height, each at most 40% of the head's width. White hair or a white hat is never taken for an eye. Rigs are rebuilt automatically with the next render after a change to the extractor.
+
 **Storyboard stills.** With the studio rig animator as the motion provider (every audio episode), "Refresh stills" renders the scene with the acting renderer, which also makes the video.
 - **What they show:** the episode's own set and its seats, and the episode's dialogue display (no bubble when "Dialogue on screen" is None).
 - **The sheet:** up to six frames, the first just after the scene's first line starts and the rest spread over its lines.

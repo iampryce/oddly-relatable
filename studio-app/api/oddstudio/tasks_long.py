@@ -214,6 +214,8 @@ def plan_segments(ctx: Ctx) -> dict:
     chars = prepare_characters(ctx)
     clips = clip_map(db, ep)
     folder = ctx.folder("episodes", ep.id, f"r{ep.revision}", "plan")
+    from .acting import episode_hook
+    script = {**script, "hook": episode_hook(db, ep)}      # the episode's own banner (off: no hook)
     full = engine.build_story(episode_id=ep.id, revision=ep.revision, title=ep.title, script=script, scenes=list(ep.scenes),
                               chars_by_key=chars, production=prod, end_card=False)
     refs = [[(sc.id, li) for li in range(len(sc.lines))] for sc in ep.scenes]

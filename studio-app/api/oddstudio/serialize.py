@@ -28,7 +28,7 @@ def episode_summary(e: Episode) -> dict:
     return {"id": e.id, "title": e.title, "stage": e.stage, "next_step": NEXT_STEP.get(e.stage, ""), "revision": e.revision,
             "format": e.format, "continues_episode_id": e.continues_episode_id, "outline_version": e.outline_version,
             "approved_outline_version": e.approved_outline_version, "source": e.source or "script",
-            "dialogue_display": e.dialogue_display or "bubbles", "set_id": e.set_id, "scene_set_ids": e.scene_set_ids or [],
+            "dialogue_display": e.dialogue_display or "bubbles", "hook_banner": hook_on(e), "hook_text": e.hook_text or "", "set_id": e.set_id, "scene_set_ids": e.scene_set_ids or [],
             "audio_rights_confirmed": bool(e.audio_rights_confirmed), "audio_rights_source": e.audio_rights_source or "",
             "idea_id": e.idea_id, "script_version": e.script_version, "approved_script_version": e.approved_script_version,
             "storyboard_version": e.storyboard_version, "approved_storyboard_version": e.approved_storyboard_version,
@@ -42,6 +42,12 @@ def scene(s: StoryboardScene, ref: Asset | None) -> dict:
             "set_id": s.set_id, "staging": s.staging, "actions": s.actions,
             "status": s.status, "production_status": s.production_status, "revision_note": s.revision_note,
             "reference": asset(ref), "updated_at": ts(s.updated_at)}
+
+
+def hook_on(e) -> bool:
+    """Whether the episode shows the hook banner: its own switch, else the default for its kind (audio: off)."""
+    v = getattr(e, "hook_banner", None)
+    return bool(v) if v is not None else getattr(e, "source", "") != "audio"
 
 
 def job(j: Job, with_log: bool = False) -> dict:

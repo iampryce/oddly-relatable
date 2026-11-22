@@ -247,8 +247,13 @@ function sitPose(c, m, u, rising) {
   const down = rising ? ease.inOut(u) : ease.back(u);
   const standHip = FLOOR() - hipHeight(c);
   const fy = lerp(FLOOR(), S.feet_y, ease.inOut(u));
+  // feet apart like the character's own hips; the legs hang almost straight below the seat (a frontal seated stick
+  // figure), so they never bend into loops however the seat's feet line was marked
+  const spread = Math.max(20, (c.hipR.x - c.hipL.x) * c.S * 0.6);
+  const reach = S.hip_y + c.legLen * c.S * 0.96;
+  const fyS = u >= 1 ? reach : lerp(fy, reach, ease.inOut(u));
   return {seated: u > 0.5, sitting: u, x: lerp(m.from ?? S.x + 40, S.x, ease.inOut(u)), hipY: lerp(standHip, S.hip_y, down),
-    feet: {L: {x: S.x - 34, y: fy}, R: {x: S.x + 34, y: fy}}, seatedFeetY: S.feet_y};
+    feet: {L: {x: S.x - spread, y: fyS}, R: {x: S.x + spread, y: fyS}}, seatedFeetY: reach};
 }
 
 const looks = Object.fromEntries(KEYS.map(k => [k, {x: 0, y: 0.1}]));
@@ -259,7 +264,7 @@ function pose(k, t) {
   if (L.walking) { p.turn = 1; p.turnDir = L.dir; p.lean = 0.05 * L.dir; p.headTilt = Math.sin(t * 9) * 0.025; }
   if (L.sitting !== undefined) {
     // seated: knees forward and slightly apart, shins down to the floor in front of the seat
-    kneeDir = {x: 0, y: -0.15};
+    kneeDir = {x: 0.7, y: -0.25};   // per leg: each knee towards its own side (mirrored for the left leg)
     if (L.sitting < 1) p.lean = Math.sin(L.sitting * Math.PI) * 0.16;
   }
   if (L.jump !== undefined) {
@@ -302,7 +307,7 @@ function pose(k, t) {
     let tgt = G.rest(c, side), kind = 'mitten';
     tgt = {x: tgt.x + Math.sin(t * 1.7 + side) * 5, y: tgt.y};
     if (L.walking) tgt = {x: tgt.x * 0.6 - L.dir * Math.sin(t * 7.5 + (side > 0 ? Math.PI : 0)) * c.armLen * 0.18, y: tgt.y};
-    if (L.seated && !L.walking) tgt = {x: side * c.armLen * 0.22, y: c.armLen * 0.7};
+    if (L.seated && !L.walking) tgt = {x: side * c.armLen * 0.25, y: c.armLen * 0.96};   // hands resting on the thighs
     for (const [arm, g, t0, t1, hk, dir] of arms[k]) {
       if (!(arm === 'both' || arm === key)) continue;
       const e = envelope(t, t0, t1, 0.26, 0.3, true);

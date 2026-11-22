@@ -60,6 +60,10 @@ class Episode(Timestamps, Base):
     audio_transcript: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # What the viewer sees of the dialogue: bubbles | none | captions (new episodes: Settings > Production default)
     dialogue_display: Mapped[str] = mapped_column(String(10), default="bubbles")
+    # the "POV" hook banner (migration 0014): None = the default for the episode's kind (on for script-first, off for
+    # audio); hook_text: the owner's own banner text (None: the script's hook)
+    hook_banner: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    hook_text: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
     # The episode's own set (background), chosen explicitly by the owner (migration 0008; no silent default)
     set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
     # extra approved sets the scenes may change to (feat/scene-sets, migration 0011)
