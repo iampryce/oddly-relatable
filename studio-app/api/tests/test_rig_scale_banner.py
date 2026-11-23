@@ -65,14 +65,15 @@ class EyePairTest(unittest.TestCase):
 
 class CastHeightTest(unittest.TestCase):
     def test_close_seats_draw_the_cast_smaller_and_wide_seats_keep_the_default(self):
+        # fix/seated-limbs-and-spacing: no head overlap (was 25%), never below MIN_HEIGHT (318 px)
         ep14 = [{"x": 269}, {"x": 422}, {"x": 561}, {"x": 690}]
         h = acting.cast_height(ep14, 0.422)
-        self.assertEqual(h, 407, "Episode 14: heads at most 25% overlapping on seats 129 px apart")
-        self.assertLessEqual(0.422 * h * 0.75, 129 + 1)
+        self.assertEqual(h, 318, "Episode 14: no overlap needs 305 px on seats 129 px apart; the floor is 318")
+        self.assertEqual(acting.cast_height([{"x": 100}, {"x": 250}], 0.42), 357, "no overlap: 150 px / 0.42")
         self.assertEqual(acting.cast_height([{"x": 100}, {"x": 500}], 0.42), 530, "seats far apart: the default")
         self.assertEqual(acting.cast_height([{"x": 300}], 0.42), 530, "one seat")
         self.assertEqual(acting.cast_height([], 0.42), 530, "no seats")
-        self.assertEqual(acting.cast_height([{"x": 100}, {"x": 120}], 0.42), 265, "never below half the default")
+        self.assertEqual(acting.cast_height([{"x": 100}, {"x": 120}], 0.42), 318, "never below the floor (60% of the default)")
         rig = {"faces": {"neutral": {"size": [586, 558]}}, "body": {"height": 1400}}
         self.assertAlmostEqual(acting.head_ratio(rig), 0.4186, places=3)
         self.assertEqual(acting.head_ratio({}), 0.0)

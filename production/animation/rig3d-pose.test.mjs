@@ -73,3 +73,33 @@ test('3D IK: out of reach straightens along the line; within reach bends towards
   assert.ok(b.joint.x > 0, 'bends towards the pole');
   assert.equal(deg, Math.PI / 180);
 });
+
+test('seated facing: the speaker\'s seat faces the camera, the audience the speaker, unless the set says otherwise', async () => {
+  const {seatYaw, seatFacing, FACE_ANGLE} = await import('./rig3d-pose.mjs');
+  // Episode 14's set: the speaker behind the desk on the left, three audience seats to the right
+  const seats = [{x: 180, n: 0}, {x: 530, n: 1, facing: 'speaker'}, {x: 737, n: 2, facing: 'seat:1'}, {x: 940, n: 3, facing: 'away'}];
+  assert.equal(seatFacing(seats, 0), '', 'no choice on the seat: decided by the scene');
+  assert.equal(seatYaw(seats, 1), -FACE_ANGLE, 'towards the speaker, on the left');
+  assert.equal(seatYaw(seats, 2), -FACE_ANGLE, 'towards seat 2, on the left');
+  assert.equal(seatYaw(seats, 3), 180, 'away from the camera');
+  // a reversed side of the room (shot / reverse shot): the seats keep their numbers, the speaker is now on the right
+  const rev = seats.slice().reverse().map(s => ({...s, x: 1024 - s.x}));
+  assert.equal(seatYaw(rev, rev.findIndex(s => s.n === 1)), FACE_ANGLE);
+  assert.equal(seatYaw([{x: 300, n: 0, facing: 'camera'}, {x: 300, n: 1, facing: 'speaker'}], 1), 0, 'right in front of the speaker: the camera');
+});
+
+test('by the scene: the speaker turns to the person addressed, listeners as the plan says, else to the speaker', async () => {
+  const {facingTarget, turnTowards, SPEAKER_TURN, LISTENER_TURN} = await import('./rig3d-pose.mjs');
+  const at = {'uncle-mortimer': 180, ralph: 530, sidney: 737, winifred: 940};
+  const line = {speaker: 'uncle-mortimer', look_at: 'sidney'};
+  const m = facingTarget({key: 'uncle-mortimer', x: 180}, line, 'uncle-mortimer', at, 'right');
+  assert.deepEqual(m, {x: 737}, 'the person the line addresses comes first');
+  assert.equal(turnTowards(m, 180, SPEAKER_TURN), 65, 'turned right, a profile');
+  assert.deepEqual(facingTarget({key: 'uncle-mortimer', x: 180}, {speaker: 'uncle-mortimer'}, null, at, 'right'), {dir: 1}, 'else the plan');
+  assert.deepEqual(facingTarget({key: 'ralph', x: 530}, line, 'uncle-mortimer', at, 'left'), {dir: -1});
+  assert.deepEqual(facingTarget({key: 'sidney', x: 737}, line, 'uncle-mortimer', at, 'ralph'), {x: 530}, 'facing another person in the plan');
+  const w = facingTarget({key: 'winifred', x: 940}, line, 'uncle-mortimer', at, undefined);
+  assert.equal(turnTowards(w, 940, LISTENER_TURN), -45, 'no note: towards the speaker, 45 degrees');
+  assert.deepEqual(facingTarget({key: 'winifred', x: 940}, null, 'uncle-mortimer', at, undefined), {x: 180}, 'between lines: the last speaker');
+  assert.equal(turnTowards(null, 0, 45), 0);
+});

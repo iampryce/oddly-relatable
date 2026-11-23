@@ -22,13 +22,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {loadRig, drawCharacter, drawHead, renderVideo, loadImage, createCanvas, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
 import {registerBannerFonts, layoutBanner, drawBanner} from './banner.mjs';
+import {seatYaw, facingTarget, turnTowards, SPEAKER_TURN, LISTENER_TURN, STANDING_TURN} from './rig3d-pose.mjs';
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const OUT = process.argv[3];
 const {width: W, height: H, fps: FPS, duration: DUR} = spec;
 let SET = spec.set;
 const KEYS = Object.keys(spec.cast);
-const seatsOf = (s, flip) => { const l = s.seats?.length ? s.seats : s.seat ? [s.seat] : []; return flip ? l.slice().reverse() : l; };
+// each seat keeps its number in the set's staging (n), so "toward seat N" and the speaker's seat survive a reversed side
+const seatsOf = (s, flip) => { const l = (s.seats?.length ? s.seats : s.seat ? [s.seat] : []).map((x, n) => ({...x, n})); return flip ? l.slice().reverse() : l; };
 let SEATS = seatsOf(SET, spec.flip);
 // scene 0 is spec.set with the cast's starts; later scenes switch set at their t0
 const SCENES = [{t0: -Infinity, set: spec.set, flip: !!spec.flip}, ...(spec.scenes || []).slice().sort((a, b) => a.t0 - b.t0)];
@@ -255,10 +257,19 @@ function sitPose(c, m, u, rising) {
   const reach = S.hip_y + c.legLen * c.S * 0.96;
   const fyS = u >= 1 ? reach : lerp(fy, reach, ease.inOut(u));
   return {seated: u > 0.5, sitting: u, x: lerp(m.from ?? S.x + 40, S.x, ease.inOut(u)), hipY: lerp(standHip, S.hip_y, down),
-    feet: {L: {x: S.x - spread, y: fyS}, R: {x: S.x + spread, y: fyS}}, seatedFeetY: reach, seatHipY: S.hip_y, seatFeetY: S.feet_y};
+    feet: {L: {x: S.x - spread, y: fyS}, R: {x: S.x + spread, y: fyS}}, seatedFeetY: reach, seatHipY: S.hip_y, seatFeetY: S.feet_y,
+    seatIndex: m.seat ?? 0};
 }
 
 const looks = Object.fromEntries(KEYS.map(k => [k, {x: 0, y: 0.1}]));
+// the 3D rig animator turns bodies by the scene: the reference plan's facings per time range (spec.facing_notes:
+// [{start, end, facing: {key: 'left' | 'right' | key}}]), smoothed so a turn takes a moment
+const yaws = Object.fromEntries(KEYS.map(k => [k, null]));
+function noteFacing(k, t) {
+  for (const r of spec.facing_notes || []) if (t >= r.start && t < r.end && r.facing && r.facing[k]) return r.facing[k];
+  return undefined;
+}
+function lastSpeakerAt(t) { let s = null; for (const l of spec.lines) if (l.start <= t) s = l.speaker; return s; }
 function pose(k, t) {
   const c = C[k], L = locomotion(k, t);
   const p = {lean: 0, breath: Math.sin(t * 2.1 + k.length) * 0.008, squash: 1, headTilt: 0, headNod: 0, expression: expressionAt(k, t)};
@@ -326,7 +337,22 @@ function pose(k, t) {
   p.footL = {x: feet.L.x, y: feet.L.y - ankleUp}; p.footR = {x: feet.R.x, y: feet.R.y - ankleUp};
   // for the 3D rig animator: walking (the step count), sitting progress and the seat's lines
   if (L.walking) p.walk = {step: L.step || 0, dir: L.dir};
-  if (L.sitting !== undefined) { p.sitting = L.sitting; p.seatHipY = L.seatHipY; p.seatFeetY = L.seatFeetY; }
+  if (L.sitting !== undefined) {
+    p.sitting = L.sitting; p.seatHipY = L.seatHipY; p.seatFeetY = L.seatFeetY;
+    p.seatChoice = (SEATS[L.seatIndex] || {}).facing ? seatYaw(SEATS, L.seatIndex) : null;   // the owner's choice on the seat
+  }
+  // which way the body turns (3D rig; the 2D rig draws everyone facing the camera): the owner's seat choice, else by the
+  // scene (the speaker towards the person addressed, the others as the plan says, else towards the speaker)
+  if (R3 && !L.walking && L.jump === undefined) {
+    const atX = Object.fromEntries(KEYS.filter(o => o === k || locomotion(o, t).x > -100).map(o => [o, o === k ? x : locomotion(o, t).x]));
+    const line = spec.lines.find(l => t >= l.start - 0.2 && t < l.end + 0.3) || null;
+    const target = facingTarget({key: k, x}, line, lastSpeakerAt(t), atX, noteFacing(k, t));
+    const angle = L.sitting !== undefined ? (line && line.speaker === k ? SPEAKER_TURN : LISTENER_TURN) : STANDING_TURN;
+    const want = p.seatChoice ?? turnTowards(target, x, angle);
+    yaws[k] = yaws[k] === null ? want : yaws[k] + (want - yaws[k]) * 0.12;
+    const u = L.sitting !== undefined ? ease.inOut(clamp(L.sitting)) : 1;
+    p.yaw3d = yaws[k] * u;
+  }
   p.kneeDir = kneeDir; p.hip = {x, y: hipY}; p.seated = !!L.seated; p.seatedFeetY = L.seatedFeetY; p.onStage = x > -150 && x < SET.width + 150;
   return p;
 }
@@ -498,11 +524,16 @@ function drawScene(ctx, t) {
   for (const k of order) { const p = poses[k]; if (!p.onStage) continue; const fy = p.seated ? (p.seatedFeetY ?? FLOOR()) : FLOOR(); ctx.fillStyle = 'rgba(40,20,10,0.22)'; ctx.beginPath(); ctx.ellipse(p.hip.x, fy, halfW(k) * 0.7, 13, 0, 0, Math.PI * 2); ctx.fill(); }
   // seated characters, then the table front (that part of the plate again, so they sit behind the table), then
   // everyone standing (in front of it)
+  // characters seated behind the table, then the table front (that part of the plate again, so they sit behind it),
+  // then everyone in front of it: standing, or seated in a row in front of the table (hips below the table front's
+  // bottom edge: the speaker behind the desk, the audience row in front of it)
   const draw = ks => { if (R3) R3.draw(ctx, ks, poses, v); else for (const k of ks) drawCharacter(ctx, C[k], poses[k]); };
-  draw(order.filter(k => poses[k].onStage && poses[k].seated));
   const tf = SET.table_front;
-  if (tf && tf.x1 > tf.x0 && tf.y1 > tf.y0) ctx.drawImage(plate, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0);
-  draw(order.filter(k => poses[k].onStage && !poses[k].seated));
+  const hasTf = tf && tf.x1 > tf.x0 && tf.y1 > tf.y0;
+  const behind = p => p.seated && (!hasTf || p.hip.y < tf.y1);
+  draw(order.filter(k => poses[k].onStage && behind(poses[k])));
+  if (hasTf) ctx.drawImage(plate, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0);
+  draw(order.filter(k => poses[k].onStage && !behind(poses[k])));
   if (spec.bubbles) drawBubble(ctx, t, poses, v, s);
   if (spec.hook) drawHook(ctx);
   if (spec.captions) {

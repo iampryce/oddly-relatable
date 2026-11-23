@@ -464,14 +464,18 @@ def set_panel(eid: int, db: Session = Depends(get_db)):
                       "url": storage().url(a.storage_key) if a else None, "preview_url": storage().url(pv.storage_key) if pv else None,
                       "width": r.get("width"), "height": r.get("height"), "blocking": r.get("blocking") or {},
                       "seats": len(sets.seats_of(r.get("blocking") or {})), "people": want,
-                      "suggested": {k: sug[k] for k in ("blocking", "info", "summary", "usage", "estimated_usd", "at") if k in sug} if sug else None,
+                      "suggested": {**{k: sug[k] for k in ("blocking", "info", "summary", "usage", "estimated_usd", "at") if k in sug},
+                                    "spacing": sets.spacing_of(sug.get("blocking"))} if sug else None,
+                      "spacing": sets.spacing_of(r.get("blocking")),
                       "suggest_error": r.get("suggest_error"), "staging_edited": bool(r.get("staging_edited_at")),
                       "request": r.get("request") or ({"prompt": r["prompt"]} if r.get("prompt") else None),
                       "request_text": sets.request_text(r["request"]) if r.get("request") else r.get("prompt"),
                       "estimated_usd": r.get("estimated_usd"), "cost": IMAGE_COST, "room": r.get("room"), "view": r.get("view"),
                       "room_index": r.get("room_index", 0), "created": r.get("created"), "description": r.get("description")})
+    from .acting import MIN_HEIGHT, min_head_px
     return {"sets": items, "people": people, "jobs": panel_jobs(db, ep, {x["id"] for x in items}),
-            "suggest_cost": seat_suggest.cost_view(db), "image_cost": IMAGE_COST, "chosen": ep.set_id}
+            "suggest_cost": seat_suggest.cost_view(db), "image_cost": IMAGE_COST, "chosen": ep.set_id,
+            "min_head_px": min_head_px(), "min_height": MIN_HEIGHT}
 
 
 @router.post("/sets/{sid}/suggest-seats")

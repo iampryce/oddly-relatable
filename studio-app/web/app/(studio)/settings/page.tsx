@@ -1,6 +1,7 @@
 'use client';
 import {useEffect, useState} from 'react';
 import SetStaging from '@/components/SetStaging';
+import {SpacingWarning} from '@/components/SetPanel';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
@@ -200,7 +201,7 @@ function VoiceCompare() {
     </div>);
 }
 
-function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
+function SetCandidate({set: x, reload, minHead}: {set: any; reload: () => unknown; minHead: number}) {
   const [b, setB] = useState<any>(x.blocking);
   const [editing, setEditing] = useState(false);
   const [checked, setChecked] = useState<any[] | null>(null);
@@ -220,6 +221,7 @@ function SetCandidate({set: x, reload}: {set: any; reload: () => unknown}) {
         <div className="grid cols-2">{field('floor_y', 'Floor line (px from top)')}{field('stand_min_x', 'Standing area from x')}{field('stand_max_x', 'Standing area to x')}</div>
         {x.url && <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} />}
         {x.suggested && <span className="small">Suggested by the vision model: {x.suggested.summary}</span>}
+        <SpacingWarning seats={b.seats || (b.seat ? [b.seat] : [])} need={minHead} />
         <div className="row"><button className="btn primary" disabled={!!busy} onClick={() => run('ok', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'approve', blocking: b}}))}>Approve set</button>
           <button className="btn" disabled={!!busy} onClick={() => run('no', () => api(`/sets/${x.id}/decide`, {method: 'POST', body: {decision: 'reject'}}))}>Reject</button></div></>}
       {x.status !== 'rejected' && <label className="small row" style={{gap: 4}}><input type="checkbox" checked={!!x.kept} disabled={!!busy}
@@ -244,7 +246,7 @@ function SetsCard() {
       <div className="spread"><h2>Sets library (kept for reuse)</h2><BulkDelete what="sets" label="Delete unused candidates" onDone={reload} /></div>
       <p className="muted small">The sets kept for future episodes, and library sets made here. Each episode makes, approves and stages its own set on its own page (Set section); keep one there to see it here and offer it to other episodes.{elsewhere > 0 ? ` ${elsewhere} set(s) belong to a single episode and are managed on that episode's page.` : ''}</p>
       <ErrorBox error={error} />
-      {library.map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} />)}
+      {library.map((x: any) => <SetCandidate key={`${x.id}-${x.status}-${x.created}`} set={x} reload={reload} minHead={data?.min_head_px || 0} />)}
       {!library.length && <p className="muted small">No set kept for reuse yet.</p>}
       {active.length > 0 && <span className="badge busy">generating {active.length} candidate(s)…</span>}
       {(data?.jobs || []).filter((j: any) => j.status === 'failed' && !j.payload?.episode_id).slice(0, 2).map((j: any) => <div key={j.id} className="small" style={{color: 'var(--bad)'}}>{j.error}</div>)}
