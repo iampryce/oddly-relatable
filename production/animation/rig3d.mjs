@@ -55,6 +55,19 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
     t.needsUpdate = true; return t;
   };
   const toCanvas = (img, w = img.width, h = img.height) => { const cv = createCanvas(w, h); cv.getContext('2d').drawImage(img, 0, 0, w, h); return cv; };
+  // the drawn pixels' box (alpha above a little), as its own canvas
+  const trimmed = cv => {
+    const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+    let x0 = cv.width, y0 = cv.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) if (d[(y * cv.width + x) * 4 + 3] > 16) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (x1 < 0) return cv;
+    const out = createCanvas(x1 - x0 + 1, y1 - y0 + 1);
+    out.getContext('2d').drawImage(cv, x0, y0, x1 - x0 + 1, y1 - y0 + 1, 0, 0, x1 - x0 + 1, y1 - y0 + 1);
+    return out;
+  };
+  const DRAWN_NECK = 1.08;
   const unit = {cyl: new THREE.CylinderGeometry(1, 1, 1, 12, 1), ball: new THREE.SphereGeometry(1, 16, 12)};
 
   const R = {};
@@ -95,7 +108,9 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
     bx.globalCompositeOperation = 'source-over'; bx.drawImage(inner, fw * 0.04, fh * 0.04, fw * 0.92, fh * 0.92);
     const drawn = {};
     for (const [angle, file] of Object.entries((cast[k] || {}).head_angles || {})) {
-      try { const img = await loadImage(file); drawn[angle] = {tex: texFrom(toCanvas(img)), w: img.width, h: img.height}; } catch { /* the mock */ }
+      // an approved drawing is a whole picture with the head in it: crop it to the drawn pixels first (feat/3d-rig PR 4;
+      // scaling the whole padded picture to the head's height drew a tiny head floating above the body)
+      try { const img = await loadImage(file); const cv = trimmed(toCanvas(img)); drawn[angle] = {tex: texFrom(cv), w: cv.width, h: cv.height}; } catch { /* the mock */ }
     }
     const head = new THREE.Mesh(planeGeo(), new THREE.MeshBasicMaterial({map: liveTex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide}));
     scene.add(head);
@@ -148,11 +163,12 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
     if (hv.view === 'back') tex = X.drawn.back?.tex || X.backTex;
     else if (hv.view !== 'front') {
       const d = X.drawn[hv.view];
-      if (d) { tex = d.tex; w = d.w * (X.fh / d.h); } else squash = hv.view === 'side' ? 0.64 : 0.86;
+      // the drawing at the front head's height (plus the bit of neck the drawings include), its own proportions kept
+      if (d) { tex = d.tex; h = X.fh * DRAWN_NECK; w = d.w * (h / d.h); } else squash = hv.view === 'side' ? 0.64 : 0.86;
     }
     X.head.material.map = tex;
     const hw = w * S * squash, hh = h * S;
-    const cx = (fo.x + X.fw / 2) * S, cy = (fo.y + X.fh / 2) * S;     // the face's centre from the neck, set px (y down)
+    const cx = (fo.x + X.fw / 2) * S, cy = (fo.y + h / 2) * S;        // the head's centre from the neck, set px (y down; the top stays where the front head's top is)
     const tilt = (p.lean || 0) + (p.headTilt || 0);
     X.head.scale.set(hv.flip ? -hw : hw, hh, 1);
     X.head.rotation.set(0, 0, -tilt);
