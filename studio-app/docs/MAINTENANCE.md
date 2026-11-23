@@ -22,18 +22,48 @@ Nothing in this change is installed or run automatically. The owner installs it 
 - **Free space before every backup** (2026-11-23: the 531a40c deploy's backup filled the disk and was left half-written). `backup.sh` first checks that the disk has room for the media volume (without `work/uploads`), the database dump, and 2G left free afterwards (`BACKUP_HEADROOM`); a deploy also asks for 5G for its image build (`DEPLOY_BUILD_FREE`). Without that room it stops with exit code 3 and says what is needed and what is free; nothing is written and no backup is removed, and the deploy stops before building, still on the previous release.
 - **A backup that fails part-way removes its own incomplete folder** (only the one it created; it never writes into another backup's folder). The backup it has just made is never removed, and no script ever removes a Docker volume.
 - **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). Run by hand without options it is a **dry run**: it only lists what it would remove, with sizes. The weekly job runs it as a **dry run** too, both in the repo's `deploy/cron.d-oddstudio` and on the server (owner decision 2026-11-23), so installing the cron file never starts deleting by itself. Only `--apply`, added deliberately (install step 4), removes:
-  - every release folder except the current one, any release a running container uses, and the 5 newest. The `oddstudio-api`/`oddstudio-web` images of removed releases go too, so `rollback.sh` keeps working for every kept release.
-  - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
-  - dangling images, build cache older than 7 days, and any build cache above 10 GB (`BUILD_CACHE_MAX`; the least recently used goes first).
-  - backups beyond the newest 7 nightly and 3 deploy-time, counted separately (complete backups only). The newest backup is never removed.
+  - everything beyond the **keep-limits** below, which the dry run lists with sizes.
   - database dumps older than 30 days. The newest dump is never removed.
-  - deploy logs older than 30 days, and the systemd journal above 100 MB.
+  - deploy logs older than 30 days.
+
+## Keep-limits (2026-11-23)
+
+What `maintenance.sh` keeps; everything else of these kinds is listed by the dry run (with sizes) and removed only by `--apply`:
+
+| What | Kept | Removed by `--apply` |
+|---|---|---|
+| Release folders (`/srv/stickman/releases`) | the live release, the **previous 2** (`KEEP_PREVIOUS_RELEASES`), and any release a container uses | older folders, and a folder whose deploy failed before it was built ("never built") |
+| Docker images | every image a container uses; the live and the **previous** release's `oddstudio-api`/`oddstudio-web` images (so `rollback.sh` works for the previous release); `alpine:3.20`, which the scripts run (`KEEP_IMAGES`) | every other image, with `docker image rm`, and dangling images with `docker image prune`. Never by deleting files under `/var/lib/docker` or `/var/lib/containerd`. |
+| Docker build cache | the most recent, up to 10 GB (`BUILD_CACHE_MAX`, owner decision 2026-11-20) | cache older than 7 days (`docker builder prune --filter until=168h`, `BUILD_CACHE_HOURS`), then the least recently used above 10 GB |
+| systemd journal | up to **200M** (`JOURNAL_MAX`) | the oldest journal files above that (`journalctl --vacuum-size`) |
+| Backups | the **newest 3 complete deploy-time** backups (`KEEP_DEPLOY`; it refuses fewer than 3), the newest 7 nightly ones (none are made now), and always the newest backup | older complete backups. Incomplete folders are listed, never removed. |
+
+- **"Previous" means the deploy order**, not the folders' dates. `deploy.sh` and `rollback.sh` add a line to `/srv/stickman/releases.log` for each release that goes live. Until that log has entries (the first deploys after this change), the order the release images were built stands in for it.
+- **Never touched:** Docker volumes, the database, media, running containers, `incoming/`, `shared/` and `repo/`. The two exceptions were approved earlier and are unchanged: upload leftovers in `work/uploads` (temporary files, older than 24 hours) and Bin items older than 30 days (see below).
+- **Rollback after `--apply`:** `rollback.sh` works for the previous release. For an older release, its images are gone, so it says "run deploy.sh" (the images are rebuilt from the release folder, if it is still kept).
+
+## The disk report and the Overview page
+
+- Every run of `maintenance.sh` (dry run or `--apply`) writes `/srv/stickman/reports/disk-report.json` (`REPORT_DIR`). It holds:
+  - the disk's size, use and free space;
+  - the biggest consumers: backups, release folders, Docker images, Docker build cache, media, database, and logs with the journal;
+  - what `--apply` would free (or, after `--apply`, what it freed).
+
+  Each run also appends one line to `reports/disk-history.log`. The weekly cron line also keeps its text output in `/var/log/oddstudio-maintenance.log`.
+- The API container mounts `/srv/stickman/reports` read-only (`docker-compose.yml`). The **Overview** page shows:
+  - a **Disk** card: used, free and percent, measured live, the same numbers as `df -h`;
+  - the consumers from the last report, and how old that report is;
+  - a **yellow warning from 80%**;
+  - a **red banner from 90%** that names the biggest consumers.
+
+  The page only reads; nothing can be removed from it.
+- Before the first report exists, the card shows the live numbers and says to run `maintenance.sh` without options (a dry run) on the server.
 - **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; the weekly sweep catches anything a crash left behind. Backups also leave `work/uploads` out.
 - **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media, apart from `work/uploads`) and running containers.
 - **Build cache cap** (owner decision 2026-11-20): every deploy builds images and refreshes the Docker build cache, so with frequent deploys nothing in it is ever older than 7 days and the age rule frees nothing; the cache had grown to 45 GB. `--apply` therefore also caps it with `docker builder prune --max-used-space $BUILD_CACHE_MAX` (default 10GB). The 10 GB kept covers the recent layers, so normal deploys stay fast; a deploy after a large dependency change rebuilds those layers and takes a few minutes longer.
 - **Deploy lock:** `--apply` holds the deploy lock (`/srv/stickman/.ci-deploy.lock`, the one `ci-deploy.sh` takes). If a deploy is running, the releases, images and build-cache steps are skipped and the rest still runs; a deploy that starts while maintenance holds the lock fails with "another deploy is running" and can be re-run.
-- **Projected free space:** the dry run ends with `projected free after --apply`, in the same units as `df -h`, counting the releases it would remove, the images no container uses, and the build cache above the cap.
-- **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS`, `BUILD_CACHE_MAX` and `JOURNAL_MAX` are environment variables.
+- **Projected free space:** the dry run ends with `projected free after --apply`, in the same units as `df -h`, with the share of releases, images, build cache, backups and journal.
+- **Tuning:** `KEEP_PREVIOUS_RELEASES`, `KEEP_IMAGES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS`, `BUILD_CACHE_MAX`, `JOURNAL_MAX` and `REPORT_DIR` are environment variables. (`KEEP_RELEASES` is no longer used.)
 - **The 30-day database-dump folder** (`/srv/stickman/db-dumps/`):
   - Each nightly backup also wrote `<stamp>-nightly.dump` with a `.sha256` file there. With nightly backups removed, no new dumps are added; the existing ones age out after 30 days, except the newest, which is kept.
   - Dumps are kept for 30 days (`DUMP_DAYS`), pruned by age by the nightly job and by `maintenance.sh`. The newest dump is never removed, however old it is.
@@ -41,7 +71,11 @@ Nothing in this change is installed or run automatically. The owner installs it 
 - **Restore** (`deploy/restore.sh`) takes any backup folder, whichever of the three name forms it has: `…-nightly`, `…-deploy` or an old unsuffixed one. It also takes a dump from `db-dumps/`, restoring the database only after checking the dump's `.sha256`.
   - **Fixed in this change:** the safety backup that `restore.sh` takes first could prune the folder being restored if that was the oldest kept backup. That folder is now protected.
   - **Also fixed:** a relative path broke the media restore. Paths are now made absolute.
-- **Simulation:** `deploy/tests/simulate-backups.sh` runs `backup.sh`, `restore.sh` and `maintenance.sh` against a fake `/srv/stickman` with a stub `docker`. It checks retention per kind, the dump folder, and restoring from every kind of backup. CI runs it on every PR.
+- **Simulation:**
+  - `deploy/tests/simulate-backups.sh` runs `backup.sh`, `restore.sh` and `maintenance.sh` against a fake `/srv/stickman` with a stub `docker`. It checks retention per kind, the dump folder, and restoring from every kind of backup.
+  - `deploy/tests/simulate-maintenance.sh` checks the keep-limits, the dry run, `--apply` and the disk report.
+
+  CI runs both on every PR.
 
 ## Install (owner, on the server, after this PR is deployed)
 
@@ -58,8 +92,11 @@ install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-od
 sha256sum /srv/stickman/current/studio-app/deploy/ci-deploy.sh
 install -o root -g root -m 755 /srv/stickman/current/studio-app/deploy/ci-deploy.sh /srv/stickman/ci-deploy.sh
 
-# 4. Optional and deliberate: let the weekly job remove things (--apply). Look at a dry run first (step 1).
-#    (undo: the reverse sed)
+# 4. Optional and deliberate: let the weekly job remove things (--apply). Nothing does this for you: the cron file in
+#    the repo and on the server runs the dry run, and installing it (step 2) keeps it that way.
+#    First read a dry run (step 1) and the Overview page's Disk card; to try --apply once by hand:
+#      /srv/stickman/current/studio-app/deploy/maintenance.sh --apply
+#    Then make the weekly job apply it (undo: the reverse sed).
 sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.d/oddstudio
 # sed -i 's#deploy/maintenance.sh --apply >>#deploy/maintenance.sh >>#' /etc/cron.d/oddstudio   (back to the dry run)
 ```

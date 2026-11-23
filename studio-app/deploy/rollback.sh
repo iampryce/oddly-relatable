@@ -14,4 +14,5 @@ if grep -q "^PUBLIC_HOST=." "$ROOT/shared/.env" && test -f "$ROOT/releases/$rel/
   f+=(-f "$ROOT/releases/$rel/studio-app/deploy/docker-compose.public.yml"); fi
 RELEASE="$rel" docker compose -p oddstudio --env-file "$ROOT/shared/.env" "${f[@]}" up -d --remove-orphans
 if [[ -n "${2:-}" ]]; then "$ROOT/releases/$rel/studio-app/deploy/restore.sh" "$2"; fi
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $rel" >> "$ROOT/releases.log" || true   # the deploy order (maintenance.sh)
 echo "rollback: now running $rel"

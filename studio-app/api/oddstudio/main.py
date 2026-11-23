@@ -91,6 +91,8 @@ from . import draft as episode_draft  # noqa: E402
 app.include_router(episode_draft.router)
 app.include_router(studio_bin.router)
 app.include_router(gpu.router)
+from . import system_disk  # noqa: E402
+app.include_router(system_disk.router)
 
 
 @app.middleware("http")
