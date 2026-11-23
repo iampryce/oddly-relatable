@@ -21,7 +21,7 @@ Nothing in this change is installed or run automatically. The owner installs it 
   - **Only complete backups count** (a folder with `SHA256SUMS`). An incomplete folder is listed by `backup.sh` and `maintenance.sh` and left alone: check it, then remove it by hand.
 - **Free space before every backup** (2026-11-23: the 531a40c deploy's backup filled the disk and was left half-written). `backup.sh` first checks that the disk has room for the media volume (without `work/uploads`), the database dump, and 2G left free afterwards (`BACKUP_HEADROOM`); a deploy also asks for 5G for its image build (`DEPLOY_BUILD_FREE`). Without that room it stops with exit code 3 and says what is needed and what is free; nothing is written and no backup is removed, and the deploy stops before building, still on the previous release.
 - **A backup that fails part-way removes its own incomplete folder** (only the one it created; it never writes into another backup's folder). The backup it has just made is never removed, and no script ever removes a Docker volume.
-- **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). Run by hand without options it is a **dry run**: it only lists what it would remove, with sizes. The weekly job runs it with `--apply` (owner decision 2026-11-21, after one verified manual run), which removes:
+- **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). Run by hand without options it is a **dry run**: it only lists what it would remove, with sizes. The weekly job runs it as a **dry run** too, both in the repo's `deploy/cron.d-oddstudio` and on the server (owner decision 2026-11-23), so installing the cron file never starts deleting by itself. Only `--apply`, added deliberately (install step 4), removes:
   - every release folder except the current one, any release a running container uses, and the 5 newest. The `oddstudio-api`/`oddstudio-web` images of removed releases go too, so `rollback.sh` keeps working for every kept release.
   - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
   - dangling images, build cache older than 7 days, and any build cache above 10 GB (`BUILD_CACHE_MAX`; the least recently used goes first).
@@ -49,8 +49,8 @@ Nothing in this change is installed or run automatically. The owner installs it 
 # 1. Look at the dry run first: nothing is removed.
 /srv/stickman/current/studio-app/deploy/maintenance.sh
 
-# 2. Install the scheduled jobs (weekly housekeeping with --apply; no nightly backup since 2026-11-23).
-#    Note: the repo copy runs maintenance.sh WITH --apply; the file installed on the server runs the dry run.
+# 2. Install the scheduled jobs (weekly housekeeping as a dry run; no nightly backup since 2026-11-23).
+#    Installing this file never turns on --apply: that is step 4, done deliberately.
 install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-oddstudio /etc/cron.d/oddstudio
 
 # 3. The CI deploy wrapper lives outside the repo: reinstall it (check the hash first). Not needed for the retention:
@@ -58,7 +58,8 @@ install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-od
 sha256sum /srv/stickman/current/studio-app/deploy/ci-deploy.sh
 install -o root -g root -m 755 /srv/stickman/current/studio-app/deploy/ci-deploy.sh /srv/stickman/ci-deploy.sh
 
-# 4. An installed cron file from before 2026-11-21 still runs the dry run: make it act (undo: the reverse sed)
+# 4. Optional and deliberate: let the weekly job remove things (--apply). Look at a dry run first (step 1).
+#    (undo: the reverse sed)
 sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.d/oddstudio
 # sed -i 's#deploy/maintenance.sh --apply >>#deploy/maintenance.sh >>#' /etc/cron.d/oddstudio   (back to the dry run)
 ```
@@ -68,7 +69,7 @@ sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.
   - `restore.sh /srv/stickman/backups/20261121T023000Z-nightly --media`: database and media from a full backup.
   - `restore.sh /srv/stickman/db-dumps/20261105T023000Z-nightly.dump`: database only, from up to 30 days back.
 - **Check the next morning:** `ls -l /srv/stickman/backups` should show a new folder.
-- **Undo:** `rm /etc/cron.d/oddstudio`. Releases, images and backups that were already removed cannot be restored, which is why the job stays a dry run until step 4.
+- **Undo:** `rm /etc/cron.d/oddstudio`. Releases, images and backups that were already removed cannot be restored, which is why the job stays a dry run unless step 4 is done deliberately.
 
 ## The Bin and cleared jobs
 
@@ -76,7 +77,7 @@ sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.
   - **Refused, with the reason:** anything another non-deleted episode uses, locked artwork, and rendered or published episodes.
   - Deleting an episode never deletes its characters or sets.
 - **Bin page:** Restore, Delete forever and Empty Bin. The confirm lists exactly what goes and the space freed. Rows and files are removed, only inside the studio's storage and work folders.
-- **Weekly purge:** the weekly `maintenance.sh --apply` removes items that have been in the Bin for more than 30 days (`BIN_DAYS`), inside the API container (`python -m oddstudio.bin purge`), and logs each one. The dry run only lists them.
+- **Weekly purge:** `maintenance.sh --apply` (weekly only once `--apply` is turned on, install step 4) removes items that have been in the Bin for more than 30 days (`BIN_DAYS`), inside the API container (`python -m oddstudio.bin purge`), and logs each one. The dry run only lists them.
 - **Backups:** until purged, binned items are still in the database and storage, so backups cover them as before.
 - **Bulk actions** show the list and count first:
   - Characters: "Delete all rejected / never-approved poses";
