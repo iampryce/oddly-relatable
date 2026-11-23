@@ -1,6 +1,6 @@
 # Motion Model Comparison: shot comparison
 
-Production › Motion Model Comparison › **Shot comparison** compares hosted AI video models with the rig animator on one recorded line of a real episode.
+**Lab** › **Shot comparison** compares hosted AI video models with the rig animator on one recorded line of a real episode. (The Lab tab, 2026-11-23, holds the shot comparison and the Motion Model Comparison; an episode's own talking shots, their keying and Key again are in its Talking shots section.)
 
 - **Inputs:**
   - Only the studio's own approved art: the scene's approved set plate, with the speaker's approved neutral pose composed onto it locally (720×1280 first frame).

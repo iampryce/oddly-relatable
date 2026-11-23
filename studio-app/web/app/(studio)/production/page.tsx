@@ -3,17 +3,16 @@ import Link from 'next/link';
 import {api, when} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {EpisodeTable, ErrorBox, JobStatus} from '@/components/ui';
-import {MotionComparison} from '@/components/MotionComparison';
 import {useState} from 'react';
-import {recentRows} from '@/lib/jobsView';
+import {FAILED_SHOWN_HOURS, quietJobs, recentRows} from '@/lib/jobsView';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
-import {ShotComparison} from '@/components/ShotComparison';
 
 export default function Production() {
   const {data: eps} = useApi<any[]>('/episodes?stage=producing,production_failed,storyboard_approved', 5000);
   const {data: jobs, error, reload} = useApi<any[]>('/jobs?limit=150', 4000);
   const act = useAction(reload);
   const [more, setMore] = useState(false);
+  const [showOld, setShowOld] = useState(false);
   const clearOne = (j: any) => {
     if (!window.confirm(`Clear failed job #${j.id} (${j.kind.replace(/_/g, ' ')})? It is hidden here; nothing is deleted.`)) return;
     act.run('clear', () => api(`/jobs/${j.id}/clear`, {method: 'POST'}));
@@ -24,7 +23,10 @@ export default function Production() {
     if (!p.count) { window.alert('No failed job from before today can be cleared.' + kept); return; }
     if (window.confirm(`Clear ${p.count} failed job(s) from before today? They are hidden here; nothing is deleted.${kept}`)) await api('/jobs/clear-failed', {body: {confirm: true}});
   });
-  const failed = (jobs || []).filter(j => j.status === 'failed');
+  // quiet by default: failed jobs older than a day behind a count (never one a live episode still needs), and no
+  // succeeded prepare or key jobs in Recent jobs. Nothing is cleared or deleted by this.
+  const quiet = quietJobs(jobs || [], showOld);
+  const failed = quiet.failed;
   const active = (jobs || []).filter(j => j.status === 'queued' || j.status === 'running');
   const table = (rows: any[], empty: string) => !rows.length ? <p className="muted">{empty}</p> : (
     <div className="table-wrap"><table>
@@ -43,19 +45,20 @@ export default function Production() {
       </tbody></table></div>);
   return (
     <>
-      <h1>Production</h1><p className="sub">Image generation, scene preparation, voice and rendering. Failed jobs can be retried on their own.</p>
+      <h1>Production</h1><p className="sub">Image generation, scene preparation, voice and rendering. Failed jobs can be retried on their own. The shot and model comparisons are in the Lab.</p>
       <ErrorBox error={error || act.error} />
-      <ShotComparison />
-      <MotionComparison />
       <div className="spread"><h2>Episodes in production</h2><BulkDelete what="episodes" label="Delete failed episodes" onDone={reload} /></div>
       {eps && <EpisodeTable episodes={eps} empty="No episode is in production." />}
       <div className="card" style={{marginTop: 16}}><h2>Running and queued ({active.length})</h2>{table(active, 'Nothing is running.')}</div>
       <div className="card" style={{marginTop: 16}}><div className="spread"><h2>Failed ({failed.length})</h2>
         {failed.length > 0 && <button className="btn sm" disabled={!!act.busy} onClick={clearOld}>Clear all failed jobs older than today</button>}</div>
         <p className="muted small">Clearing hides a failed job here; it is never deleted and stays in its episode&apos;s history. A failed job that a live episode still needs to retry stays, with the reason.</p>
-        {table(failed, 'No failed jobs.')}</div>
-      <div className="card" style={{marginTop: 16}}><h2>Recent jobs</h2>{table(recentRows(jobs || [], more), 'No jobs yet.')}
-        {(jobs || []).length > 10 && <button className="btn sm" onClick={() => setMore(!more)}>{more ? 'Show the latest 10' : `Show more (${Math.min((jobs || []).length, 40) - 10} more)`}</button>}</div>
+        {table(failed, quiet.hiddenFailed ? 'No failed jobs from the last day.' : 'No failed jobs.')}
+        {(quiet.hiddenFailed > 0 || showOld) && <button className="btn sm" onClick={() => setShowOld(!showOld)}>
+          {showOld ? `Hide failed jobs older than ${FAILED_SHOWN_HOURS} h` : `${quiet.hiddenFailed} older failed job(s) hidden · Show them`}</button>}</div>
+      <div className="card" style={{marginTop: 16}}><h2>Recent jobs</h2>{table(recentRows(quiet.recent, more), 'No jobs yet.')}
+        {quiet.hiddenRoutine > 0 && <p className="muted small">{quiet.hiddenRoutine} finished preparation and keying job(s) not listed (each episode&apos;s History has them).</p>}
+        {quiet.recent.length > 10 && <button className="btn sm" onClick={() => setMore(!more)}>{more ? 'Show the latest 10' : `Show more (${Math.min(quiet.recent.length, 40) - 10} more)`}</button>}</div>
     </>
   );
 }

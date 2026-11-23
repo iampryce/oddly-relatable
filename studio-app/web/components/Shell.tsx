@@ -6,7 +6,7 @@ import {useApi} from '@/lib/hooks';
 
 const NAV = [
   ['/', 'Overview'], ['/ideas', 'Ideas'], ['/scripts', 'Scripts'], ['/characters', 'Characters'],
-  ['/storyboards', 'Storyboards'], ['/production', 'Production'], ['/library', 'Video Library'],
+  ['/storyboards', 'Storyboards'], ['/production', 'Production'], ['/lab', 'Lab'], ['/library', 'Video Library'],
   ['/publishing', 'Publishing'], ['/settings', 'Settings'], ['/bin', 'Bin'],
 ] as const;
 

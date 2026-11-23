@@ -1,5 +1,5 @@
 'use client';
-// Shot comparison, batch mode (Production > Motion Model Comparison). One screen: pick the episode, tick lines and
+// Shot comparison, batch mode (the Lab page). One screen: pick the episode, tick lines and
 // models; planning (first frames from our approved art, the line's own audio cut, the rig render) starts by itself for
 // every ticked line. One summary (exact clips, total estimate, budget with approved-but-uncharged runs against the cap)
 // and ONE "Run selected" confirm before anything paid runs. Results: one row per line, rig / i2v / avatar side by side.
@@ -11,7 +11,7 @@ import {api, uploadFile} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {DeleteButton} from '@/components/BinButtons';
-import {clipCell, lineKey, toggleAll} from '@/lib/shotBatch';
+import {clipCell, lineKey, splitRequests, toggleAll} from '@/lib/shotBatch';
 import {gpuLine} from '@/lib/gpuView';
 
 const FRAMING_NAME: Record<string, string> = {wide: 'wide', medium: 'medium', head: 'head and shoulders', cutout: 'cutout on plain colour'};
@@ -83,7 +83,12 @@ export function ShotComparison() {
     if (!window.confirm(`Run ${r.label} on ${whose} for this line: estimated ${usd(r.estimate.usd, 3)}${r.estimate?.note ? ` (${r.estimate.note})` : ''}${p.talking && r.provider ? `. This plan's talking cap: ${usd(p.talking.spent_usd, 3)} of ${usd(p.talking.cap_usd)} used` : ''}. Experimental budget: ${usd(batch.data?.spent_usd)} spent + ${usd(batch.data?.pending_usd)} approved, of ${usd(batch.data?.budget_usd)}.`)) return;
     try { await api(`/motion/shot/${p.id}/run`, {body: {model: r.model}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
-  const requests = (p: any) => (p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
+  const requests = (p: any) => {
+    const {shown, unavailable} = splitRequests((p.requests || []).filter((r: any) => models.has(r.model)));
+    return <>{shown.map(request(p))}{unavailable.length > 0 && <details className="muted small"><summary>{unavailable.length} not available · why</summary>
+      {unavailable.map((r: any) => <div key={r.model}>{r.label}: {r.blocked}</div>)}</details>}</>;
+  };
+  const request = (p: any) => (r: any) => (
     <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}{r.backend === 'gpu' ? `, about ${r.estimate.gpu_seconds} GPU s` : ''}{p.own_frame ? ', your first frame' : `, ${r.framing} frame`}){r.blocked ? ` · cannot run: ${r.blocked}` : ''}{r.result ? ` · ${r.result.status}` : ''}</summary>
       {r.sends && <div className="muted">Sends: {r.sends.join('; ')}</div>}
       {r.estimate?.note && <div className="muted">{r.estimate.note}</div>}
@@ -96,7 +101,7 @@ export function ShotComparison() {
       {r.blocked?.startsWith('make the') && !p.own_frame && <button className="btn sm" onClick={() => edit(`/motion/shot/${p.id}/frame`, {framing: r.framing}, 'POST')}>Make the {FRAMING_NAME[r.framing] || r.framing} first frame (free)</button>}
       {r.framing === 'cutout' && p.key_colour && <div className="muted">Key colour {p.key_colour}: the character alone, no set; keyed out after the clip (free)</div>}
       {!r.result && !r.blocked && <button className="btn sm" onClick={() => runOne(p, r)}>Run this ({usd(r.estimate.usd, 3)})</button>}
-    </details>));
+    </details>);
   const edit = async (path: string, body: any, method = 'PUT') => {
     try { await api(path, {method, body}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
@@ -171,7 +176,7 @@ export function ShotComparison() {
         <strong>Summary: {summary.clips} paid clip(s){summary.rig ? ' + the rig renders (free)' : ''}, estimated {usd(summary.total_usd)}</strong>
         <span className={`small ${summary.fits ? '' : 'bad'}`}>fal.ai budget: {usd(summary.spent_usd)} spent + {usd(summary.pending_usd)} approved, not yet charged, of {usd(summary.budget_usd)}{summary.fits ? '' : ': over a cap or the GPU cannot run, so Run selected is refused'}</span>
         {summary.gpu?.clips > 0 && <span className={`small ${summary.gpu.ok ? '' : 'bad'}`}>{summary.gpu.clips} self-hosted clip(s), about {usd(summary.gpu.estimate_usd, 3)} of GPU time · {gpuLine(summary.gpu)}</span>}
-        {summary.skipped?.length > 0 && <span className="muted small">Not included: {summary.skipped.join('; ')}</span>}
+        {summary.skipped?.length > 0 && <details className="muted small"><summary>{summary.skipped.length} not included · why</summary>{summary.skipped.map((x: string, i: number) => <div key={i}>{x}</div>)}</details>}
         <div><button className="btn primary" disabled={busy || !summary.clips || !summary.fits} onClick={runSelected}>Run selected</button></div>
       </div>}
       {chosenPlans.length > 0 && <div className="table-wrap"><table>
