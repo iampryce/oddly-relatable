@@ -10,6 +10,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import SetStaging from './SetStaging';
+import SetViews from './SetViews';
 import {candidateCost, seatsLine, statusTone} from '@/lib/workspace';
 import {spacingWarnings} from '@/lib/setStaging';
 
@@ -85,6 +86,7 @@ function SetCard({ep, x, data, reload}: {ep: any; x: any; data: any; reload: () 
       </div>
       {x.status !== 'rejected' && <label className="small row" style={{gap: 4}}><input type="checkbox" checked={!!x.kept} disabled={!!busy}
         onChange={e => run('keep', () => api(`/sets/${x.id}/keep`, {method: 'POST', body: {keep: e.target.checked}}))} />Keep for future episodes</label>}
+      {x.status === 'approved' && <SetViews sid={x.id} eid={ep.id} />}
       {x.request_text && <details><summary className="small">The exact request sent to the image API</summary>
         <pre className="small" style={{whiteSpace: 'pre-wrap', margin: 0}}>{x.request_text}</pre></details>}
     </div>);

@@ -838,6 +838,7 @@ from . import rig_check  # noqa: E402,F401
 from . import character_looks  # noqa: E402,F401
 from . import shot_compare  # noqa: E402,F401
 from . import set_proposals  # noqa: E402,F401
+from . import set_views  # noqa: E402,F401
 from . import head_angles  # noqa: E402,F401
 from . import seat_suggest  # noqa: E402,F401
 from . import room_read  # noqa: E402,F401

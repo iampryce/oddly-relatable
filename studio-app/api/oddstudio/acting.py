@@ -447,6 +447,21 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     for ln in lines:   # the marker is internal: the spec stays as before for renders without scene changes
         (ln.get("move") or {}).pop("auto", None)
 
+    # set views (feat/set-views): each line's shot picks a view of its set (speaker, audience, two-shot); a cut to a
+    # view is a scene change to that view's picture with only the people it shows seated, and back. Without approved
+    # views nothing changes (missing views fall back to wide).
+    from . import set_views
+    first_sid = scene_sets.scene_set(ep, first) if first is not None else ep.set_id
+    base = [{"t0": -1e9, "set_id": first_sid, "set": st, "starts": {k: cast[k]["start"] for k in cast}}] + [
+        {"t0": x["t0"], "set_id": scene_sets.scene_set(ep, scenes[x["id"]]), "set": x["set"], "starts": x["starts"],
+         **({"flip": True} if x.get("flip") else {})} for x in scene_specs]
+    by_set = set_views.specs_for(db, [b["set_id"] for b in base if b["set_id"]], folder)
+    if by_set:
+        merged = set_views.cut(lines, base, by_set)
+        if merged:
+            scene_specs = merged
+            ctx.log(f"set views: {sum(1 for x in merged if x.get('view') != 'wide')} cut(s) to a view")
+
     # timed actions from the video's beats (audio episodes: absolute times), only inside this render's span and for
     # characters in its cast; none -> the spec has no "actions" key, exactly as before
     actions = []

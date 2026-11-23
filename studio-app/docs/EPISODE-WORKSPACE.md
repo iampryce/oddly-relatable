@@ -118,3 +118,11 @@ It writes only the set notes, on the proposal. It never touches the recording, l
 Once "who is who" is confirmed, a person nobody confirmed is left out of the scenes. So:
 - **Seats:** they take no seat. The note "N seated person(s) will stand" counts only the people who will be on screen. The seats a new set is generated for count the same way.
 - **Beats:** their beats, and turns towards them, are not acted. The plan lists only the acted beats, and says how many were skipped. With nobody confirmed, no beat is acted.
+
+## Set views
+
+An approved set's card in the Set section has **Views of this room**:
+- the speaker, audience and two-shot views, each with its camera words (from "Read the room from a video", editable), its picture and its own staging;
+- a list of the view each shot will use.
+
+Missing views use the wide picture. See [SETS.md](SETS.md#views-of-one-set-featset-views).
