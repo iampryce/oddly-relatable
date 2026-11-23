@@ -448,6 +448,53 @@ def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db))
     return S.scene(sc, None)
 
 
+class LineExpressionIn(BaseModel):
+    expression: str = Field(min_length=2, max_length=40)
+    character: str | None = Field(default=None, max_length=41)   # a reacting character's expression (else the speaker's)
+
+
+EXPRESSION_STAGES = ("storyboard_review", "storyboard_approved", "production_failed", "video_review")
+
+
+@router.put("/episodes/{eid}/scenes/{sid}/lines/{li}/expression")
+def set_line_expression(eid: int, sid: int, li: int, body: LineExpressionIn, db: Session = Depends(get_db)):
+    """The owner changes one line's expression (the speaker's, or a reacting character's) to one of that character's
+    usable (approved) expressions. Only the storyboard line changes: the script, its approval and the storyboard's
+    approval stay as they are (feat/3d-rig PR 4). Applies to the stills and the next render."""
+    ep = get_episode(db, eid)
+    if ep.stage not in EXPRESSION_STAGES:
+        raise HTTPException(409, f"not while the episode is {ep.stage}: expressions can be changed once the storyboard exists "
+                                 "and not during a render")
+    sc = get_scene(db, ep, sid)
+    lines = [dict(x) for x in (sc.lines or [])]
+    if not 0 <= li < len(lines):
+        raise HTTPException(404, "no such line in this scene")
+    ln = lines[li]
+    key = body.character or ln.get("speaker")
+    c = by_key(db).get(key)
+    if c is None:
+        raise HTTPException(404, "no such character")
+    usable = set(c.expressions or {}) | {"neutral"}
+    e = body.expression.strip().lower()
+    if e not in usable:
+        raise HTTPException(422, f"{c.name} has no approved '{e}' pose: choose one of {', '.join(sorted(usable))}")
+    if body.character and body.character != ln.get("speaker"):
+        reactions = [dict(r) for r in ln.get("reactions") or []]
+        r = next((r for r in reactions if r.get("character") == key), None)
+        if r is None:
+            raise HTTPException(404, f"{c.name} does not react to this line")
+        r["expression"] = e
+        ln["reactions"] = reactions
+    else:
+        ln["expression"] = e
+    lines[li] = ln
+    sc.lines = lines
+    log_event(db, ep.id, "storyboard", f"Scene {sc.position}, line {li + 1}: {c.name}'s expression set to {e} "
+                                        "(the script and its approval are unchanged; applies to the stills and the next render)")
+    db.commit()
+    return S.scene(sc, None)
+
+
 @router.post("/episodes/{eid}/scenes/{sid}/regenerate")
 def regenerate_scene(eid: int, sid: int, body: InstructionIn, db: Session = Depends(get_db)):
     ep = get_episode(db, eid)
