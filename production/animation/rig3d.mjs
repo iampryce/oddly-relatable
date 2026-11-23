@@ -162,6 +162,9 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
 
   const pixels = new Uint8Array(width * height * 4);
   const out = createCanvas(width, height), ox = out.getContext('2d');
+  // ONE image buffer for every pass, reused (fix/3d-render-memory): a new one per pass is native memory the canvas
+  // library frees only lazily, about 8 MB a frame, and the worker's 4 GB limit killed the renderer after ~400 frames
+  const img = ox.createImageData(width, height), stride = width * 4;
   // the screen box that holds these characters (set px -> output px), so only that part is rendered (the software
   // renderer's cost is per pixel: a wide shot of four seated characters is a third of the frame)
   function box(ks, poses, view, k) {
@@ -195,9 +198,10 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
       order.forEach((key, i) => posed(key, poses[key], i));
       renderer.render(scene, camera);
       gl.readPixels(0, 0, b.w, b.h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-      const img = ox.createImageData(b.w, b.h), row = b.w * 4;
-      for (let y = 0; y < b.h; y++) img.data.set(pixels.subarray((b.h - 1 - y) * row, (b.h - y) * row), y * row);
-      ox.clearRect(0, 0, b.w, b.h); ox.putImageData(img, 0, 0);
+      // the box's rows, flipped (GL rows run bottom-up), into the top-left of the reused buffer; only that part is put
+      const row = b.w * 4;
+      for (let y = 0; y < b.h; y++) img.data.set(pixels.subarray((b.h - 1 - y) * row, (b.h - y) * row), y * stride);
+      ox.clearRect(0, 0, width, height); ox.putImageData(img, 0, 0, 0, 0, b.w, b.h);   // a FULL clear: the canvas library keeps every put until the canvas is wholly cleared
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(out, 0, 0, b.w, b.h, b.sx0, b.sy0, b.w, b.h); ctx.restore();
     },
   };
