@@ -207,6 +207,32 @@ class WorkspaceRulesTest(unittest.TestCase):
         self.assertEqual((out["current"], self.by(out)["production"]["open"]), ("talking", False),
                          "while production renders, the next thing for you is the talking shots; nothing else is open")
 
+    def test_the_now_box_is_the_single_next_action_with_its_cost(self):
+        """The Now box (2026-11-23): a decision costs nothing; the talking shots show their own estimate; anything else
+        says "cost shown before it starts"; the button never starts a paid run by itself."""
+        nx = WS.sections(self.facts(plan_waiting=True))["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_text"], nx["button"]["action"]),
+                         ("plan", "decision", "no cost: your decision", "open"))
+        nx = WS.sections(self.facts(stage="script_review", script=1))["next"]
+        self.assertEqual((nx["section"], nx["kind"]), ("script", "decision"))
+        nx = WS.sections(self.facts())["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_text"], nx["cost_usd"]), ("script", "estimate", WS.NO_ESTIMATE, None),
+                         "generating a script is a paid text call with no estimate here: never shown as free")
+        f = self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5,
+                       set={"chosen": True, "label": "Office", "seats": 5, "people": 5, "candidates_waiting": 0},
+                       talking={"lines": 4, "keyed": 1, "todo_lines": 3, "todo_usd": 0.135})
+        f["stage"] = "producing"
+        nx = WS.sections(f)["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_usd"], nx["button"]),
+                         ("talking", "paid", 0.135, {"action": "run_talking", "label": "Run 3 line(s)"}))
+        self.assertIn("shown again with the total before anything starts", nx["cost_text"])
+        f["talking"] = {"lines": 4, "keyed": 1, "todo_lines": 0, "todo_usd": 0, "running": 3}
+        nx = WS.sections(f)["next"]
+        self.assertEqual((nx["kind"], nx["button"]), ("working", None), "running: nothing to press")
+        jobs = {"notes": [{"id": 9, "kind": "audio_video_notes", "status": "failed", "error": "401"}]}
+        nx = WS.sections(self.facts(notes_ranges=0, notes_requested=True, jobs=jobs))["next"]
+        self.assertEqual((nx["section"], nx["cost_text"]), ("notes", WS.NO_ESTIMATE), "a retry may be paid again: no guess")
+
     def test_script_first_episodes_have_no_audio_sections(self):
         s = self.by(WS.sections(self.facts(audio=False, stage="script_pending", notes_ranges=0, people_found=0, person_map=False)))
         for k in ("lines", "notes", "people", "plan"):

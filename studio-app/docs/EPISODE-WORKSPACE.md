@@ -38,6 +38,12 @@ Each section header shows:
 - **Quiet by default (2026-11-23): only the current step is open.** That is the step that blocks the episode, or, when nothing blocks, the first step still to do in the episode's order (Talking shots comes after the storyboard). Every other section is one collapsed line: its title, its badge (✓ when done) and its note on one line. Its job lines show when you open it.
 - **Only the current step is flagged "blocking".** A failure in a later step keeps its red badge and note, without the flag.
 - The page order of the sections is unchanged (the 22 Nov order, Set first).
+- **The Now box** (top of the episode, 2026-11-23): the single next action, the current step's note, and its cost:
+  - "no cost: your decision" for approve, accept and confirm;
+  - the talking shots' own estimate ("about $0.135 for 3 line(s), shown again with the total before anything starts");
+  - otherwise "cost shown before it starts", never "free" by guess. A retry can be paid again, so it says this too.
+
+  Its button never starts anything paid by itself. "Run N line(s)" opens Talking shots and runs its own Run selected lines flow on the lines not yet keyed: free preparation first where needed, then the confirm with the total, each plan's cap and the budget. Nothing starts without your OK. Any other step's button opens that step, whose own button and confirm do the rest. While a step is running, the box only says so.
 
 - A failed job blocks only a step that is due now. An old failed set candidate shows red, but production is far off, so it does not block the episode.
 - What you open or close lasts for this visit only: the next visit starts quiet again, with the current step open.

@@ -55,6 +55,33 @@ FLAGGED = ("action", "failed")
 CURRENT_ORDER = ("lines", "notes", "people", "plan", "cast", "script", "storyboard", "talking", "set", "production",
                  "review", "publishing")
 NOT_CURRENT = ("done", "not_needed", "waiting")
+# The Now box (2026-11-23): the single next action and its cost. A decision (approve, accept, confirm) costs nothing; the
+# talking shots' figure is their own estimate; anything else says "cost shown before it starts" (never "free" by guess).
+DECISIONS = ("review", "approve", "accept", "confirm", "speakers")
+NO_ESTIMATE = "cost shown before it starts"
+
+
+def next_step(out: dict, current: str | None, f: dict) -> dict | None:
+    """{section, title, text, kind, cost_usd, cost_text, button} for the current step, or None when nothing is left.
+    The button never starts anything paid by itself: "run_talking" opens the Talking shots section's own Run flow (its
+    confirm shows the total first); "open" opens the step, whose own button and confirm do the rest."""
+    if not current:
+        return None
+    s = out[current]
+    base = {"section": current, "title": s["title"], "text": s["note"], "cost_usd": None}
+    if s["status"] == "running":
+        return {**base, "kind": "working", "cost_text": "", "button": None}
+    if current == "talking":
+        t = f.get("talking") or {}
+        n, usd = t.get("todo_lines", 0), t.get("todo_usd", 0)
+        if n and usd:
+            return {**base, "kind": "paid", "cost_usd": usd,
+                    "cost_text": f"about ${usd:.3f} for {n} line(s), shown again with the total before anything starts",
+                    "button": {"action": "run_talking", "label": f"Run {n} line(s)"}}
+        return {**base, "kind": "estimate", "cost_text": NO_ESTIMATE, "button": {"action": "open", "label": f"Open {s['title']}"}}
+    if s["status"] != "failed" and s.get("label") in DECISIONS:
+        return {**base, "kind": "decision", "cost_text": "no cost: your decision", "button": {"action": "open", "label": f"Open {s['title']}"}}
+    return {**base, "kind": "estimate", "cost_text": NO_ESTIMATE, "button": {"action": "open", "label": f"Open {s['title']}"}}
 
 
 def idx(stage: str) -> int:
@@ -288,7 +315,7 @@ def sections(f: dict) -> dict:
         s["open"] = k == current                      # only the current step is open
         s["blocking"] = blocker is not None and k == blocker["key"]   # and only the blocker is flagged
     running = [out[k]["title"] for k in FLOW if out[k]["status"] == "running"]
-    return {"sections": [out[k] for k in ORDER], "current": current,
+    return {"sections": [out[k] for k in ORDER], "current": current, "next": next_step(out, current, f),
             "blocker": {"section": blocker["key"], "title": blocker["title"], "message": blocker["note"]} if blocker else None,
             "running": running}
 

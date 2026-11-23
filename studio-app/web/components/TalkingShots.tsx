@@ -4,7 +4,7 @@
 // and the experimental budget first and starts only after the owner accepts; and the free first draft of the whole
 // episode ("Draft: not for publishing"). Paid calls are never retried by themselves: a failed line stays failed until
 // it is ticked and run again.
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {api} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
@@ -14,7 +14,7 @@ import DraftCameras from '@/components/DraftCameras';
 const IT = 'wavespeed-infinitetalk-fast';
 const usd = (x: number | null | undefined, d = 3) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
 
-export default function TalkingShots({ep}: {ep: any}) {
+export default function TalkingShots({ep, autoRun = 0}: {ep: any; autoRun?: number}) {
   const t = useApi<any>(`/episodes/${ep.id}/talking-shots`, 4000);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [err, setErr] = useState('');
@@ -24,7 +24,7 @@ export default function TalkingShots({ep}: {ep: any}) {
   const chosen = rows.filter(r => picked.has(key(r)));
   const total = talkingTotal(chosen);
 
-  const run = async () => {
+  const run = async (chosen: any[]) => {
     setErr('');
     const missing = chosen.filter(r => !r.plan_ready || r.blocked?.startsWith('make the'));
     setBusy(true);
@@ -53,6 +53,16 @@ export default function TalkingShots({ep}: {ep: any}) {
     setErr('');
     try { await api(`/motion/shot/${r.plan_id}/key`, {body: {model: IT}}); await t.reload(); } catch (e: any) { setErr(e.message); }
   };
+  // The Now box's "Run N line(s)": the lines not keyed and not running, through this same flow (free preparation
+  // first where needed; then the TOTAL, each plan's cap and the budget in the confirm, and nothing starts without OK)
+  const handled = useRef(0);
+  useEffect(() => {
+    if (!autoRun || autoRun === handled.current || !t.data) return;
+    handled.current = autoRun;
+    const todo = rows.filter(r => !['keyed', 'queued', 'running', 'preparing'].includes(r.status));
+    setPicked(new Set(todo.map(key)));
+    if (todo.length) run(todo);
+  }, [autoRun, t.data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const makeDraft = async () => {
     setErr('');
     try { await api(`/episodes/${ep.id}/draft`, {body: {}}); await t.reload(); } catch (e: any) { setErr(e.message); }
@@ -66,7 +76,7 @@ export default function TalkingShots({ep}: {ep: any}) {
       <div className="row" style={{gap: 6}}>
         <button className="btn sm" onClick={() => setPicked(new Set(rows.filter(r => r.status !== 'keyed').map(key)))}>All not keyed</button>
         <button className="btn sm" onClick={() => setPicked(new Set())}>None</button>
-        <button className="btn primary sm" disabled={busy || !chosen.length} onClick={run}>Run selected lines{chosen.length ? ` (${chosen.length}, about ${usd(total)})` : ''}</button>
+        <button className="btn primary sm" disabled={busy || !chosen.length} onClick={() => run(chosen)}>Run selected lines{chosen.length ? ` (${chosen.length}, about ${usd(total)})` : ''}</button>
         <span className="muted small">Experimental budget: {usd(t.data?.spent_usd, 2)} spent + {usd(t.data?.pending_usd, 2)} approved, of {usd(t.data?.budget_usd, 2)}</span>
       </div>
       <div className="table-wrap"><table>

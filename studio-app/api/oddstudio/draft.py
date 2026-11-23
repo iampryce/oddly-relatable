@@ -563,9 +563,13 @@ def talking_lines(db, ep) -> list[dict]:
 
 def talking_counts(db, ep) -> dict:
     rows = talking_lines(db, ep)
+    todo = [r for r in rows if r["status"] not in ("keyed", "queued", "running", "preparing")]
     return {"lines": len(rows), "keyed": sum(r["status"] == "keyed" for r in rows),
             "running": sum(r["status"] in ("queued", "running", "preparing") for r in rows),
-            "failed": sum(r["status"] == "failed" for r in rows)}
+            "failed": sum(r["status"] == "failed" for r in rows),
+            # the lines "Run selected lines" would take for the Now box, and their estimate (the confirm shows the total
+            # again, with each plan's cap and the budget, before anything starts)
+            "todo_lines": len(todo), "todo_usd": round(sum(r.get("estimate_usd") or 0 for r in todo), 4)}
 
 
 def _episode(db, eid: int):

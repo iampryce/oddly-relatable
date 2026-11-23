@@ -20,6 +20,7 @@ import EpisodeSetPicker from '@/components/EpisodeSetPicker';
 import TalkingShots from '@/components/TalkingShots';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
 import {bannerText, isOpen, jobLine, showLastError, TONE, workingText, type Section} from '@/lib/workspace';
+import {nowBox} from '@/lib/nowBox';
 
 const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 const AUDIO_ONLY = ['people', 'plan', 'lines', 'notes', 'talking'];
@@ -34,6 +35,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   const {data: settings} = useApi<any>('/settings');
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [seen, setSeen] = useState<Set<string>>(new Set());
+  const [talkingRun, setTalkingRun] = useState(0);   // the Now box's Run: handed to the Talking shots section
   const reloadAll = async () => { await reload(); await reloadWs(); };
   const act = useAction(reloadAll);
   useEffect(() => { setOverrides({}); }, [id]);   // what you open or close lasts for this visit only
@@ -73,7 +75,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         : <p className="muted small">{ep.source === 'audio' ? 'The poses each character needs are listed once the scenes are built.' : 'The cast comes from the script.'}</p>}</>;
       case 'script': return <>{ep.format === 'long' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}{p.scenes}<ScriptTab {...ctx} /></>;
       case 'storyboard': return <StoryboardTab {...ctx} />;
-      case 'talking': return <TalkingShots ep={ep} />;
+      case 'talking': return <TalkingShots ep={ep} autoRun={talkingRun} />;
       case 'production': return <ProductionTab {...ctx} />;
       case 'review': return <ReviewTab {...ctx} />;
       case 'publishing': return <PublishTab {...ctx} />;
@@ -101,6 +103,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <strong>What is blocking this episode:</strong> {banner.text}
         {' '}<button className="btn sm" onClick={() => goTo(ws.blocker.section)}>Go to {ws.blocker.title}</button></div>}
       {!banner && workingText(ws) && <p className="muted small" role="status">{workingText(ws)}</p>}
+      <NowBox next={ws?.next} onGo={(b) => { goTo(b.section); if (b.action === 'run_talking') setTalkingRun(n => n + 1); }} />
       <ErrorBox error={act.error} />
       {showLastError(ep) && <div className="alert bad">{ep.last_error}</div>}
       {!ws ? <p className="muted">Loading the sections…</p>
@@ -569,4 +572,16 @@ function HistoryTab({ep}: Ctx) {
       </div>
     </div>
   );
+}
+
+// The Now box: the single next action and its cost. The button only opens the step, or hands the lines to the Talking
+// shots section's own Run flow (its confirm shows the total first); it never starts anything paid by itself.
+function NowBox({next, onGo}: {next: any; onGo: (b: {action: string; section: string}) => void}) {
+  const n = nowBox(next);
+  if (!n) return null;
+  return (
+    <div className="card row" style={{justifyContent: 'space-between', gap: 12, marginBottom: 12}} role="region" aria-label="Now">
+      <div className={n.tone}><strong>Now: {n.title}.</strong> {n.text}{n.cost ? <span className="muted"> · {n.cost}</span> : null}</div>
+      {n.button && <button className="btn primary sm" onClick={() => onGo(n.button!)}>{n.button.label}</button>}
+    </div>);
 }
