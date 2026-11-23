@@ -87,3 +87,28 @@ The owner's choice is stored on the seat (`facing`: `speaker` | `camera` | `away
 - **Warning:** two seats closer than one head width at that smallest height (134 px for a typical head) get a warning on the Set panel, with the numbers. For example: "seats 3 and 4 are 129 px apart; need 134 px". The warning shows whenever seats are marked, edited, suggested or approved, and approving such a set also logs it on the episode.
 - **Never a refusal:** most generated sets space their chairs for normal proportions, so refusing them would block them.
 - **The prompt:** the set prompt still asks for at least one chair's width between seats.
+
+## Acting and blockers (PR 4)
+
+**Dialogue-driven acting.**
+- **The speaker:** turns toward the person the line addresses (PR 3).
+- **The listeners** react, the same way every render:
+  - they look at the speaker;
+  - they look at the person the reference plan has them facing, when the plan names one;
+  - they look down on a sad, worried, embarrassed or similar reaction;
+  - every few seconds they glance briefly (under a second) at another listener, never in a line's first second.
+- **The head:** in the 3D rig, it turns toward where the eyes look (up to about 30°), on top of the body's turn. The 2D rig moves only the eyes.
+- **Unchanged:** walking, standing up, sitting down, timed actions, and the optional hook banner.
+
+**Expressions never block an episode.**
+- **The nearest approved one:** a line asking for an expression with no approved pose uses the nearest approved one, in this order: the same name; a name match (a pose called "smug" for "very smug"); the same family (an "angry" pose for "furious"); otherwise neutral.
+- **Where it shows:** the Cast section and the Cast panel list each substitution, for example "furious → angry". It is a note, not a blocker.
+- **What still blocks:** only a character without any approved art.
+- **Drawing them:** missing expressions can still be drawn ("Draw the missing expressions (optional)").
+- **Poses waiting for review:** these count only when they are for an expression the script uses that has no approved pose yet. Leftover poses are not "to review" blockers.
+
+**Changing a line's expression.**
+- **Where:** in the Storyboard, under each scene, open **Expressions per line**. Each line shows the speaker's expression and each reacting character's.
+- **Choices:** only that character's usable (approved) expressions are offered. A line whose expression has no pose shows which one it uses.
+- **What changes:** only the storyboard line (`PUT /api/episodes/{id}/scenes/{scene}/lines/{n}/expression`). The script, its approval and the storyboard's approval stay as they are. The change applies to the stills and the next render.
+- **When:** from storyboard review through video review; not during a render.

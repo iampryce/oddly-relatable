@@ -103,3 +103,19 @@ test('by the scene: the speaker turns to the person addressed, listeners as the 
   assert.deepEqual(facingTarget({key: 'winifred', x: 940}, null, 'uncle-mortimer', at, undefined), {x: 180}, 'between lines: the last speaker');
   assert.equal(turnTowards(null, 0, 45), 0);
 });
+
+test('listeners: the speaker, the person the plan names, down on a sad reaction, a short glance now and then', async () => {
+  const {listenerGaze, GLANCE_EVERY} = await import('./rig3d-pose.mjs');
+  const line = {speaker: 'uncle-mortimer', start: 0, end: 20, reactions: [{character: 'sidney', expression: 'worried'}]};
+  assert.deepEqual(listenerGaze('sidney', 3, line, ['ralph', 'winifred'], undefined), {target: null, down: true}, 'worried: looks down');
+  assert.deepEqual(listenerGaze('ralph', 3, line, ['sidney'], 'sidney'), {target: 'sidney', down: false}, 'the plan says Ralph faces Sidney');
+  // over a long line a listener mostly watches the speaker and glances away briefly, the same way every render
+  const ts = Array.from({length: 200}, (_, i) => 1.05 + i * 0.1);
+  const at = ts.map(t => listenerGaze('winifred', t, line, ['ralph'], undefined).target);
+  const away = at.filter(x => x === 'ralph').length / at.length;
+  assert.ok(away > 0.05 && away < 0.3, `glances are short: ${away}`);
+  assert.deepEqual(at, ts.map(t => listenerGaze('winifred', t, line, ['ralph'], undefined).target), 'deterministic');
+  assert.equal(listenerGaze('winifred', 0.5, line, ['ralph'], undefined).target, 'uncle-mortimer', 'no glance in the first second');
+  assert.equal(listenerGaze('winifred', 3, line, [], undefined).target, 'uncle-mortimer', 'nobody else: the speaker');
+  assert.ok(GLANCE_EVERY > 4);
+});
