@@ -3,6 +3,7 @@ import {useEffect, useState} from 'react';
 import {api} from '@/lib/api';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
+import HeadAngles from '@/components/HeadAngles';
 import {Empty, ErrorBox} from '@/components/ui';
 import {groupCharacters, imageCost, isCandidate, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
@@ -172,6 +173,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
+      {c.art_status === 'approved' && <HeadAngles characterId={c.id} locked={c.locked} />}
       {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
         <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}
       {everyPose.length > poses.length || allPoses ? <label className="small row" style={{gap: 6}}><input type="checkbox" checked={allPoses} onChange={e => setAllPoses(e.target.checked)} />
