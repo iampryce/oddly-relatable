@@ -74,7 +74,7 @@ export default function TalkingShots({ep}: {ep: any}) {
             <td className="small">{r.scene} · {r.line + 1}</td>
             <td className="small">{r.speaker}: &ldquo;{String(r.text).slice(0, 48)}{String(r.text).length > 48 ? '…' : ''}&rdquo;</td>
             <td className="small">{r.seconds} s</td>
-            <td className={`small ${r.status === 'failed' ? 'bad' : ''}`}>{r.status}{r.message ? ` · ${r.message}` : ''}{r.blocked && !r.blocked.startsWith('make the') ? ` · ${r.blocked}` : ''}</td>
+            <td className={`small ${r.status === 'failed' ? 'bad' : String(r.message || '').startsWith('key needs attention') ? 'warn' : ''}`}>{r.status}{r.message ? ` · ${r.message}` : ''}{r.blocked && !r.blocked.startsWith('make the') ? ` · ${r.blocked}` : ''}</td>
             <td className="small">{r.actual_usd != null ? `${usd(r.actual_usd)} (charged)` : `${usd(r.estimate_usd)} (estimate)`}</td>
             <td className="small">{r.cap_usd != null ? `${usd(r.cap_used_usd)} of ${usd(r.cap_usd, 2)}` : '—'}</td>
             <td className="small">{r.preview_url ? <a href={r.preview_url} target="_blank" rel="noreferrer">over the set</a> : ''}</td>

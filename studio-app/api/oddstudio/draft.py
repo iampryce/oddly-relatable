@@ -525,6 +525,10 @@ def line_status(p: dict | None, db=None) -> tuple[str, str]:
         from .shot_compare import key_state
         k = key_state(db, p["id"], IT, k) or {}
     if k.get("status") == "done":
+        q = k.get("quality") or {}
+        if q and not q.get("ok", True):
+            # still "keyed" (the draft uses it, and "All not keyed" never re-runs a paid clip for it): Key again is free
+            return "keyed", "key needs attention: " + "; ".join(q.get("reasons") or [])
         return "keyed", ""
     if k.get("status") == "failed":
         return "done", f"keying failed: {k.get('error') or ''}"

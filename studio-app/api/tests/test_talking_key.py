@@ -105,9 +105,35 @@ class KeyEdgeTest(ShotBase):
         self.assertLessEqual(int(spill[visible].max()), 24, "no magenta fringe on the outline or the white")
         self.assertTrue((a[visible] > 0).all())
         check = Image.open(res["paths"]["check"])
-        self.assertEqual(check.size, (3 * w, 2 * h), "three timepoints, over the set and over grey")
-        grey = np.asarray(Image.open(res["paths"]["check"]).convert("RGB"))[h + 5, 5]
+        self.assertEqual(res["check_at"], [0.0], "one check frame per second: a 0.48 s clip has one")
+        self.assertEqual(check.size, (w // 2, 2 * (h // 2)), "half size, over the set and over grey")
+        grey = np.asarray(Image.open(res["paths"]["check"]).convert("RGB"))[h // 2 + 5, 5]
         self.assertTrue((abs(grey.astype(int) - 128) <= 6).all(), "the grey background shows where the key was")
+        self.assertTrue(res["quality"]["ok"], res["quality"])
+
+    def test_a_drifting_key_colour_is_followed_through_a_whole_clip(self):
+        """Encoded and decoded through H.264 like the provider's clip: the background drifts from (250,34,230) to
+        (240,57,210) over 3 s, with enclosed light pink gaps and an open red mouth; check frames one per second."""
+        from test_key_per_frame import END, START, frame, mix
+        w, h, fps, n = 360, 450, 10, 30
+        src = self.media / "drift.mp4"
+        enc = subprocess.Popen([self.ff, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(fps), "-i", "-",
+                                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", str(src)], stdin=subprocess.PIPE)
+        for i in range(n):
+            enc.stdin.write(frame(mix(START, END, i / (n - 1)), pad=4).tobytes())
+        enc.stdin.close()
+        self.assertEqual(enc.wait(), 0)
+        wav = self.media / "drift.wav"
+        subprocess.run([self.ff, "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", str(wav)], check=True)
+        res = K.key_clip(src, wav, "#FF00FF", None, self.media / "drift", self.ff, _ffprobe(self.ff))
+        q = res["quality"]
+        self.assertTrue(q["ok"], q)
+        self.assertLessEqual(q["bg_dev_max"], K.QA_BG_DEV)
+        self.assertLessEqual(max(abs(a - b) for a, b in zip(q["key_last"], END)), 6, "the key colour followed to the end")
+        self.assertEqual(res["check_at"], [0.0, 1.0, 2.0], "one check frame per second")
+        self.assertEqual(Image.open(res["paths"]["check"]).size, (3 * (w // 2), 2 * (h // 2)))
+        rgba = decode_rgba(self.ff, res["paths"]["keyed"], w, h)
+        self.assertLess(int(rgba[-1][20:200, 10:60, 3].max()), 10, "the last frame's background is transparent: no veil")
 
 
 class KeyFlowTest(ShotBase):
@@ -160,8 +186,32 @@ class KeyFlowTest(ShotBase):
         rgba = decode_rgba(self.ff, f, 720, 900)
         self.assertLess(int(rgba[0][5, 5, 3]), 10, "transparent where the key colour was (the padding too)")
         self.assertGreater(int(rgba[0][450, 360, 3]), 245, "the figure stays opaque")
-        # the free keying can be run again, but not for a clip that is not a finished cutout
+        self.assertTrue(k["quality"]["ok"], k["quality"])
+        self.assertEqual(k["check_at"], [0.0, 1.0, 2.0], "one check frame per second")
+        rows = self.c.get(f"/api/episodes/{self.eid}/talking-shots").json()["lines"]
+        self.assertEqual((rows[0]["status"], rows[0]["message"]), ("keyed", ""))
+        # the free keying can be run again on a finished key (it keys the stored clip; nothing is sent, nothing charged),
+        # and a key over the check's limits says "needs attention" with the reason
+        raw_id = res["raw_asset_id"]
+        with new_session() as s:
+            raw_sha = s.get(Asset, raw_id).sha256
+        from unittest import mock
         self.assertEqual(self.c.post(f"/api/motion/shot/{p['id']}/key", json={"model": IT}).status_code, 200)
+        with mock.patch.object(K, "QA_BG_DEV", -1):
+            self.assertEqual(self.env.run_jobs(["shot_key"])[0][1], "succeeded")
+        res = self.row(p["id"])["results"][IT]
+        q = res["key"]["quality"]
+        self.assertFalse(q["ok"])
+        self.assertIn("levels off grey", q["reasons"][0])
+        rows = self.c.get(f"/api/episodes/{self.eid}/talking-shots").json()["lines"]
+        self.assertEqual(rows[0]["status"], "keyed", "still keyed: All not keyed never re-runs a paid clip for it")
+        self.assertTrue(rows[0]["message"].startswith("key needs attention: over grey the background"), rows[0]["message"])
+        self.assertEqual(len(self.calls), 1, "Key again sent nothing to WaveSpeed")
+        self.assertEqual(res["actual_usd"], 0.045, "and charged nothing")
+        with new_session() as s:
+            self.assertEqual((s.get(Asset, res["asset_id"]).sha256, s.get(Asset, raw_id).sha256), (clip_sha, raw_sha),
+                             "the clip and the provider's file are untouched")
+        # but not for a clip that is not a finished cutout
         self.assertEqual(self.c.post(f"/api/motion/shot/{p['id']}/key", json={"model": "wavespeed-kling-v1-avatar-standard"}).status_code, 409)
 
 
