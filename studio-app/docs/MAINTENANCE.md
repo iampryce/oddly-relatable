@@ -5,6 +5,7 @@ Nothing in this change is installed or run automatically. The owner installs it 
 ## What changes
 - **Nightly backup** (`deploy/backup.sh` with `BACKUP_KIND=nightly`, 03:30 server time).
   - It dumps the database and archives the media. Until now, backups only ran on deploys; no nightly job was installed.
+  - **Paused since 2026-11-23** (the disk filled up): line 7 of the installed `/etc/cron.d/oddstudio` is commented out with the prefix `# PAUSED 2026-11-23 (disk full): `. `backup.sh` and the deploy-time backups are unchanged, so every deploy still makes a backup first; the newest 30-day database dump in `db-dumps/` stays as it is. While paused, old-backup cleanup keeps the newest 3 complete backups, nightly or deploy-time. **Re-enable** (once there is room for a backup each night, about 2.5 GB plus 2 GB left free): `sed -i 's|^# PAUSED 2026-11-23 (disk full): ||' /etc/cron.d/oddstudio`, then `grep backup.sh /etc/cron.d/oddstudio` should show the line starting with `30 3 * * *`.
 - **Retention is counted per kind**, so frequent deploys can't push out the nightly history.
   - Folders are named `<stamp>-nightly` or `<stamp>-deploy`. Older unsuffixed folders count as deploy-time.
   - **Nightly: the newest 7** (`KEEP_NIGHTLY`).
