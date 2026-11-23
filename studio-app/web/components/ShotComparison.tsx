@@ -6,6 +6,7 @@
 // A line can also get the owner's own first frame (uploaded, confirmed made from our approved art): a second plan beside
 // the original-art one, with the same audio and action, and every request has its own Run with its estimate.
 import {useEffect, useMemo, useState} from 'react';
+import {keyQuality, checkFrames} from '@/lib/keyQuality';
 import {api, uploadFile} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
@@ -218,19 +219,24 @@ function OwnFrameUpload({plan, onDone, onError}: {plan: any; onDone: () => void;
 }
 
 // The keyed copy of a cutout clip, judged on two backgrounds (the episode's approved set, mid-grey) and in one check
-// image (10%, 50% and 90% of the clip; set above, grey below). Keying is free and can be run again.
+// image (one frame per second; set above, grey below), with the built-in check over grey: "Keyed", or "Key needs
+// attention" and why. Keying is free and can be run again (it keys the stored clip; nothing is sent to a provider).
 function KeyedPreview({k, onAgain}: {k: any; onAgain: () => void}) {
   if (k.status === 'queued' || k.status === 'running') return <div className="muted">Keying {k.colour} out… (free)</div>;
   if (k.status === 'failed') return <div className="bad">Keying failed: {k.error} <button className="btn sm" onClick={onAgain}>Key again (free)</button></div>;
   if (k.status !== 'done' || !k.urls) return null;
   return (
     <div className="stack" style={{marginTop: 4}}>
-      <div className="muted">Keyed ({k.colour} removed): over the set and over grey</div>
+      {keyQuality(k).ok
+        ? <div className="muted">Keyed ({k.colour} removed, frame by frame): over the set and over grey</div>
+        : <div className="alert warn small" role="status">Key needs attention: {keyQuality(k).reasons.join('; ')}</div>}
+      <div className="muted small">{keyQuality(k).line}</div>
       <div className="row" style={{gap: 4}}>
         {k.urls.over_set && <video controls src={k.urls.over_set} style={{width: 120}} aria-label="keyed clip over the episode's set" />}
         {k.urls.over_grey && <video controls src={k.urls.over_grey} style={{width: 120}} aria-label="keyed clip over mid-grey" />}
       </div>
-      {k.urls.check && <a href={k.urls.check} target="_blank" rel="noreferrer">Check frames at {(k.check_at || []).map((t: number) => `${t} s`).join(', ')}</a>}
+      {k.urls.check && <a href={k.urls.check} target="_blank" rel="noreferrer">Check frames: {checkFrames(k.check_at)}</a>}
       {k.urls.keyed && <a href={k.urls.keyed} download>Transparent copy (WebM with alpha)</a>}
+      <div><button className="btn sm" onClick={onAgain}>Key again (free)</button></div>
     </div>);
 }

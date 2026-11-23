@@ -1564,8 +1564,9 @@ def shot_key(ctx: Ctx) -> dict:
                                                label=f"Shot comparison: {TALKING[model]['short']} on WaveSpeed, {what}",
                                                content_type=ctype, job_id=job.id).id
         db.commit()
+        # the built-in check over grey: "Keyed", or "Key needs attention" with the reasons (the key is still stored)
         mark(status="done", colour=colour, frames=res["frames"], check_at=res["check_at"], size=res["size"],
-             set_id=p.get("set_id"), error=None, terms=TALKING[model]["terms"], **ids)
+             set_id=p.get("set_id"), error=None, terms=TALKING[model]["terms"], quality=res.get("quality"), **ids)
         return {"pid": pid, "model": model, "frames": res["frames"]}
     except Exception as e:
         db.rollback()                 # a failed insert leaves the session unusable: record the failure on a clean one

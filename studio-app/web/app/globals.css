@@ -88,6 +88,8 @@ tr:last-child td { border-bottom: 0; }
 .alert { border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid; }
 .alert.bad { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
 .alert.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+td.bad, div.bad, span.bad { color: var(--bad); }
+td.warn, div.warn, span.warn { color: var(--warn); }
 .alert.info { background: var(--busy-soft); color: var(--busy); border-color: var(--busy); }
 .alert.good { background: var(--good-soft); color: var(--good); border-color: var(--good); }
 /* the episode workspace: collapsible sections with a status badge */
