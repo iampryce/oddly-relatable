@@ -30,3 +30,14 @@ test('grid cells: rig, done clip, running, failed with its reason, not run', () 
   assert.equal(g.gpu, '5.2 GPU s on GPU session ab12 ($2.89/h); boot and idle time are on the session', 'a self-hosted clip says where it ran');
   assert.equal(clipCell({...plan, results: {g: {status: 'running', progress: {status: 'starting the GPU worker'}}}}, 'g').state, 'running… (starting the GPU worker)');
 });
+
+test('a talking shot says its terms status and that it is not for publishing', () => {
+  const plan = {status: 'ready', requests: [{model: 't', estimate: {usd: 0.105}}],
+    results: {t: {status: 'done', url: '/t.mp4', actual_usd: 0.105, per_second_usd: 0.0169, publishable: false,
+      terms: 'InfiniteTalk, Apache-2.0 model, hosted on WaveSpeed; commercial-use terms not yet confirmed in writing',
+      check: {length_ok: true, video_seconds: 6.22, audio_seconds: 6.22}}}};
+  assert.equal(clipCell(plan, 't').terms, 'InfiniteTalk, Apache-2.0 model, hosted on WaveSpeed; commercial-use terms not yet confirmed in writing · not for publishing');
+  assert.equal(clipCell(plan, 't').cost, '$0.105 · $0.017/s');
+  const failed = clipCell({...plan, results: {t: {status: 'failed', error: 'WaveSpeed: task x failed', terms: 'Kling terms not yet confirmed in writing: not for publishing', publishable: false}}}, 't');
+  assert.match(failed.terms!, /^Kling terms not yet confirmed in writing/);
+});

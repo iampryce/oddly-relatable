@@ -18,6 +18,13 @@ Models (fal.ai, checked 2026-11-21; both pages say "Commercial use permitted (Pa
 - Kling 2.6 Pro image-to-video, audio off: $0.07 per second, 5 or 10 s clips (cut to the line afterwards).
 - Kling AI Avatar v2 Standard: image + OUR line audio -> a talking clip as long as the audio; $0.0562 per second.
 
+Talking shots (TALKING; Settings > Motion > talking-shot provider, WaveSpeed InfiniteTalk fast by default): image + OUR
+line audio + a NEUTRAL prompt (attitude words are refused: they made eyelids and grins go off-model) + a seed, from the
+head-and-shoulders first frame by default. Each run is started by the owner after seeing its cost (the audio length
+rounded up, with the provider's minimum), checked against a hard cap per plan and the experimental budget, never
+retried by itself, and downloaded into our storage at once with the exact provider, endpoint, prompt, seed and cost.
+Every clip carries its terms status and is not for publishing until the owner confirms the terms in writing.
+
 Self-hosted models (GPU_MODELS; proof of concept, docs/GPU-INFRASTRUCTURE.md §16) run on our own GPU worker (gpu.py):
 the same plan, the same first frames and line audio, the same per-run approval, our audio laid under the result and
 the same length check. They are sent as files to the worker (no public URL needed) and capped by the monthly GPU cap,
@@ -82,9 +89,30 @@ GPU_MODELS = {
         "price": "GPU time on our worker (rented per second, or our own machine)",
         "licence": "Apache-2.0 (ByteDance LatentSync)", "framing": "wide"},
 }
+# Talking-shot providers (one setting picks the default; a new provider is one entry here plus its run function in
+# TALKING_RUN). Billed per second of OUR audio, rounded up, with a minimum.
+INFINITETALK_TERMS = "InfiniteTalk, Apache-2.0 model, hosted on WaveSpeed; commercial-use terms not yet confirmed in writing"
+KLING_TERMS = "Kling terms not yet confirmed in writing: not for publishing"
+TALKING = {
+    "wavespeed-infinitetalk-fast": {
+        "provider": "wavespeed", "endpoint": "wavespeed-ai/infinitetalk-fast", "kind": "talking", "rate": 0.015, "min_seconds": 3,
+        "label": "WaveSpeed InfiniteTalk fast (our line audio)", "short": "InfiniteTalk",
+        "why": "image + our recorded line; kept the character on-model with no text on clothing in the hand test (480p output)",
+        "price": "$0.015 per second of audio, rounded up, 3 s minimum", "licence": INFINITETALK_TERMS, "terms": INFINITETALK_TERMS,
+        "framing": "head", "seed": True},
+    "wavespeed-kling-v1-avatar-standard": {
+        "provider": "wavespeed", "endpoint": "kwaivgi/kling-v1-ai-avatar-standard", "kind": "talking", "rate": 0.05, "min_seconds": 3,
+        "label": "WaveSpeed Kling v1 AI Avatar Standard (our line audio; fallback only)", "short": "Kling v1",
+        "why": "fallback only: clean hands, but heavy eyelids and a toothy grin even with a neutral prompt in the hand test",
+        "price": "$0.05 per second of audio, rounded up, 3 s minimum", "licence": KLING_TERMS, "terms": KLING_TERMS,
+        "framing": "medium", "seed": False},
+}
+MODELS.update(TALKING)
 ALL_MODELS = {**MODELS, **GPU_MODELS}
 WORKFLOW_DIR = Path(__file__).resolve().parent / "gpu_workflows"
-FRAMINGS = ("wide", "medium")
+FRAMINGS = ("wide", "medium", "head")
+FRAME_SIZE = {"wide": (720, 1280), "medium": (720, 1280), "head": (720, 900)}   # head and shoulders: vertical 4:5
+FRAME_WORDS = {"wide": "wide", "medium": "medium", "head": "head-and-shoulders"}
 NEGATIVE = "realistic, photo, 3d render, extra characters, text, logo, watermark, deformed, blur"
 
 
@@ -110,6 +138,10 @@ def estimate(model: str, seconds: float, db: Session | None = None) -> dict:
         return {"billed_seconds": round(gs), "gpu_seconds": round(gs), "usd": round(gs * price / 3600, 4), "price_per_hour": price,
                 "note": f"GPU time estimate (published H100 timings, default steps; measured in the proof of concept); {src}"}
     m = MODELS[model]
+    if m["kind"] == "talking":
+        billed = max(m["min_seconds"], math.ceil(round(seconds, 3)))
+        return {"billed_seconds": billed, "usd": round(m["rate"] * billed, 4),
+                "note": f"{seconds:.2f} s of audio billed as {billed} s at ${m['rate']}/s"}
     if m["kind"] == "i2v":
         billed = 5 if seconds <= 5 else 10
         note = "" if seconds <= 10 else f"the line runs {seconds:.1f} s: the 10 s clip's last frame is held to the end"
@@ -167,8 +199,64 @@ def gpu_input_names(model: str) -> list[str]:
     return ["video.mp4", "audio.wav"] if GPU_MODELS[model]["kind"] == "dub" else ["image.png", "audio.wav"]
 
 
-def request_for(model: str, action: str, image_url: str, audio_url: str, seconds: float) -> dict:
-    """The exact JSON body sent to fal (shown to the owner before Run)."""
+# Words that put an attitude on the face (heavy eyelids, grins). Refused in a talking-shot prompt unless negated
+# ("no smile"): the attitude belongs to the scene's expression setting and the approved poses, not the video prompt.
+ATTITUDE_WORDS = ("pompous", "smug", "smugly", "smirk", "smirks", "smirking", "grin", "grins", "grinning", "smile", "smiles",
+                  "smiling", "laugh", "laughs", "laughing", "sneer", "sneers", "sneering", "arrogant", "haughty", "proud",
+                  "proudly", "sarcastic", "mocking", "angry", "furious", "scowl", "scowling", "frown", "frowning", "glare",
+                  "glaring", "wink", "winks", "squint", "squinting", "contempt", "disdain", "condescending", "superior",
+                  "self-satisfied", "triumphant", "cheeky", "sly", "chin raised", "raised chin", "chin up", "lifts his chin",
+                  "lifts her chin", "raises his chin", "raises her chin", "chin slightly raised", "raised eyebrow",
+                  "eyebrow raised", "narrowed eyes", "eyes narrowed", "half-closed eyes", "heavy eyelids", "smiles widely")
+
+
+def attitude_words(prompt: str) -> list[str]:
+    """The attitude words in a prompt (whole words or phrases; "no smile" / "not smiling" are allowed)."""
+    import re
+    low, found = prompt.lower(), []
+    for w in ATTITUDE_WORDS:
+        for m_ in re.finditer(r"(?<![a-z-])" + re.escape(w) + r"(?![a-z-])", low):
+            before = low[max(0, m_.start() - 14):m_.start()]
+            if not re.search(r"\b(no|not|never|without)\s+((a|an|any)\s+)?$", before):
+                found.append(w)
+                break
+    return found
+
+
+def default_talking_prompt(name: str) -> str:
+    return (f"{name or 'The character'} speaks the line: formal, composed, neutral face, eyes wide open as in the image, "
+            "small nods, no smile. No text, letters or logos anywhere on clothing or background. Keep the character's "
+            "flat 2D design and the background exactly as in the image; the mouth follows the audio.")
+
+
+def talking_prompt(db: Session | None, p: dict) -> str:
+    """The plan's talking-shot prompt: the owner's edit, else the neutral default (never the plan's action text)."""
+    if p.get("talking_prompt"):
+        return p["talking_prompt"]
+    c = db.query(Character).filter_by(key=p.get("speaker")).first() if db is not None and p.get("speaker") else None
+    return default_talking_prompt(c.name if c else "")
+
+
+def seed_of(p: dict, model: str) -> int | None:
+    if not MODELS[model].get("seed"):
+        return None
+    from .gpu import seed_for
+    return int((p.get("seeds") or {}).get(model, seed_for(p["id"] + model)))
+
+
+def bill_seconds(p: dict) -> float:
+    """The seconds a talking provider bills: the length of the audio we send."""
+    return float(p.get("audio_seconds") or p["seconds"])
+
+
+def request_for(model: str, action: str, image_url: str, audio_url: str, seconds: float, prompt: str | None = None,
+                seed: int | None = None) -> dict:
+    """The exact JSON body sent to the provider (shown to the owner before Run)."""
+    if MODELS[model]["kind"] == "talking":
+        body = {"image": image_url, "audio": audio_url, "prompt": prompt or ""}
+        if MODELS[model].get("seed"):
+            body["seed"] = seed
+        return body
     if MODELS[model]["kind"] == "i2v":
         return {"prompt": prompt_for(model, action), "start_image_url": image_url,
                 "duration": str(estimate(model, seconds)["billed_seconds"]), "generate_audio": False, "negative_prompt": NEGATIVE}
@@ -352,6 +440,9 @@ def options(episode_id: int, db: Session = Depends(get_db)):
     led = fal.spent(db)
     return {"episode": {"id": ep.id, "title": ep.title, "set_id": ep.set_id}, "lines": lines,
             "models": [{"id": k, **{x: m[x] for x in ("label", "why", "price", "licence")}} for k, m in MODELS.items()],
+            "talking": [{"id": k, "short": m["short"], "framing": m["framing"], "terms": m["terms"],
+                         **{x: m[x] for x in ("label", "why", "price")}} for k, m in TALKING.items()],
+            "talking_provider": talking_default(db),
             "gpu_models": [{"id": k, "kind": m["kind"], "short": m["short"], "framing": m["framing"], "pinned": workflow_of(k) is not None,
                             **{x: m[x] for x in ("label", "why", "price", "licence")}} for k, m in GPU_MODELS.items()],
             "gpu": gpu.availability(db), "spent_usd": round(led["total"], 2), "budget_usd": fal.budget(db)}
@@ -388,7 +479,46 @@ def frame_words(p: dict, model: str) -> str:
     """What the first frame in a request is, in words (shown with the request)."""
     if p.get("own_frame"):
         return "your own first frame (uploaded; you confirmed it was made from our approved art)"
-    return f"the {framing_of(p, model)} first frame (approved set + approved neutral pose)"
+    return f"the {FRAME_WORDS[framing_of(p, model)]} first frame (approved set + approved neutral pose)"
+
+
+def frame_asset_of(p: dict, model: str) -> int | None:
+    """The first frame a model gets; None when this plan has no such frame yet (never silently another framing)."""
+    if p.get("own_frame"):
+        return p.get("frame_asset_id")
+    return (p.get("frame_assets") or {}).get(framing_of(p, model)) or (p.get("frame_asset_id") if framing_of(p, model) == "wide" else None)
+
+
+def talking_default(db: Session) -> str:
+    """Settings > Motion > talking-shot provider (InfiniteTalk fast unless the owner picks another)."""
+    from .settings_store import get_section
+    v = get_section(db, "motion").get("talking_provider")
+    return v if v in TALKING else "wavespeed-infinitetalk-fast"
+
+
+def plan_cap(db: Session, p: dict) -> float:
+    from .settings_store import get_section
+    return float(p.get("talking_cap_usd") or get_section(db, "motion").get("talking_plan_cap_usd") or 0.5)
+
+
+def plan_spent(p: dict) -> float:
+    """Talking-shot spend on this plan: every accepted task (kept across retries), plus approved runs not yet sent."""
+    sent = sum(x.get("usd") or 0 for x in p.get("spend") or [])
+    waiting = sum(r.get("estimated_usd") or 0 for k, r in (p.get("results") or {}).items()
+                  if k in TALKING and r.get("status") in ("queued", "running") and not r.get("request_id"))
+    return round(sent + waiting, 4)
+
+
+def talking_blocked(db: Session, p: dict, model: str, extra: float = 0.0) -> str:
+    """Why a talking-shot run cannot start now ('' when it can, apart from the experimental budget). `extra`: other
+    runs of this plan in the same batch."""
+    if frame_asset_of(p, model) is None:
+        return f"make the {FRAME_WORDS[framing_of(p, model)]} first frame first (free)"
+    est = estimate(model, bill_seconds(p))["usd"]
+    cap, spent_ = plan_cap(db, p), plan_spent(p) + extra
+    if spent_ + est > cap + 1e-9:
+        return f"over this plan's cap: ${spent_:.3f} spent or approved + ${est:.3f} > ${cap:.2f} (raise the plan's cap to continue)"
+    return ""
 
 
 def framing_of(p: dict, model: str) -> str:
@@ -416,7 +546,18 @@ def view(db: Session, p: dict) -> dict:
                                                 "<the line audio shown above>", p["seconds"]),
                             "sends": [frame_words(p, k)]
                                      + (["the line's own recorded audio"] if m["kind"] == "avatar" else []),
-                            "result": p["results"].get(k)} for k, m in MODELS.items()]
+                            "result": p["results"].get(k)} for k, m in MODELS.items() if k not in TALKING]
+        cap = plan_cap(db, p)
+        out["talking"] = {"cap_usd": cap, "spent_usd": plan_spent(p), "prompt": talking_prompt(db, p),
+                          "prompt_is_default": not p.get("talking_prompt")}
+        out["requests"] += [{"model": k, "label": m["label"], "provider": m["provider"], "endpoint": f"{m['provider']}: {m['endpoint']}",
+                             "price": m["price"], "estimate": estimate(k, bill_seconds(p)), "framing": framing_of(p, k),
+                             "frame_url": url(frame_asset_of(p, k)), "seed": seed_of(p, k), "terms": m["terms"],
+                             "body": request_for(k, "", "<your first frame shown>" if p.get("own_frame") else f"<the {FRAME_WORDS[framing_of(p, k)]} first frame shown>",
+                                                 "<the line audio shown above>", p["seconds"], talking_prompt(db, p), seed_of(p, k)),
+                             "blocked": talking_blocked(db, p, k),
+                             "sends": [frame_words(p, k), "the line's own recorded audio"],
+                             "result": p["results"].get(k)} for k, m in TALKING.items()]
         out["requests"] += [{"model": k, "label": m["label"], "backend": "gpu", "endpoint": f"our GPU worker: workflow {m['workflow']}",
                              "price": m["price"], "estimate": estimate(k, p["seconds"], db), "framing": framing_of(p, k),
                              "frame_url": out["frame_urls"].get(framing_of(p, k)) if m["kind"] != "dub" else None,
@@ -459,6 +600,8 @@ def set_framing(pid: str, body: FramingIn, db: Session = Depends(get_db)):
         raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
     if (p["results"].get(body.model) or {}).get("status") in ("queued", "running"):
         raise HTTPException(409, "not while that model is running")
+    if not p.get("own_frame") and not (p.get("frame_assets") or {}).get(body.framing) and not (body.framing == "wide" and p.get("frame_asset_id")):
+        raise HTTPException(409, f"make the {FRAME_WORDS[body.framing]} first frame first (free)")
     p["framing"] = {**(p.get("framing") or {}), body.model: body.framing}
     save(db, recs)
     db.commit()
@@ -484,7 +627,11 @@ def run_model(pid: str, body: RunIn, db: Session = Depends(get_db), user: str = 
         raise HTTPException(409, "the plan is not ready yet (its free preparation is still running or failed)")
     if (p["results"].get(body.model) or {}).get("status") in ("queued", "running", "done"):
         raise HTTPException(409, "already queued, running or done")
-    est = estimate(body.model, p["seconds"], db)
+    est = estimate(body.model, bill_seconds(p) if body.model in TALKING else p["seconds"], db)
+    if body.model in TALKING:
+        why = talking_blocked(db, p, body.model)
+        if why:
+            raise HTTPException(409, f"{TALKING[body.model]['label']}: {why}")
     if body.model in GPU_MODELS:
         why = gpu_blocked(view(db, p), body.model)
         if why:
@@ -529,7 +676,7 @@ def approve(db: Session, pid: str, model: str, user: str):
     from .queue import enqueue
     recs = records(db)
     p = recs[pid]
-    est = estimate(model, p["seconds"], db)
+    est = estimate(model, bill_seconds(p) if model in TALKING else p["seconds"], db)
     p["results"][model] = {"status": "queued", "estimated_usd": est["usd"], "approved_by": user}
     save(db, recs)
     job = enqueue(db, "shot_generate", episode_id=p["episode_id"],
@@ -630,6 +777,133 @@ def set_action(pid: str, body: ActionIn, db: Session = Depends(get_db)):
     save(db, recs)
     db.commit()
     return view(db, p)
+
+
+# ------------------------------------------------------------------ talking shots: prompt, seed, cap, first frame
+def _plan_for_edit(recs: dict, pid: str) -> dict:
+    p = recs.get(pid)
+    if not p:
+        raise HTTPException(404, "no such plan")
+    if any((r or {}).get("status") in ("queued", "running") for k, r in p["results"].items() if k in TALKING):
+        raise HTTPException(409, "not while a talking shot of this line is queued or running")
+    return p
+
+
+class TalkingPromptIn(BaseModel):
+    prompt: str = Field(default="", max_length=600)      # empty: back to the neutral default
+
+
+@router.put("/motion/shot/{pid}/talking-prompt")
+def set_talking_prompt(pid: str, body: TalkingPromptIn, db: Session = Depends(get_db)):
+    """Free: the prompt the talking-shot providers get. Neutral wording only: attitude words are refused (they put
+    heavy eyelids and grins on the face); the attitude stays with the scene's expression setting and approved poses."""
+    recs = records(db)
+    p = _plan_for_edit(recs, pid)
+    text = body.prompt.strip()
+    bad = attitude_words(text)
+    if bad:
+        raise HTTPException(422, f"keep the talking prompt neutral: remove {', '.join(bad)} (attitude comes from the scene's "
+                                 "expression setting, not the video prompt)")
+    if text and len(text) < 10:
+        raise HTTPException(422, "the prompt is too short")
+    p["talking_prompt"] = text or None
+    save(db, recs)
+    db.commit()
+    return view(db, p)
+
+
+class SeedIn(BaseModel):
+    model: str
+    seed: int = Field(ge=0, le=2_147_483_647)
+
+
+@router.put("/motion/shot/{pid}/seed")
+def set_seed(pid: str, body: SeedIn, db: Session = Depends(get_db)):
+    """Free: the seed sent to a talking-shot provider that takes one (saved with the clip)."""
+    recs = records(db)
+    p = _plan_for_edit(recs, pid)
+    if body.model not in TALKING or not TALKING[body.model].get("seed"):
+        raise HTTPException(422, "this provider takes no seed")
+    p["seeds"] = {**(p.get("seeds") or {}), body.model: body.seed}
+    save(db, recs)
+    db.commit()
+    return view(db, p)
+
+
+class CapIn(BaseModel):
+    cap_usd: float = Field(gt=0, le=10)
+
+
+@router.put("/motion/shot/{pid}/talking-cap")
+def set_talking_cap(pid: str, body: CapIn, db: Session = Depends(get_db)):
+    """Free: this plan's hard cap for talking shots (every run, retries included; the experimental budget still applies)."""
+    recs = records(db)
+    p = _plan_for_edit(recs, pid)
+    p["talking_cap_usd"] = round(body.cap_usd, 2)
+    save(db, recs)
+    db.commit()
+    return view(db, p)
+
+
+class FrameIn(BaseModel):
+    framing: str
+
+
+@router.post("/motion/shot/{pid}/frame")
+def make_frame(pid: str, body: FrameIn, db: Session = Depends(get_db)):
+    """Free and local: make a first frame this plan does not have yet (plans prepared before the head-and-shoulders
+    framing existed), from the same approved pose and set."""
+    import tempfile
+    recs = records(db)
+    p = recs.get(pid)
+    if not p:
+        raise HTTPException(404, "no such plan")
+    if body.framing not in FRAMINGS:
+        raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
+    if p.get("own_frame"):
+        raise HTTPException(409, "this plan uses your own first frame")
+    if p.get("status") != "ready":
+        raise HTTPException(409, "the plan is not ready yet")
+    if (p.get("frame_assets") or {}).get(body.framing):
+        return view(db, p)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            pose, spec = frame_inputs(db, p, Path(tmp))
+            frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], Path(tmp) / f"first-frame-{body.framing}.png", body.framing)
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(422, f"the {FRAME_WORDS[body.framing]} first frame could not be made: {str(e)[:200]}")
+        a = store_frame(db, p, body.framing, frame)
+    recs = records(db)
+    recs[pid]["frame_assets"] = {**(recs[pid].get("frame_assets") or {}), body.framing: a}
+    save(db, recs)
+    db.commit()
+    return view(db, recs[pid])
+
+
+def frame_inputs(db: Session, p: dict, folder: Path) -> tuple[Path, dict]:
+    """The speaker's approved neutral pose and the scene's approved set (our own art only)."""
+    from . import scene_sets
+    from . import sets as studio_sets
+    from .storage import storage
+    ep = db.get(Episode, p["episode_id"])
+    sc = db.get(StoryboardScene, p["scene_id"])
+    c = db.query(Character).filter_by(key=p["speaker"]).one()
+    pid_pose = (c.expressions or {}).get("neutral")
+    a = db.get(CharacterAsset, int(pid_pose[1:])) if pid_pose and pid_pose.startswith("p") else None
+    if a is None or a.status != "approved":
+        raise RuntimeError(f"{c.name} has no approved neutral pose")
+    pose = storage().get_to_file(a.storage_key, folder / "pose.png")
+    set_id = scene_sets.scene_set(ep, sc)
+    spec = studio_sets.spec_for(db, set_id, folder / "set") if set_id else None
+    if not spec:
+        raise RuntimeError("the scene has no approved set")
+    return pose, {**spec, "set_id": set_id}
+
+
+def store_frame(db: Session, p: dict, framing: str, frame: Path, job_id=None) -> int:
+    return store_asset(db, ep_id=p["episode_id"], src=frame, key=f"episodes/{p['episode_id']}/shot-compare/{p['id']}/first-frame-{framing}.png",
+                       kind="scene-reference", label=f"Shot comparison first frame, {FRAME_WORDS[framing]} (approved set + approved neutral pose)",
+                       content_type="image/png", job_id=job_id).id
 
 
 # ------------------------------------------------------------------ the owner's own first frame (a second arm)
@@ -754,10 +1028,12 @@ def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float
         if m not in ALL_MODELS or f not in FRAMINGS:
             raise HTTPException(422, f"framing must be one of {', '.join(FRAMINGS)}")
     clips, skipped = [], []
+    planned: dict[str, float] = {}      # talking runs of each plan in this batch (its cap covers them together)
     for pid in body.plan_ids:
         p = recs.get(pid)
         if not p:
             raise HTTPException(404, f"no such plan {pid}")
+        p = {**p, "framing": {**(p.get("framing") or {}), **body.framing}}    # checked with the framing that will run
         for m in paid:
             r = p["results"].get(m) or {}
             if p.get("status") != "ready":
@@ -766,8 +1042,15 @@ def _batch_clips(db: Session, body: BatchIn) -> tuple[list[tuple[str, str, float
                 skipped.append(f"line {p['line'] + 1}, {ALL_MODELS[m]['label']}: already {r['status']}")
             elif m in GPU_MODELS and gpu_blocked(view(db, p), m):
                 skipped.append(f"line {p['line'] + 1}, {GPU_MODELS[m]['label']}: {gpu_blocked(view(db, p), m)}")
+            elif m in MODELS and p.get("status") == "ready" and frame_asset_of(p, m) is None:
+                skipped.append(f"line {p['line'] + 1}, {MODELS[m]['label']}: make the {FRAME_WORDS[framing_of(p, m)]} first frame first (free)")
+            elif m in TALKING and talking_blocked(db, p, m, planned.get(pid, 0.0)):
+                skipped.append(f"line {p['line'] + 1}, {TALKING[m]['label']}: {talking_blocked(db, p, m, planned.get(pid, 0.0))}")
             else:
-                clips.append((pid, m, estimate(m, p["seconds"], db)["usd"]))
+                usd = estimate(m, bill_seconds(p) if m in TALKING else p["seconds"], db)["usd"]
+                if m in TALKING:
+                    planned[pid] = planned.get(pid, 0.0) + usd
+                clips.append((pid, m, usd))
     return clips, skipped
 
 
@@ -835,14 +1118,14 @@ def stream_seconds(path: Path) -> dict:
     return out
 
 
-def finish(video: Path, wav: Path, seconds: float, out: Path) -> dict:
+def finish(video: Path, wav: Path, seconds: float, out: Path, size: tuple[int, int] = (W, H)) -> dict:
     """The model's (or the rig's) picture with OUR line audio: the picture is cut, or its last frame held, to exactly
     the line's length at 30 fps; any audio the model made is dropped. Returns the length check."""
     vs = stream_seconds(video).get("video") or 0.0
     pad = max(0.0, seconds - vs) + 0.5
     _ff(["-i", str(video), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0",
-         "-vf", f"tpad=stop_mode=clone:stop_duration={pad:.3f},fps={FPS},scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
+         "-vf", f"tpad=stop_mode=clone:stop_duration={pad:.3f},fps={FPS},scale={size[0]}:{size[1]}:force_original_aspect_ratio=decrease,"
+                f"pad={size[0]}:{size[1]}:(ow-iw)/2:(oh-ih)/2",
          "-t", f"{seconds:.3f}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", str(out)])
     got = stream_seconds(out)
     v, a = got.get("video") or 0.0, got.get("audio") or 0.0
@@ -856,6 +1139,8 @@ def compose(plate: Path, pose: Path, blocking: dict, plate_w: int, plate_h: int,
     art only. wide: the whole figure standing on the floor line. medium: closer on the same plate, the head and upper
     body filling most of the frame (the figure runs off the bottom edge, the plate is enlarged to match)."""
     from PIL import Image
+    if framing == "head":
+        return compose_head(plate, pose, blocking, plate_h, out)
     bg = Image.open(plate).convert("RGB")
     k = max(W / bg.width, H / bg.height)
     if framing == "medium":
@@ -888,6 +1173,76 @@ def compose(plate: Path, pose: Path, blocking: dict, plate_w: int, plate_h: int,
     return out
 
 
+def body_marks(fig) -> dict:
+    """Where the head ends and the vest begins on the (alpha-cropped) approved pose, found by the rig's own measuring
+    (production/animation/rig_extract.py): the neck, the shoulder line (the top of the vest) and the head's width.
+    Falls back to the neck alone, then to the house-style proportions (head about 30% of the height)."""
+    import importlib.util
+
+    import numpy as np
+    from .config import REPO_ROOT
+    a = np.array(fig.convert("RGBA"))
+    alpha = a[:, :, 3] > 128
+    h = a.shape[0]
+    spec = importlib.util.spec_from_file_location("rig_extract", REPO_ROOT / "production" / "animation" / "rig_extract.py")
+    rx = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rx)
+    style, how = "v2", "rig"
+    try:
+        style = rx.detect_style(a)
+        b = rx.measure_body(a, style)
+        neck_x, neck_y = b["neck"]
+        vest_y = (b["shoulder_l"][1] + b["shoulder_r"][1]) / 2
+    except Exception:            # noqa: BLE001
+        try:
+            n = rx.find_neck(a, style)
+            neck_x, neck_y = n["neck"]
+            how = "neck"
+        except Exception:        # noqa: BLE001
+            neck_x, neck_y, how = a.shape[1] / 2, 0.30 * h, "proportions"
+        vest_y = neck_y + 0.06 * h
+    vest_y = max(vest_y, neck_y + 1)
+    cols = np.nonzero(alpha[: max(1, int(neck_y))].any(0))[0]
+    head_w = int(cols[-1] - cols[0] + 1) if len(cols) else a.shape[1]
+    return {"neck_x": float(neck_x), "neck_y": float(neck_y), "vest_y": float(vest_y), "head_w": head_w, "found_by": how}
+
+
+def head_layout(marks: dict, out_w: int = 720, out_h: int = 900) -> dict:
+    """Head and shoulders: the head near the top (4% margin) and the frame ending around the top of the vest (the
+    shoulder line at 94% of the height); if the head would then be too wide (over 92% of the width), it is scaled to
+    fit instead and a little more of the vest shows. Pure, so the crop is testable."""
+    top = round(0.04 * out_h)
+    s_vest = (0.94 * out_h - top) / marks["vest_y"]
+    s_head = 0.92 * out_w / marks["head_w"]
+    s = min(s_vest, s_head)
+    return {"scale": s, "x": round(out_w / 2 - marks["neck_x"] * s), "y": top, "vest_at": round(top + marks["vest_y"] * s),
+            "fit": "vest" if s_vest <= s_head else "head width", "size": (out_w, out_h)}
+
+
+def compose_head(plate: Path, pose: Path, blocking: dict, plate_h: int, out: Path) -> Path:
+    """The head-and-shoulders first frame (720x900, vertical): our approved pose cut at the top of the vest, on the
+    approved set plate enlarged to the same apparent scale (as the medium frame does). Our own art only."""
+    from PIL import Image
+    ow, oh = FRAME_SIZE["head"]
+    fig = Image.open(pose).convert("RGBA")
+    fig = fig.crop(fig.getchannel("A").getbbox() or (0, 0, fig.width, fig.height))
+    lay = head_layout(body_marks(fig), ow, oh)
+    s = lay["scale"]
+    figs = fig.resize((max(1, round(fig.width * s)), max(1, round(fig.height * s))), Image.LANCZOS)
+    bg = Image.open(plate).convert("RGB")
+    k = max(W / bg.width, H / bg.height)
+    k3 = k * figs.height / (0.46 * H)              # the plate at the figure's apparent scale (the wide frame's ratio)
+    floor = blocking.get("floor_y", plate_h * 0.86) * k3
+    top = floor - (lay["y"] + figs.height)          # the feet stay on the floor line, far below the frame
+    top = max(0.0, min(bg.height * k3 - oh, top))
+    left = max(0.0, (bg.width * k3 - ow) / 2)
+    region = (left / k3, top / k3, (left + ow) / k3, (top + oh) / k3)
+    canvas = bg.crop(tuple(round(v) for v in region)).resize((ow, oh), Image.LANCZOS)
+    canvas.paste(figs, (lay["x"], lay["y"]), figs)
+    canvas.save(out)
+    return out
+
+
 # ------------------------------------------------------------------ jobs
 from .tasks import Ctx, store_asset, task  # noqa: E402
 
@@ -906,29 +1261,27 @@ def shot_prepare(ctx: Ctx) -> dict:
     sc = db.get(StoryboardScene, p["scene_id"])
     folder = ctx.folder("shot-compare", pid)
     try:
-        c = db.query(Character).filter_by(key=p["speaker"]).one()
-        pid_pose = (c.expressions or {}).get("neutral")
-        a = db.get(CharacterAsset, int(pid_pose[1:])) if pid_pose and pid_pose.startswith("p") else None
-        if a is None or a.status != "approved":
-            raise RuntimeError(f"{c.name} has no approved neutral pose")
-        pose = storage().get_to_file(a.storage_key, folder / "pose.png")
-        set_id = scene_sets.scene_set(ep, sc)
-        spec = studio_sets.spec_for(db, set_id, folder / "set") if set_id else None
-        if not spec:
-            raise RuntimeError("the scene has no approved set")
-        frame_assets = {}
+        pose, spec = frame_inputs(db, p, folder)
+        set_id = spec["set_id"]
+        frame_assets, frame_errors = {}, {}
         for f in FRAMINGS:
-            frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], folder / f"first-frame-{f}.png", f)
-            frame_assets[f] = store_asset(db, ep_id=ep.id, src=frame, key=f"episodes/{ep.id}/shot-compare/{pid}/first-frame-{f}.png",
-                                          kind="scene-reference", label=f"Shot comparison first frame, {f} (approved set + approved neutral pose)",
-                                          content_type="image/png", job_id=job.id).id
+            try:
+                frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], folder / f"first-frame-{f}.png", f)
+            except Exception as e:   # noqa: BLE001 (head and shoulders needs the neck found; wide and medium never fail here)
+                if f in ("wide", "medium"):
+                    raise
+                frame_errors[f] = str(e)[:200]
+                ctx.log(f"the {FRAME_WORDS[f]} first frame could not be made: {e}")
+                continue
+            frame_assets[f] = store_frame(db, p, f, frame, job.id)
         src, _ = source_audio(db, ep, folder / "source")
         wav = media.cut_audio(src, folder / "line.wav", p["start"], p["end"])
         aa = store_asset(db, ep_id=ep.id, src=wav, key=f"episodes/{ep.id}/shot-compare/{pid}/line.wav", kind="audio",
                          label="Shot comparison: the line's recorded audio", content_type="audio/wav", job_id=job.id)
         write_action(db, pid, ep, sc, ctx.log)
         recs = records(db)
-        recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
+        recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "frame_errors": frame_errors,
+                          "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
                           "audio_seconds": round(media.probe(wav)["duration"] or p["seconds"], 3)})
         save(db, recs)
         db.commit()
@@ -973,10 +1326,15 @@ def shot_generate(ctx: Ctx) -> dict:
     p = records(db)[pid]
     if model in GPU_MODELS:
         return _generate_gpu(ctx, pid, model)
+    if model in TALKING:
+        return _generate_talking(ctx, pid, model)
     m = MODELS[model]
     folder = ctx.folder("shot-compare", pid)
     framing = framing_of(p, model)
-    img = public_url(storage().url(db.get(Asset, (p.get("frame_assets") or {}).get(framing) or p["frame_asset_id"]).storage_key, 7200))
+    aid = frame_asset_of(p, model)
+    if aid is None:
+        raise RuntimeError(f"no {FRAME_WORDS[framing]} first frame on this plan")
+    img = public_url(storage().url(db.get(Asset, aid).storage_key, 7200))
     aud = public_url(storage().url(db.get(Asset, p["audio_asset_id"]).storage_key, 7200))
     body = request_for(model, p["action"], img, aud, p["seconds"])
     est = estimate(model, p["seconds"])
@@ -1010,7 +1368,96 @@ def shot_generate(ctx: Ctx) -> dict:
         return {"pid": pid, "model": model, "actual_usd": actual, "check": check}
     except Exception as e:
         mark(status="failed", error=str(e)[:300])
-        raise
+        raise no_retry(e)
+
+
+def no_retry(e: Exception) -> Exception:
+    """A paid clip is never sent again by the job runner's automatic retry (rate limits, server errors and timeouts
+    would otherwise re-run the job and could pay twice): the failure stays, and the owner decides to run it again."""
+    from .providers import ProviderError, ProviderNotConfigured
+    if isinstance(e, ProviderNotConfigured) or (isinstance(e, ProviderError) and not e.transient):
+        return e
+    err = ProviderError(f"{type(e).__name__}: {e}"[:500], transient=False)
+    err.__cause__ = e
+    return err
+
+
+TALKING_RUN = {"wavespeed": lambda: __import__("oddstudio.wavespeed", fromlist=["run"]).run}
+
+
+def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
+    """ONE talking shot the owner started: the first frame, OUR line audio, the neutral prompt and the seed go to the
+    provider as shown; the provider's video is stored at once, unchanged, and again with our audio laid under it and
+    the length check; the exact provider, endpoint, prompt, seed, cost and terms are saved with the clip."""
+    from .comparison import public_url
+    from .models import Asset
+    from .storage import storage
+    db, job = ctx.db, ctx.job
+    p = records(db)[pid]
+    m = TALKING[model]
+    framing = framing_of(p, model)
+
+    def mark(**kw):
+        recs = records(db)
+        recs[pid]["results"][model] = {**recs[pid]["results"].get(model, {}), **kw}
+        save(db, recs)
+        db.commit()
+
+    def accepted(tid: str):
+        # the provider took the task: it counts against this plan's cap from now on, whatever happens next
+        recs = records(db)
+        recs[pid].setdefault("spend", []).append({"model": model, "usd": est["usd"], "request_id": tid, "at": time.time()})
+        recs[pid]["results"][model] = {**recs[pid]["results"].get(model, {}), "request_id": tid}
+        save(db, recs)
+        db.commit()
+
+    est = estimate(model, bill_seconds(p))
+    prompt, seed = talking_prompt(db, p), seed_of(p, model)
+    meta = {"provider": m["provider"], "endpoint": m["endpoint"], "prompt": prompt, "seed": seed, "framing": framing,
+            "terms": m["terms"], "publishable": False}
+    try:
+        aid = frame_asset_of(p, model)
+        if aid is None:
+            raise RuntimeError(f"no {FRAME_WORDS[framing]} first frame on this plan")
+        img = public_url(storage().url(db.get(Asset, aid).storage_key, 7200))
+        aud = public_url(storage().url(db.get(Asset, p["audio_asset_id"]).storage_key, 7200))
+        if not (img.startswith("http") and aud.startswith("http")):
+            raise RuntimeError("the provider fetches the first frame and the line audio from the studio: set PUBLIC_URL first")
+        body = request_for(model, "", img, aud, p["seconds"], prompt, seed)
+        mark(status="running", **meta)
+        folder = ctx.folder("shot-compare", pid)
+        raw = folder / f"{model}-raw.mp4"
+        data, tm = TALKING_RUN[m["provider"]]()(db, m["endpoint"], body, est["usd"], f"shot {pid}: {p['text'][:60]}", raw, ctx.log,
+                                                lambda info: mark(progress=info), accepted=accepted)
+        # the provider's own file first (it deletes outputs after 7 days), unchanged
+        ra = store_asset(db, ep_id=p["episode_id"], src=raw, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}-raw.mp4",
+                         kind="video", label=f"Shot comparison: {m['label']}, the provider's file as delivered ({m['terms']})",
+                         content_type="video/mp4", job_id=job.id)
+        db.commit()
+        info = stream_size(raw)
+        wav = storage().get_to_file(db.get(Asset, p["audio_asset_id"]).storage_key, folder / "line.wav")
+        out = folder / f"{model}.mp4"
+        check = finish(raw, wav, p["seconds"], out, FRAME_SIZE["head"] if framing == "head" and not p.get("own_frame") else (W, H))
+        va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
+                         kind="video", label=f"Shot comparison: {m['label']} ({m['terms']})", content_type="video/mp4", job_id=job.id)
+        mark(status="done", asset_id=va.id, raw_asset_id=ra.id, actual_usd=est["usd"], billed_seconds=est["billed_seconds"],
+             per_second_usd=round(est["usd"] / max(0.001, p["seconds"]), 4), check=check, seconds=tm["seconds"],
+             request_id=tm["request_id"], output_size=info, **meta)
+        return {"pid": pid, "model": model, "actual_usd": est["usd"], "check": check}
+    except Exception as e:
+        mark(status="failed", error=str(e)[:300], **meta)
+        raise no_retry(e)
+
+
+def stream_size(video: Path) -> str:
+    """The provider's output size, as delivered (for example 352x640)."""
+    from .config import get_settings
+    fp = get_settings().ffprobe
+    if not fp:
+        return ""
+    r = subprocess.run([fp, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x",
+                        str(video)], capture_output=True, text=True, timeout=60)
+    return r.stdout.strip() if r.returncode == 0 else ""
 
 
 def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:

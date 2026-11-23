@@ -31,6 +31,29 @@ Production › Motion Model Comparison › **Shot comparison** compares hosted A
   - **Fallback:** if the provider is not set, fails or gives nothing usable, the phrase matcher is used, with a note. It matches whole words and phrases only; cues such as "Sure," or "I," count only at the start of a sentence. A line with no cue still gets a sensible tone (excited, puzzled for a question, matter-of-fact otherwise, or the line's own mood).
   - **Your edit is never overwritten.**
 
+## Talking shots (WaveSpeed)
+
+A talking shot is a speaking line from a still and the line's own recorded audio. It runs in the same shot comparison, as one more column per provider.
+
+- **Providers** (Settings > Motion > Talking-shot provider; the setting picks which one is ticked by default):
+
+  | Provider | Endpoint | Price | Default first frame | Terms status shown on every clip |
+  |---|---|---|---|---|
+  | **WaveSpeed InfiniteTalk fast** (default) | `wavespeed-ai/infinitetalk-fast` | $0.015 per second of audio, rounded up, 3 s minimum | head and shoulders | "InfiniteTalk, Apache-2.0 model, hosted on WaveSpeed; commercial-use terms not yet confirmed in writing" |
+  | WaveSpeed Kling v1 AI Avatar Standard (fallback only) | `kwaivgi/kling-v1-ai-avatar-standard` | $0.05 per second of audio, rounded up, 3 s minimum | medium | "Kling terms not yet confirmed in writing: not for publishing" |
+
+  Kling v1 is never chosen or ticked by itself. In the hand test it gave clean hands but heavy eyelids and a toothy grin even with a neutral prompt. A new provider is one entry in `shot_compare.TALKING` plus its run function in `TALKING_RUN`.
+- **What is sent:** `image` (the first frame), `audio` (the line's own recording), `prompt` and, for InfiniteTalk, `seed`. Both files are sent as the studio's short-lived signed links, so `PUBLIC_URL` must be set. The exact body is shown with the request before Run.
+- **The prompt is neutral.** The default is "<name> speaks the line: formal, composed, neutral face, eyes wide open as in the image, small nods, no smile", followed by the no-text rule and the "keep the design" sentence. It is NOT the plan's action text. You can edit it per plan, but attitude words (pompous, smug, grin, chin raised and similar) are refused, unless negated as in "no smile". The attitude belongs to the scene's expression setting and the approved poses, not the video prompt.
+- **The seed** is shown and editable per plan. It is saved with the clip.
+- **Head and shoulders** (720×900, vertical 4:5): cut automatically from the approved neutral pose on the approved set. The neck and shoulder line are found by the rig's own measuring (`rig_extract.py`). The head sits near the top (4% margin) and the frame ends around the top of the vest; a very wide head is fitted to the width, so a little more vest shows. New plans get it in the free preparation. An older plan shows **Make the head-and-shoulders first frame (free)**. A frame that does not exist is never replaced by another one silently: the run is refused.
+- **Cost before every run:** the estimate is the audio length rounded up × the rate, with the 3 s minimum (6.22 s = 7 s = $0.105 for InfiniteTalk). Only you start a run, with **Run this** or the batch's one confirm.
+- **Caps:** a hard cap per plan (Settings > Motion, default $0.50, editable on the plan) covers every talking-shot run of that plan, retries included. A task WaveSpeed accepted counts even if it failed later. The experimental budget (Settings > Motion) still applies, and hosted spend from fal.ai and WaveSpeed is counted together there.
+- **Never retried by itself:** a submit is sent once. Only the status checks and the download are repeated after a rate limit, a server error or a dropped connection. A failed shot stays failed until you run it again. The same rule now applies to every paid clip in the shot comparison: the job runner's automatic retry never re-sends a paid request.
+- **Stored at once** (WaveSpeed deletes outputs after 7 days): the provider's file as delivered, and the clip with our line audio laid under it at the frame's size (720×900 for head and shoulders), with the length check. Saved with the clip: the provider, endpoint, prompt, seed, cost, billed seconds, the provider's output size, the task id and the terms status.
+- **Not for publishing:** every clip is marked `publishable: false` with its terms status, and shows it in the grid. Comparison clips are never offered for publishing; only an episode's own rendered video is.
+- **The key** is `wavespeed_api_key` under Settings > Credentials. It is encrypted at rest, only ever put in the Authorization header, and never returned, logged or stored anywhere else.
+
 ## Your own first frame (a second plan for the same line)
 
 - **What it is:** under a line's requests, **Use my own first frame** uploads an image you made (PNG, JPEG or WebP, at most 15 MB). You tick "made from our own approved art (no third-party picture or video frame)" first; the upload is refused without it.

@@ -18,7 +18,7 @@ const CREDENTIALS: [string, string][] = [
   ['aws_access_key_id', 'AWS access key ID (S3)'], ['aws_secret_access_key', 'AWS secret access key (S3)'],
   ['youtube_client_id', 'YouTube OAuth client ID'], ['youtube_client_secret', 'YouTube OAuth client secret'],
   ['youtube_refresh_token', 'YouTube refresh token (set by "Connect YouTube")'], ['comfyui_token', 'ComfyUI access token (optional)'],
-  ['fal_key', 'fal.ai API key (hosted video models)'],
+  ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (hosted talking shots)'],
   ['runpod_api_key', 'RunPod API key (rented GPU sessions; stays on the studio)'], ['gpu_worker_token', 'GPU worker token (our own GPU machine)'],
 ];
 const NEED_LABEL = (n: string) => n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :
@@ -163,6 +163,11 @@ function CapabilityCard({id, cap, sections, data, reload}: {id: string; cap: any
       {id === 'motion' && <>
         <p className="muted small">The studio 2D rig animator performs the script&apos;s acting on the CPU and keeps the approved characters exact. Hosted video models (fal.ai) are paid per clip and capped by the budget below.</p>
         <div><label htmlFor="motion-budget">Experimental budget for paid generation (USD)</label><input id="motion-budget" type="number" min={0} step={1} value={s.v.budget_usd ?? 25} onChange={e => s.set('budget_usd', Number(e.target.value))} /></div>
+        <div><label htmlFor="motion-talking">Talking-shot provider (shot comparison)</label>
+          <select id="motion-talking" value={s.v.talking_provider || 'wavespeed-infinitetalk-fast'} onChange={e => s.set('talking_provider', e.target.value)}>
+            <option value="wavespeed-infinitetalk-fast">WaveSpeed InfiniteTalk fast ($0.015/s of audio, 3 s minimum)</option>
+            <option value="wavespeed-kling-v1-avatar-standard">WaveSpeed Kling v1 Avatar Standard ($0.05/s, 3 s minimum; fallback only)</option></select></div>
+        <div><label htmlFor="motion-plan-cap">Hard cap per shot plan for talking shots (USD, every run of the plan)</label><input id="motion-plan-cap" type="number" min={0.05} max={10} step={0.05} value={s.v.talking_plan_cap_usd ?? 0.5} onChange={e => s.set('talking_plan_cap_usd', Number(e.target.value))} /></div>
         <p className="small">The hosted model comparison runs from <a href="/production#motion-comparison">Production › Motion Model Comparison</a>.</p></>}
       {id === 'storage' && <><div className="grid cols-2">
         <div><label htmlFor="storage-backend">Store new media in</label><select id="storage-backend" value={s.v.backend || i.storage} onChange={e => s.set('backend', e.target.value)}><option value="local">Server volume</option><option value="s3">AWS S3</option></select></div>
