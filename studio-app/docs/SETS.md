@@ -91,3 +91,41 @@ When the notes show one room from two sides, the Set card offers **"Generate bot
 - **Approval:** each candidate is approved, and its seats and table front are marked, in the episode's Set section. The pair shows as "main side" / "reverse side".
 - **In scenes:** add both to the episode's sets for scene changes. The simple split then cuts where the camera changes side, and each scene takes its side's set. On the reverse side the standing marks and seats are used in the opposite order, so who sits or stands where flips as it does in the video.
 - **Single-view episodes:** with one view, or only one side's set, nothing switches and nothing flips. The render is identical to before.
+
+## Views of one set (feat/set-views)
+
+A set can have up to four views of the same room, like the cuts in a real video:
+
+| View | What it shows |
+|---|---|
+| **wide** | The set's own picture, with everyone. |
+| **speaker** | The speaker, seen from the audience's side. |
+| **audience** | The row of listeners, seen from the speaker's side. |
+| **two-shot** | The speaker and the nearest listener, side-on. |
+
+**Camera words.** "Read the room from a video" also writes the camera angles the video uses, in words only, in the same single call as the set notes. The cost shown before the upload includes them. For each distinct angle the words give:
+- the camera position and the shot size;
+- what is in frame;
+- who is seated or standing where, and which way each person faces;
+- where the furniture, windows and bookcase sit from that angle.
+
+The instruction to the vision model says that only the set and the camera angles are wanted: never a person's face, appearance, clothing or name. Every value comes from fixed lists, and anything else is removed and counted. The video and its frames are deleted after the call. The words are stored on the episode and shown on each view's card, where they can be edited (`PUT /api/episodes/{id}/camera-angles`). The reference video's own angles decide which views have words.
+
+**Generating a view.** On an approved set's card in the Set panel, under **Views of this room**:
+- **The request:** the set's text description, plus the view's camera words, plus the set's own approved wide picture as the reference image. The exact request names it: "our own generated set picture". No third-party picture or video frame is ever sent.
+- **Cost:** shown first, about $0.05–0.20 per image.
+- **Approval:** each view waits for your Approve or Reject; nothing is approved by itself.
+- **Route:** `POST /api/sets/{id}/views/{view}/generate`.
+
+**Each view's staging** is edited on its own picture: seats (with facing), floor line, desk front and standing area (`PUT /api/sets/{id}/views/{view}/staging`). A view seats only who it shows:
+- **speaker:** the speaker;
+- **audience:** the listeners, in their seat order;
+- **two-shot:** the speaker and the person addressed.
+
+**Which view a shot uses.** The storyboard stills and the renderer use the same rule:
+- a wide shot uses **wide**;
+- a close shot uses **speaker**;
+- a medium shot of a speaker addressing someone uses **two-shot** (else **speaker**);
+- a line of five seconds or more with reactions ends on a 2-second cutaway to the **audience** view.
+
+**Missing views** fall back to wide and never block anything. A cut to a view is a scene change in the render spec: that view's picture, with only its people seated, then back to everyone's seats on the wide set. A render without approved views is exactly as before. The Set panel lists the view each shot will use (`GET /api/episodes/{id}/view-plan`).

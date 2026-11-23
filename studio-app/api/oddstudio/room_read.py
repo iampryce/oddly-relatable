@@ -33,6 +33,7 @@ from . import serialize as S
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 LOCKED = ("producing", "publishing")
+ANGLE_OUT, ANGLE_PROMPT = 160, 260          # tokens: per camera angle written, and the angles' instruction
 MIN_FRAMES, MAX_FRAMES, SECONDS_PER_FRAME = 4, 8, 8.0
 IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -65,6 +66,9 @@ def estimate(db: Session, seconds: float | None) -> dict:
         return {"configured": False, "frames": n, "cap_usd": cap, "message": str(e)}
     est = SN.estimate(cfg["provider"], rooms_n=2, frames=n)
     est["output_tokens"] = est.get("output_tokens", 0) + 2 * SN.OUT_PER_ROOM      # up to 4 rooms
+    # the camera angles (feat/set-views): up to 4 more entries in words, and their instruction
+    est["output_tokens"] += 4 * ANGLE_OUT
+    est["input_tokens"] = est.get("input_tokens", 0) + ANGLE_PROMPT
     from .notes_v2 import CALIBRATION
     from . import video_notes as VN
     p = VN.PRICES.get(cfg["provider"])
@@ -236,9 +240,13 @@ def set_notes_read_video(ctx: Ctx) -> dict:
             raise ValueError("no frames could be read from the video")
         cfg = hints_vision_config(db)
         analysis.last_vision_usage.clear()
-        ans = analysis.analyse_images(cfg, [f for f, _ in frames], SN.scan_prompt(len(frames)))
+        from . import camera_angles as CA
+        ans = analysis.analyse_images(cfg, [f for f, _ in frames], SN.scan_prompt(len(frames)) + CA.prompt_addition())
         usage = dict(analysis.last_vision_usage)
+        raw_angles = ans.pop("angles", None) if isinstance(ans, dict) else None
         rooms, stripped = SN.clean_scan(ans)
+        angles, a_stripped = CA.clean(raw_angles)
+        stripped += a_stripped
         if not rooms:
             raise ValueError("the answer described no room in the allowed words: nothing saved")
         notes = []
@@ -250,17 +258,19 @@ def set_notes_read_video(ctx: Ctx) -> dict:
         db.refresh(ep)
         sp = dict(ep.set_proposal or {})
         sp["set_notes"] = notes
+        # the camera angles, in words (feat/set-views): editable, shown before a view is generated from them
+        sp["camera_angles"] = [{"view": a["view"], "fields": a, "text": CA.angle_text(a), "edited": False} for a in angles]
         sp["set_notes_source"] = {"from": "a video read for the room (deleted)", "job_id": job.id, "frames": len(frames),
                                   "stripped": stripped, "usage": usage, "estimated_usd": est.get("usd"), "at": time.time()}
         ep.set_proposal = sp
-        db.add(Event(episode_id=ep.id, kind="episode", message=f"Room read from a video: {len(notes)} room(s), "
+        db.add(Event(episode_id=ep.id, kind="episode", message=f"Room read from a video: {len(notes)} room(s), {len(angles)} camera angle(s), "
                                                               f"{stripped} value(s) outside the lists removed; video and "
                                                               "frames deleted"))
         db.commit()
         if usage:
             ctx.log(f"vision call: {usage.get('provider')} {usage.get('model')}, {usage.get('input_tokens')} in / "
                     f"{usage.get('output_tokens')} out tokens")
-        return {"rooms": len(notes), "frames": len(frames), "stripped": stripped, "usage": usage}
+        return {"rooms": len(notes), "angles": len(angles), "frames": len(frames), "stripped": stripped, "usage": usage}
     finally:
         src.unlink(missing_ok=True)
         shutil.rmtree(frames_dir, ignore_errors=True)
