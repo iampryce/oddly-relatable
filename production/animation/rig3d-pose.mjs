@@ -157,3 +157,22 @@ export function turnTowards(target, x, angle) {
   const d = target.dir ?? (Math.abs(target.x - x) < 30 ? 0 : Math.sign(target.x - x));
   return d * angle;
 }
+
+// Where a listener looks during a line (feat/3d-rig PR 4; both rigs use it for the eyes, the 3D rig turns the head
+// too): the person the reference plan has them facing, or down on a sad / worried reaction, or a short glance at
+// another listener now and then (deterministic: from the character's name and the time), else the speaker.
+//   me: key; t: seconds; line: {speaker, start, end, reactions?}; others: keys of the other listeners on stage;
+//   note: the plan's facing for me now (a key, 'left' / 'right' or undefined).
+export const DOWN = new Set(['sad', 'worried', 'ashamed', 'embarrassed', 'guilty', 'upset', 'hurt', 'nervous', 'awkward']);
+export const GLANCE_EVERY = 5.5, GLANCE_FOR = 0.8;
+export function listenerGaze(me, t, line, others, note) {
+  const reaction = (line.reactions || []).find(r => r.character === me);
+  if (reaction && DOWN.has(String(reaction.expression || '').toLowerCase())) return {target: null, down: true};
+  if (note && note !== line.speaker && note !== me && others.includes(note)) return {target: note, down: false};
+  const seed = [...me].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 997, 7);
+  const phase = (t - line.start + (seed % 50) / 10) % GLANCE_EVERY;
+  if (others.length && t - line.start > 1 && phase < GLANCE_FOR) {
+    return {target: others[seed % others.length], down: false};
+  }
+  return {target: line.speaker, down: false};
+}

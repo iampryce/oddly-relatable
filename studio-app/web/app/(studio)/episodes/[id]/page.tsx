@@ -11,6 +11,7 @@ import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import SceneSetSelect from '@/components/SceneSetSelect';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import CastPanel from '@/components/CastPanel';
+import LineExpressions from '@/components/LineExpressions';
 import {hookNote} from '@/lib/hookView';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
@@ -372,7 +373,7 @@ function StoryboardTab({ep, can, act, characters, environments, reload}: Ctx) {
                     <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('save', async () => { await api(`/episodes/${ep.id}/scenes/${sc.id}`, {method: 'PUT', body: draft}); setEditing(null); await api(`/episodes/${ep.id}/scenes/${sc.id}/reference`, {method: 'POST'}); })}>Save scene</button>
                     <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
                   </div>
-                </div>) : <SceneView scene={sc} characters={characters} />}</div>
+                </div>) : <><SceneView scene={sc} characters={characters} /><LineExpressions ep={ep} scene={sc} characters={characters} act={act} /></>}</div>
               <div>{sc.reference ? <a href={sc.reference.url} target="_blank" rel="noreferrer"><img className="scene-img" src={sc.reference.url} alt={`Scene ${sc.position} stills`} /></a>
                 : <div className="card empty small">No stills yet{ref?.status === 'failed' ? ' (see the error above)' : ''}</div>}</div>
             </div>
