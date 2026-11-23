@@ -37,7 +37,7 @@ class WordsTest(unittest.TestCase):
         self.assertGreaterEqual(stripped, 5)
         t = CA.angle_text(got[0])
         self.assertEqual(t, "Camera in front, eye level, wide shot. In frame: desk, bookcase, window, a row of chairs. "
-                            "the main speaker seated, left of frame, facing right. 3 others seated, right of frame, facing "
+                            "The main speaker seated, left of frame, facing right. 3 others seated, right of frame, facing "
                             "towards the main speaker. Furniture: desk left of frame; bookcase background.")
         p = CA.prompt_addition()
         self.assertIn("never describe any person's face, appearance, clothing or name", p)
@@ -66,6 +66,21 @@ class PickTest(unittest.TestCase):
         self.assertEqual(out[1]["starts"], {"m": "seat:0"})
         self.assertEqual(out[2]["starts"], base[0]["starts"], "back to everyone's seats on the wide set")
         self.assertIsNone(SV.cut(lines, base, {}), "no views: the spec stays as before")
+
+    def test_a_set_change_between_two_wide_lines_is_kept_and_cuts_fall_between_lines(self):
+        a, b = {"plate": "a.png", "seats": [{}]}, {"plate": "b.png", "seats": [{}]}
+        base = [{"t0": -1e9, "set_id": "a", "set": a, "starts": {"m": "seat:0"}},
+                {"t0": 10.5, "set_id": "b", "set": b, "starts": {"m": "seat:0"}}]
+        views = {"a": {"speaker": {"plate": "asp.png", "seats": [{}]}}}
+        lines = [{"speaker": "m", "start": 0.0, "end": 4.0, "shot": "close"},
+                 {"speaker": "m", "start": 5.0, "end": 10.0, "shot": "wide"},
+                 {"speaker": "m", "start": 11.0, "end": 14.0, "shot": "wide"}]
+        out = SV.cut(lines, base, views)
+        self.assertEqual([(x["t0"], x["view"], x["set"]["plate"]) for x in out],
+                         [(0.0, "speaker", "asp.png"), (4.5, "wide", "a.png"), (10.5, "wide", "b.png")],
+                         "the scene's own set change stays, at the same moment between the lines")
+        for x, ln in zip(out, lines):
+            self.assertLessEqual(x["t0"], ln["start"], "every cut happens before its line starts")
 
 
 class RoutesTest(unittest.TestCase):

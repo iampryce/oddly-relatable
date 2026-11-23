@@ -134,7 +134,8 @@ def angle_text(e: dict) -> str:
     for p in e.get("people", []):
         who = p["who"] if p["who"] != "the others" else (f"{p['count']} others" if p["count"] > 1 else "one other")
         bits = [who, p.get("pose"), p.get("where"), f"facing {p['facing']}" if p.get("facing") else None]
-        parts.append(" ".join(b for b in bits[:2] if b) + "".join(f", {b}" for b in bits[2:] if b) + ".")
+        s = " ".join(b for b in bits[:2] if b) + "".join(f", {b}" for b in bits[2:] if b) + "."
+        parts.append(s[:1].upper() + s[1:])
     if e.get("furniture"):
         parts.append("Furniture: " + "; ".join(f"{f['item']} {f['where']}" if f.get("where") else f["item"] for f in e["furniture"]) + ".")
     return " ".join(parts)
