@@ -20,7 +20,8 @@ Models (fal.ai, checked 2026-11-21; both pages say "Commercial use permitted (Pa
 
 Talking shots (TALKING; Settings > Motion > talking-shot provider, WaveSpeed InfiniteTalk fast by default): image + OUR
 line audio + a NEUTRAL prompt (attitude words are refused: they made eyelids and grins go off-model) + a seed, from the
-head-and-shoulders first frame by default. Each run is started by the owner after seeing its cost (the audio length
+head-and-shoulders cutout on a plain key colour by default (no set: the character alone, keyed after the clip into a
+transparent copy for placing over the episode's set at assembly; talking_key.py). Each run is started by the owner after seeing its cost (the audio length
 rounded up, with the provider's minimum), checked against a hard cap per plan and the experimental budget, never
 retried by itself, and downloaded into our storage at once with the exact provider, endpoint, prompt, seed and cost.
 Every clip carries its terms status and is not for publishing until the owner confirms the terms in writing.
@@ -99,7 +100,7 @@ TALKING = {
         "label": "WaveSpeed InfiniteTalk fast (our line audio)", "short": "InfiniteTalk",
         "why": "image + our recorded line; kept the character on-model with no text on clothing in the hand test (480p output)",
         "price": "$0.015 per second of audio, rounded up, 3 s minimum", "licence": INFINITETALK_TERMS, "terms": INFINITETALK_TERMS,
-        "framing": "head", "seed": True},
+        "framing": "cutout", "seed": True},
     "wavespeed-kling-v1-avatar-standard": {
         "provider": "wavespeed", "endpoint": "kwaivgi/kling-v1-ai-avatar-standard", "kind": "talking", "rate": 0.05, "min_seconds": 3,
         "label": "WaveSpeed Kling v1 AI Avatar Standard (our line audio; fallback only)", "short": "Kling v1",
@@ -110,9 +111,11 @@ TALKING = {
 MODELS.update(TALKING)
 ALL_MODELS = {**MODELS, **GPU_MODELS}
 WORKFLOW_DIR = Path(__file__).resolve().parent / "gpu_workflows"
-FRAMINGS = ("wide", "medium", "head")
-FRAME_SIZE = {"wide": (720, 1280), "medium": (720, 1280), "head": (720, 900)}   # head and shoulders: vertical 4:5
-FRAME_WORDS = {"wide": "wide", "medium": "medium", "head": "head-and-shoulders"}
+FRAMINGS = ("wide", "medium", "head", "cutout")
+# head and shoulders: vertical 4:5; cutout: the same crop of the character alone on a flat key colour (talking_key.py)
+FRAME_SIZE = {"wide": (720, 1280), "medium": (720, 1280), "head": (720, 900), "cutout": (720, 900)}
+FRAME_WORDS = {"wide": "wide", "medium": "medium", "head": "head-and-shoulders",
+               "cutout": "head-and-shoulders cutout on plain colour"}
 NEGATIVE = "realistic, photo, 3d render, extra characters, text, logo, watermark, deformed, blur"
 
 
@@ -479,7 +482,11 @@ def frame_words(p: dict, model: str) -> str:
     """What the first frame in a request is, in words (shown with the request)."""
     if p.get("own_frame"):
         return "your own first frame (uploaded; you confirmed it was made from our approved art)"
-    return f"the {FRAME_WORDS[framing_of(p, model)]} first frame (approved set + approved neutral pose)"
+    f = framing_of(p, model)
+    if f == "cutout":
+        return (f"the {FRAME_WORDS[f]} first frame (the approved neutral pose alone on flat {p.get('key_colour') or '#FF00FF'}; "
+                "no set)")
+    return f"the {FRAME_WORDS[f]} first frame (approved set + approved neutral pose)"
 
 
 def frame_asset_of(p: dict, model: str) -> int | None:
@@ -570,6 +577,9 @@ def view(db: Session, p: dict) -> dict:
     from .bin import hidden_ids
     gone = hidden_ids(db, "clip")
     for k, r in (p.get("results") or {}).items():
+        kk = r.get("key") or {}
+        if kk.get("status") == "done":
+            kk["urls"] = {x: url(kk.get(f"{x}_asset_id")) for x in ("keyed", "over_set", "over_grey", "check")}
         if r.get("asset_id") and r["asset_id"] not in gone:
             r["url"] = url(r["asset_id"])
         elif r.get("asset_id"):
@@ -869,12 +879,14 @@ def make_frame(pid: str, body: FrameIn, db: Session = Depends(get_db)):
     with tempfile.TemporaryDirectory() as tmp:
         try:
             pose, spec = frame_inputs(db, p, Path(tmp))
-            frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], Path(tmp) / f"first-frame-{body.framing}.png", body.framing)
+            frame, colour = make_framing(db, p, pose, spec, body.framing, Path(tmp))
         except Exception as e:   # noqa: BLE001
             raise HTTPException(422, f"the {FRAME_WORDS[body.framing]} first frame could not be made: {str(e)[:200]}")
         a = store_frame(db, p, body.framing, frame)
     recs = records(db)
     recs[pid]["frame_assets"] = {**(recs[pid].get("frame_assets") or {}), body.framing: a}
+    if colour:
+        recs[pid]["key_colour"] = colour
     save(db, recs)
     db.commit()
     return view(db, recs[pid])
@@ -901,9 +913,31 @@ def frame_inputs(db: Session, p: dict, folder: Path) -> tuple[Path, dict]:
 
 
 def store_frame(db: Session, p: dict, framing: str, frame: Path, job_id=None) -> int:
+    what = "approved neutral pose alone on a flat key colour" if framing == "cutout" else "approved set + approved neutral pose"
     return store_asset(db, ep_id=p["episode_id"], src=frame, key=f"episodes/{p['episode_id']}/shot-compare/{p['id']}/first-frame-{framing}.png",
-                       kind="scene-reference", label=f"Shot comparison first frame, {FRAME_WORDS[framing]} (approved set + approved neutral pose)",
+                       kind="scene-reference", label=f"Shot comparison first frame, {FRAME_WORDS[framing]} ({what})",
                        content_type="image/png", job_id=job_id).id
+
+
+def character_art(db: Session, p: dict, folder: Path) -> list[Path]:
+    """Every approved pose of the speaking character (the key colour must not appear in any of them)."""
+    from .storage import storage
+    c = db.query(Character).filter_by(key=p["speaker"]).one()
+    out = []
+    for a in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").all():
+        out.append(storage().get_to_file(a.storage_key, folder / f"art-{a.id}.png"))
+    return out
+
+
+def make_framing(db: Session, p: dict, pose: Path, spec: dict, framing: str, folder: Path) -> tuple[Path, str | None]:
+    """One first frame. The cutout is the character's own art on the plan's key colour (chosen once, recorded)."""
+    out = folder / f"first-frame-{framing}.png"
+    if framing == "cutout":
+        from . import talking_key
+        colour = p.get("key_colour") or talking_key.key_colour(character_art(db, p, folder))
+        talking_key.compose_cutout(pose, colour, out)
+        return out, colour
+    return compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], out, framing), None
 
 
 # ------------------------------------------------------------------ the owner's own first frame (a second arm)
@@ -1118,14 +1152,14 @@ def stream_seconds(path: Path) -> dict:
     return out
 
 
-def finish(video: Path, wav: Path, seconds: float, out: Path, size: tuple[int, int] = (W, H)) -> dict:
+def finish(video: Path, wav: Path, seconds: float, out: Path, size: tuple[int, int] = (W, H), pad_colour: str = "black") -> dict:
     """The model's (or the rig's) picture with OUR line audio: the picture is cut, or its last frame held, to exactly
     the line's length at 30 fps; any audio the model made is dropped. Returns the length check."""
     vs = stream_seconds(video).get("video") or 0.0
     pad = max(0.0, seconds - vs) + 0.5
     _ff(["-i", str(video), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0",
          "-vf", f"tpad=stop_mode=clone:stop_duration={pad:.3f},fps={FPS},scale={size[0]}:{size[1]}:force_original_aspect_ratio=decrease,"
-                f"pad={size[0]}:{size[1]}:(ow-iw)/2:(oh-ih)/2",
+                f"pad={size[0]}:{size[1]}:(ow-iw)/2:(oh-ih)/2:color={pad_colour.replace('#', '0x')}",
          "-t", f"{seconds:.3f}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", str(out)])
     got = stream_seconds(out)
     v, a = got.get("video") or 0.0, got.get("audio") or 0.0
@@ -1263,10 +1297,11 @@ def shot_prepare(ctx: Ctx) -> dict:
     try:
         pose, spec = frame_inputs(db, p, folder)
         set_id = spec["set_id"]
-        frame_assets, frame_errors = {}, {}
+        frame_assets, frame_errors, colour = {}, {}, None
         for f in FRAMINGS:
             try:
-                frame = compose(Path(spec["plate"]), pose, spec, spec["width"], spec["height"], folder / f"first-frame-{f}.png", f)
+                frame, c_ = make_framing(db, {**p, "key_colour": colour}, pose, spec, f, folder)
+                colour = c_ or colour
             except Exception as e:   # noqa: BLE001 (head and shoulders needs the neck found; wide and medium never fail here)
                 if f in ("wide", "medium"):
                     raise
@@ -1281,6 +1316,7 @@ def shot_prepare(ctx: Ctx) -> dict:
         write_action(db, pid, ep, sc, ctx.log)
         recs = records(db)
         recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "frame_errors": frame_errors,
+                          **({"key_colour": colour} if colour else {}),
                           "audio_asset_id": aa.id, "set_id": set_id, "status": "ready",
                           "audio_seconds": round(media.probe(wav)["duration"] or p["seconds"], 3)})
         save(db, recs)
@@ -1437,16 +1473,104 @@ def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
         info = stream_size(raw)
         wav = storage().get_to_file(db.get(Asset, p["audio_asset_id"]).storage_key, folder / "line.wav")
         out = folder / f"{model}.mp4"
-        check = finish(raw, wav, p["seconds"], out, FRAME_SIZE["head"] if framing == "head" and not p.get("own_frame") else (W, H))
+        own_size = framing in ("head", "cutout") and not p.get("own_frame")
+        keyed = framing == "cutout" and not p.get("own_frame") and p.get("key_colour")
+        check = finish(raw, wav, p["seconds"], out, FRAME_SIZE[framing] if own_size else (W, H),
+                       pad_colour=p["key_colour"] if keyed else "black")
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
                          kind="video", label=f"Shot comparison: {m['label']} ({m['terms']})", content_type="video/mp4", job_id=job.id)
         mark(status="done", asset_id=va.id, raw_asset_id=ra.id, actual_usd=est["usd"], billed_seconds=est["billed_seconds"],
              per_second_usd=round(est["usd"] / max(0.001, p["seconds"]), 4), check=check, seconds=tm["seconds"],
              request_id=tm["request_id"], output_size=info, **meta)
+        if keyed:
+            queue_key(db, pid, model)
         return {"pid": pid, "model": model, "actual_usd": est["usd"], "check": check}
     except Exception as e:
         mark(status="failed", error=str(e)[:300], **meta)
         raise no_retry(e)
+
+
+def queue_key(db: Session, pid: str, model: str):
+    """The free keying step after a cutout clip (its own job, so a keying failure never touches the paid result)."""
+    from .queue import enqueue
+    recs = records(db)
+    r = recs[pid]["results"][model]
+    r["key"] = {"status": "queued", "colour": recs[pid].get("key_colour")}
+    save(db, recs)
+    job = enqueue(db, "shot_key", episode_id=recs[pid]["episode_id"], payload={"pid": pid, "model": model})
+    db.commit()
+    return job
+
+
+@task
+def shot_key(ctx: Ctx) -> dict:
+    """Free and local: key the plan's colour out of a finished cutout clip (the clip itself is only read), and make the
+    transparent copy, the previews over the episode's approved set and over grey, and the check image."""
+    from . import sets as studio_sets
+    from . import talking_key
+    from .config import get_settings
+    from .models import Asset
+    from .storage import storage
+    db, job = ctx.db, ctx.job
+    pid, model = job.payload["pid"], job.payload["model"]
+    p = records(db)[pid]
+    r = p["results"][model]
+    colour = p.get("key_colour")
+
+    def mark(**kw):
+        recs = records(db)
+        rr = recs[pid]["results"][model]
+        rr["key"] = {**(rr.get("key") or {}), **kw}
+        save(db, recs)
+        db.commit()
+
+    try:
+        if not (colour and r.get("status") == "done" and r.get("asset_id")):
+            raise RuntimeError("no finished cutout clip to key")
+        mark(status="running")
+        folder = ctx.folder("shot-compare", pid, "key", model)
+        src = storage().get_to_file(db.get(Asset, r["asset_id"]).storage_key, folder / "clip.mp4")
+        wav = storage().get_to_file(db.get(Asset, p["audio_asset_id"]).storage_key, folder / "line.wav")
+        spec = studio_sets.spec_for(db, p["set_id"], folder / "set") if p.get("set_id") else None
+        s = get_settings()
+        res = talking_key.key_clip(src, wav, colour, Path(spec["plate"]) if spec else None, folder / "out", s.ffmpeg, s.ffprobe)
+        base = f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}"
+        kinds = {"keyed": ("video/webm", "keyed.webm", "keyed copy with transparency (VP9 WebM alpha)"),
+                 "over_set": ("video/mp4", "over-set.mp4", "keyed, over the episode's approved set (preview)"),
+                 "over_grey": ("video/mp4", "over-grey.mp4", "keyed, over mid-grey (preview)"),
+                 "check": ("image/png", "check.png", "keyed check frames at 10%, 50% and 90% (set above, grey below)")}
+        ids = {}
+        for k, (ctype, name, what) in kinds.items():
+            ids[f"{k}_asset_id"] = store_asset(db, ep_id=p["episode_id"], src=res["paths"][k], key=f"{base}-{name}",
+                                               kind="scene-reference" if k == "check" else "video",
+                                               label=f"Shot comparison: {TALKING[model]['label']}, {what} ({TALKING[model]['terms']})",
+                                               content_type=ctype, job_id=job.id).id
+        db.commit()
+        mark(status="done", colour=colour, frames=res["frames"], check_at=res["check_at"], size=res["size"],
+             set_id=p.get("set_id"), error=None, **ids)
+        return {"pid": pid, "model": model, "frames": res["frames"]}
+    except Exception as e:
+        mark(status="failed", error=str(e)[:300])
+        raise
+
+
+class KeyIn(BaseModel):
+    model: str
+
+
+@router.post("/motion/shot/{pid}/key")
+def key_again(pid: str, body: KeyIn, db: Session = Depends(get_db)):
+    """Free: run the keying step again on a finished cutout clip (for example after it failed)."""
+    p = records(db).get(pid)
+    if not p:
+        raise HTTPException(404, "no such plan")
+    r = (p.get("results") or {}).get(body.model) or {}
+    if body.model not in TALKING or r.get("status") != "done" or r.get("framing") != "cutout" or not p.get("key_colour"):
+        raise HTTPException(409, "only a finished cutout clip can be keyed")
+    if (r.get("key") or {}).get("status") in ("queued", "running"):
+        raise HTTPException(409, "already keying")
+    job = queue_key(db, pid, body.model)
+    return {"job_id": job.id}
 
 
 def stream_size(video: Path) -> str:

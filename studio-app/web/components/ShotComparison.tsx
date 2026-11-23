@@ -13,6 +13,7 @@ import {DeleteButton} from '@/components/BinButtons';
 import {clipCell, lineKey, toggleAll} from '@/lib/shotBatch';
 import {gpuLine} from '@/lib/gpuView';
 
+const FRAMING_NAME: Record<string, string> = {wide: 'wide', medium: 'medium', head: 'head and shoulders', cutout: 'cutout on plain colour'};
 const usd = (x: number | null | undefined, d = 2) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
 const PAID = ['kling-2.6-pro-i2v', 'kling-avatar-v2-standard'];
 const LABEL: Record<string, string> = {rig: 'Rig animator (free)', 'kling-2.6-pro-i2v': 'Kling i2v', 'kling-avatar-v2-standard': 'Kling Avatar'};
@@ -91,7 +92,8 @@ export function ShotComparison() {
       {r.seed !== undefined && r.seed !== null && <label className="row small" style={{gap: 4}}>Seed
         <input type="number" min={0} defaultValue={r.seed} style={{width: 130}} aria-label={`seed for ${r.label}`}
           onBlur={e => Number(e.target.value) !== r.seed && edit(`/motion/shot/${p.id}/seed`, {model: r.model, seed: Number(e.target.value)})} /></label>}
-      {r.blocked?.startsWith('make the') && !p.own_frame && <button className="btn sm" onClick={() => edit(`/motion/shot/${p.id}/frame`, {framing: r.framing}, 'POST')}>Make the {r.framing === 'head' ? 'head-and-shoulders' : r.framing} first frame (free)</button>}
+      {r.blocked?.startsWith('make the') && !p.own_frame && <button className="btn sm" onClick={() => edit(`/motion/shot/${p.id}/frame`, {framing: r.framing}, 'POST')}>Make the {FRAMING_NAME[r.framing] || r.framing} first frame (free)</button>}
+      {r.framing === 'cutout' && p.key_colour && <div className="muted">Key colour {p.key_colour}: the character alone, no set; keyed out after the clip (free)</div>}
       {!r.result && !r.blocked && <button className="btn sm" onClick={() => runOne(p, r)}>Run this ({usd(r.estimate.usd, 3)})</button>}
     </details>));
   const edit = async (path: string, body: any, method = 'PUT') => {
@@ -129,7 +131,7 @@ export function ShotComparison() {
           const def = t ? t.framing : m.includes('avatar') ? 'medium' : 'wide';
           return <label key={m} className="small row" style={{gap: 4}}>{label(m)} framing
           <select value={framing[m] || ''} onChange={e => setFraming(f => { const n = {...f}; if (e.target.value) n[m] = e.target.value; else delete n[m]; return n; })}>
-            <option value="">default ({def === 'head' ? 'head and shoulders' : def})</option><option value="wide">wide</option><option value="medium">medium</option><option value="head">head and shoulders</option></select></label>; })}
+            <option value="">default ({FRAMING_NAME[def] || def})</option><option value="wide">wide</option><option value="medium">medium</option><option value="head">head and shoulders</option><option value="cutout">cutout on plain colour</option></select></label>; })}
       </div>
       {opts && <div className="stack small">
         <div className="row" style={{gap: 6}}><strong>Lines</strong>
@@ -184,6 +186,7 @@ export function ShotComparison() {
                 {cell.binned && <div className="muted">clip in the Bin</div>}
                 {cell.cost && <div>{cell.cost}</div>}
                 {cell.terms && <div className="muted">{cell.terms}</div>}
+                {cell.key && <KeyedPreview k={cell.key} onAgain={() => edit(`/motion/shot/${p.id}/key`, {model: c}, 'POST')} />}
                 {cell.check && <div className={cell.lengthOk ? 'muted' : 'bad'}>{cell.check}</div>}
                 {cell.state && <div className="muted">{cell.state}</div>}
                 {cell.failed && <div className="bad">{cell.failed} <button className="btn sm" onClick={() => retry(p, c, cell.estimate || 0)}>Retry</button></div>}
@@ -211,5 +214,23 @@ function OwnFrameUpload({plan, onDone, onError}: {plan: any; onDone: () => void;
         made from our own approved art (no third-party picture or video frame)</label>
       <button className="btn sm" disabled={!file || !ownArt || busy} onClick={send}>{busy ? 'Uploading…' : 'Add as a second plan'}</button>
       <span className="muted">PNG, JPEG or WebP up to 15 MB; cropped to 9:16 and scaled to 720×1280 if needed</span>
+    </div>);
+}
+
+// The keyed copy of a cutout clip, judged on two backgrounds (the episode's approved set, mid-grey) and in one check
+// image (10%, 50% and 90% of the clip; set above, grey below). Keying is free and can be run again.
+function KeyedPreview({k, onAgain}: {k: any; onAgain: () => void}) {
+  if (k.status === 'queued' || k.status === 'running') return <div className="muted">Keying {k.colour} out… (free)</div>;
+  if (k.status === 'failed') return <div className="bad">Keying failed: {k.error} <button className="btn sm" onClick={onAgain}>Key again (free)</button></div>;
+  if (k.status !== 'done' || !k.urls) return null;
+  return (
+    <div className="stack" style={{marginTop: 4}}>
+      <div className="muted">Keyed ({k.colour} removed): over the set and over grey</div>
+      <div className="row" style={{gap: 4}}>
+        {k.urls.over_set && <video controls src={k.urls.over_set} style={{width: 120}} aria-label="keyed clip over the episode's set" />}
+        {k.urls.over_grey && <video controls src={k.urls.over_grey} style={{width: 120}} aria-label="keyed clip over mid-grey" />}
+      </div>
+      {k.urls.check && <a href={k.urls.check} target="_blank" rel="noreferrer">Check frames at {(k.check_at || []).map((t: number) => `${t} s`).join(', ')}</a>}
+      {k.urls.keyed && <a href={k.urls.keyed} download>Transparent copy (WebM with alpha)</a>}
     </div>);
 }
