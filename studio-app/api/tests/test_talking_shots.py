@@ -117,16 +117,18 @@ class TalkingFlowTest(ShotBase):
     def test_a_talking_shot_from_the_head_frame_with_the_neutral_prompt_stored_with_its_request(self):
         providers.set_test_text_responder(lambda s, p: self.fail("no text call"))
         p = self.ready()
-        self.assertIn("head", p["frame_assets"], "made in the free preparation")
+        self.assertIn("cutout", p["frame_assets"], "made in the free preparation")
+        self.assertEqual(p["key_colour"], "#FF00FF", "recorded with the plan")
         from oddstudio.db import new_session
         from oddstudio.models import Asset
         from oddstudio.storage import storage
         with new_session() as s:
-            f = storage().get_to_file(s.get(Asset, p["frame_assets"]["head"]).storage_key, self.media / "head.png")
+            f = storage().get_to_file(s.get(Asset, p["frame_assets"]["cutout"]).storage_key, self.media / "cutout.png")
         with Image.open(f) as im:
             self.assertEqual(im.size, (720, 900))
         req = next(r for r in p["requests"] if r["model"] == IT)
-        self.assertEqual(req["framing"], "head", "head and shoulders by default for InfiniteTalk")
+        self.assertEqual(req["framing"], "cutout", "the cutout on plain colour by default for InfiniteTalk")
+        self.assertIn("no set", req["sends"][0])
         self.assertEqual(req["estimate"]["usd"], 0.045, "a 3.0 s line: the 3 s minimum")
         self.assertEqual(set(req["body"]), {"image", "audio", "prompt", "seed"})
         self.assertEqual(SC.attitude_words(req["body"]["prompt"]), [], "the neutral default, not the action text")
@@ -148,7 +150,7 @@ class TalkingFlowTest(ShotBase):
         self.assertEqual(ran[0][1], "succeeded", ran)
         endpoint, body = self.calls[0]
         self.assertEqual(endpoint, "wavespeed-ai/infinitetalk-fast")
-        self.assertIn("first-frame-head.png", body["image"])
+        self.assertIn("first-frame-cutout.png", body["image"])
         self.assertTrue(body["audio"].startswith("https://studio.example/"))
         self.assertEqual((body["prompt"], body["seed"]), ("Mortimer reads calmly, neutral face, small nods, no smile.", 4242))
         res = self.row(p["id"])["results"][IT]
@@ -164,7 +166,8 @@ class TalkingFlowTest(ShotBase):
             fin = storage().get_to_file(s.get(Asset, res["asset_id"]).storage_key, self.media / "fin.mp4")
         size = subprocess.run([self.ff.replace("ffmpeg", "ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries",
                                "stream=width,height", "-of", "csv=p=0:s=x", str(fin)], capture_output=True, text=True).stdout.strip()
-        self.assertEqual(size, "720x900", "kept vertical at the head frame's size")
+        self.assertEqual(size, "720x900", "kept vertical at the cutout's size")
+        self.assertEqual(res["key"]["status"], "queued", "the free keying step follows the clip")
         b = self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()
         self.assertAlmostEqual(b["spent_usd"], spent0 + 0.045, places=4, msg="on the experimental budget")
         self.assertEqual(self.row(p["id"])["spend"][0]["usd"], 0.045, "on the plan's own cap")
@@ -208,17 +211,18 @@ class TalkingFlowTest(ShotBase):
         from oddstudio.db import new_session
         with new_session() as s:
             recs = SC.records(s)
-            recs[p["id"]]["frame_assets"].pop("head")
+            recs[p["id"]]["frame_assets"].pop("cutout")
             SC.save(s, recs)
             s.commit()
         r = self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": IT})
         self.assertEqual(r.status_code, 409)
-        self.assertIn("make the head-and-shoulders first frame first", r.text)
-        self.assertEqual(self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "head"}).status_code, 409,
+        self.assertIn("make the head-and-shoulders cutout on plain colour first frame first", r.text)
+        self.assertEqual(self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "cutout"}).status_code, 409,
                          "never silently another frame")
-        r = self.c.post(f"/api/motion/shot/{p['id']}/frame", json={"framing": "head"})
+        r = self.c.post(f"/api/motion/shot/{p['id']}/frame", json={"framing": "cutout"})
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertIn("head", r.json()["frame_assets"])
+        self.assertIn("cutout", r.json()["frame_assets"])
+        self.assertEqual(r.json()["key_colour"], "#FF00FF")
         self.ws_stub()
         self.assertEqual(self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": IT}).status_code, 200)
 

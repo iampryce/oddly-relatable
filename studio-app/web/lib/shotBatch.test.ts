@@ -41,3 +41,11 @@ test('a talking shot says its terms status and that it is not for publishing', (
   const failed = clipCell({...plan, results: {t: {status: 'failed', error: 'WaveSpeed: task x failed', terms: 'Kling terms not yet confirmed in writing: not for publishing', publishable: false}}}, 't');
   assert.match(failed.terms!, /^Kling terms not yet confirmed in writing/);
 });
+
+test('a keyed cutout clip carries its keying state to the cell', () => {
+  const key = {status: 'done', colour: '#FF00FF', check_at: [0.62, 3.11, 5.6], urls: {over_set: '/s.mp4', over_grey: '/g.mp4', check: '/c.png', keyed: '/k.webm'}};
+  const plan = {status: 'ready', requests: [], results: {t: {status: 'done', url: '/t.mp4', actual_usd: 0.105, per_second_usd: 0.0169, key,
+    check: {length_ok: true, video_seconds: 6.22, audio_seconds: 6.22}}}};
+  assert.deepEqual(clipCell(plan, 't').key, key);
+  assert.equal(clipCell({...plan, results: {t: {...plan.results.t, key: undefined}}}, 't').key, undefined, 'no key: nothing to show');
+});
