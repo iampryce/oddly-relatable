@@ -1,7 +1,10 @@
 # API and worker image. Build context: the repository root (the worker runs the existing Node production engine).
 #   docker build -f studio-app/api/Dockerfile -t oddstudio-api .
 FROM node:22-trixie-slim
+# xvfb + Mesa (libgl1, libglx-mesa0, libgl1-mesa-dri, libxi6): the Studio 3D rig animator's headless-gl draws in software
+# on a virtual display (no GPU, nothing shown)
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg fonts-dejavu-core ca-certificates curl \
+    xvfb xauth libgl1 libglx-mesa0 libgl1-mesa-dri libxi6 \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 studio
 WORKDIR /app

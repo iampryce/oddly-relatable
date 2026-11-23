@@ -30,7 +30,7 @@ TARGETS = {
     "vision": ("openai", "anthropic"),
     "lipsync": ("rhubarb",),
     "sound": ("elevenlabs",),
-    "motion": ("procedural-rig",),
+    "motion": ("procedural-rig", "procedural-rig-3d"),
 }
 
 
@@ -223,6 +223,7 @@ def provider_test(ctx: Ctx) -> dict:
         st["plate"] = str(REPO_ROOT / st["plate"])
         folder = ctx.folder("provider-tests", f"motion-{job.id}")
         spec = {"width": 540, "height": 960, "fps": 24, "duration": round(secs + 1.4, 2), "captions": False, "set": st,
+                **({"engine": "3d"} if name == "procedural-rig-3d" else {}),
                 "cast": {"character-01": {"rig": str(rig), "height": 560, "lips": False, "start": "on"}},
                 "lines": [{"speaker": "character-01", "text": TEST_LINE, "start": 0.5, "end": round(0.5 + secs + 0.3, 2),
                            "expression": "neutral", "gesture": "open_palms", "cues": cues}]}
@@ -232,15 +233,17 @@ def provider_test(ctx: Ctx) -> dict:
         env = engine.env_for_node()
         if s.ffmpeg:
             env["FFMPEG"] = s.ffmpeg
-        r = _sp.run([s.node_bin, str(acting.ANIM / "render-acting.mjs"), str(folder / "acting.json"), str(silent)], capture_output=True,
-                    text=True, encoding="utf-8", cwd=str(REPO_ROOT), env=env, timeout=900, stdin=_sp.DEVNULL)
+        r = _sp.run(acting.node_command(s.node_bin, [str(acting.ANIM / "render-acting.mjs"), str(folder / "acting.json"), str(silent)],
+                                        name == "procedural-rig-3d"),
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT), env=env, timeout=900, stdin=_sp.DEVNULL)
         if r.returncode != 0 or not silent.exists():
             raise RuntimeError("acting renderer failed: " + (r.stderr or r.stdout)[-500:])
         clip = folder / "clip-audio.mp4"
         _sp.run([s.ffmpeg or "ffmpeg", "-v", "error", "-y", "-i", str(silent), "-itsoffset", "0.5", "-i", str(sample), "-map", "0:v",
                  "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-t", str(spec["duration"]), str(clip)], check=True, timeout=300, stdin=_sp.DEVNULL)
         a = store_asset(db, ep_id=None, src=clip, key=f"provider-tests/motion-rig-job{job.id}.mp4", kind="provider-test",
-                        label="Motion test (studio rig animator)", content_type="video/mp4", job_id=job.id)
+                        label=f"Motion test ({'Studio 3D rig animator' if name == 'procedural-rig-3d' else 'studio rig animator'})",
+                        content_type="video/mp4", job_id=job.id)
         rep = _json.loads(r.stdout.strip().splitlines()[-1])
         out.update(asset_id=a.id, seconds=spec["duration"], render_seconds=rep.get("render_seconds"), cues=len(cues))
     out["seconds_taken"] = round(time.time() - t0, 2)

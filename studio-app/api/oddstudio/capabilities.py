@@ -53,6 +53,9 @@ CAPABILITIES: dict[str, dict] = {
     "motion": {"label": "Motion and character animation", "section": "motion", "providers": {
         "procedural-rig": {"label": "Studio 2D rig animator (procedural, CPU, free)", "needs": ["tool:rhubarb"], "implemented": True,
                            "note": "performs the script's acting (gestures, walking, sitting, reactions) with Rhubarb lip sync"},
+        "procedural-rig-3d": {"label": "Studio 3D rig animator (three.js, CPU, free)", "needs": ["tool:rhubarb"], "implemented": True,
+                              "note": "the same acting with 3D stickmen built from the approved poses: they turn, walk and sit "
+                                      "facing any direction; head angles from the approved drawings (else a mock); deterministic"},
         "fal": {"label": "fal.ai hosted open models (Wan 2.2, LTX-2)", "needs": ["fal_key"], "implemented": True,
                 "note": "paid per clip; estimated cost shown before each run; capped by the experimental budget"},
         "comfyui": {"label": "ComfyUI image-to-video workflow (GPU)", "needs": ["setting:comfyui.url"], "implemented": False,

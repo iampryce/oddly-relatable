@@ -15,10 +15,12 @@
 //     seated characters (a table top), drawn again after them so they sit behind it.)
 //    lines: [{speaker, text, start, end, expression, gesture?, move?: {type, to?}, look_at?, reactions?: [...],
 //             cues: [{start, end, value}]}]}
+//    engine?: "3d"   (the Studio 3D rig animator, rig3d.mjs: the same choreography, shots, bubbles and captions, the
+//      characters drawn as 3D stickmen; cast[key].head_angles?: {three-quarter|side|back: png} the approved head drawings)
 // Video only (the studio muxes the voice mix). Deterministic: the same input renders the same frames.
 import fs from 'node:fs';
 import path from 'node:path';
-import {loadRig, drawCharacter, renderVideo, loadImage, createCanvas, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
+import {loadRig, drawCharacter, drawHead, renderVideo, loadImage, createCanvas, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
 import {registerBannerFonts, layoutBanner, drawBanner} from './banner.mjs';
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -237,7 +239,7 @@ function walkPose(c, m, t) {
   if (moverR) posR = lerp(posR, k + 1, sf); else posL = lerp(posL, k + 1, sf);
   const lift = Math.sin(Math.PI * f) * c.legLen * c.S * 0.16;
   const stance = 0.12;   // turned body: feet close together under it, so the legs read as walking sideways
-  return {walking: true, dir, x: m.from + stride * (posL + posR) / 2, hipY: FLOOR() - hipHeight(c) - Math.abs(Math.sin(Math.PI * f)) * 9,
+  return {walking: true, dir, step: u, x: m.from + stride * (posL + posR) / 2, hipY: FLOOR() - hipHeight(c) - Math.abs(Math.sin(Math.PI * f)) * 9,
     feet: {L: {x: m.from + stride * posL + c.hipL.x * c.S * stance, y: FLOOR() - (moverR ? 0 : lift)},
            R: {x: m.from + stride * posR + c.hipR.x * c.S * stance, y: FLOOR() - (moverR ? lift : 0)}}};
 }
@@ -253,7 +255,7 @@ function sitPose(c, m, u, rising) {
   const reach = S.hip_y + c.legLen * c.S * 0.96;
   const fyS = u >= 1 ? reach : lerp(fy, reach, ease.inOut(u));
   return {seated: u > 0.5, sitting: u, x: lerp(m.from ?? S.x + 40, S.x, ease.inOut(u)), hipY: lerp(standHip, S.hip_y, down),
-    feet: {L: {x: S.x - spread, y: fyS}, R: {x: S.x + spread, y: fyS}}, seatedFeetY: reach};
+    feet: {L: {x: S.x - spread, y: fyS}, R: {x: S.x + spread, y: fyS}}, seatedFeetY: reach, seatHipY: S.hip_y, seatFeetY: S.feet_y};
 }
 
 const looks = Object.fromEntries(KEYS.map(k => [k, {x: 0, y: 0.1}]));
@@ -315,12 +317,16 @@ function pose(k, t) {
       const gt = G[g](c, side, t - t0, dir || 1);
       tgt = {x: lerp(tgt.x, gt.x, e), y: lerp(tgt.y, gt.y, e)};
       if (e > 0.5 && hk) kind = hk;
+      if (e > 0.3) p.gesturing = true;
     }
     p[`hand${key}`] = tgt; p[`handKind${key}`] = kind;
   }
   if (!feet) feet = {L: {x: x + c.hipL.x * c.S * 0.75, y: FLOOR()}, R: {x: x + c.hipR.x * c.S * 0.75, y: FLOOR()}};
   const ankleUp = (c.footDrop - c.ankleL.y) * c.S;
   p.footL = {x: feet.L.x, y: feet.L.y - ankleUp}; p.footR = {x: feet.R.x, y: feet.R.y - ankleUp};
+  // for the 3D rig animator: walking (the step count), sitting progress and the seat's lines
+  if (L.walking) p.walk = {step: L.step || 0, dir: L.dir};
+  if (L.sitting !== undefined) { p.sitting = L.sitting; p.seatHipY = L.seatHipY; p.seatFeetY = L.seatFeetY; }
   p.kneeDir = kneeDir; p.hip = {x, y: hipY}; p.seated = !!L.seated; p.seatedFeetY = L.seatedFeetY; p.onStage = x > -150 && x < SET.width + 150;
   return p;
 }
@@ -492,10 +498,11 @@ function drawScene(ctx, t) {
   for (const k of order) { const p = poses[k]; if (!p.onStage) continue; const fy = p.seated ? (p.seatedFeetY ?? FLOOR()) : FLOOR(); ctx.fillStyle = 'rgba(40,20,10,0.22)'; ctx.beginPath(); ctx.ellipse(p.hip.x, fy, halfW(k) * 0.7, 13, 0, 0, Math.PI * 2); ctx.fill(); }
   // seated characters, then the table front (that part of the plate again, so they sit behind the table), then
   // everyone standing (in front of it)
-  for (const k of order) if (poses[k].onStage && poses[k].seated) drawCharacter(ctx, C[k], poses[k]);
+  const draw = ks => { if (R3) R3.draw(ctx, ks, poses, v); else for (const k of ks) drawCharacter(ctx, C[k], poses[k]); };
+  draw(order.filter(k => poses[k].onStage && poses[k].seated));
   const tf = SET.table_front;
   if (tf && tf.x1 > tf.x0 && tf.y1 > tf.y0) ctx.drawImage(plate, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0);
-  for (const k of order) if (poses[k].onStage && !poses[k].seated) drawCharacter(ctx, C[k], poses[k]);
+  draw(order.filter(k => poses[k].onStage && !poses[k].seated));
   if (spec.bubbles) drawBubble(ctx, t, poses, v, s);
   if (spec.hook) drawHook(ctx);
   if (spec.captions) {
@@ -512,6 +519,10 @@ function drawScene(ctx, t) {
   }
 }
 
+// the Studio 3D rig animator draws the characters (everything else stays as above)
+const R3 = spec.engine === '3d'
+  ? await (await import('./rig3d.mjs')).create3D({width: W, height: H, keys: KEYS, C, drawHead, createCanvas, loadImage, cast: spec.cast})
+  : null;
 const t0 = Date.now();
 const res = await renderVideo({width: W, height: H, fps: FPS, seconds: DUR, drawFrame: (ctx, t) => drawFrame(ctx, t), out: OUT,
   ffmpeg: process.env.FFMPEG || 'ffmpeg', font: spec.font, stills: spec.stills || null});
