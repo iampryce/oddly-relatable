@@ -177,6 +177,36 @@ class WorkspaceRulesTest(unittest.TestCase):
         self.assertEqual([j["id"] for j in s["set"]["jobs"]], [12, 11])
         self.assertEqual(s["storyboard"]["jobs"], [], "a later success clears an older failure")
 
+    def test_only_the_current_step_is_open_and_only_the_blocker_is_flagged(self):
+        """Quiet by default (2026-11-23): one open section, the current step; done steps are one collapsed line."""
+        cases = [self.facts(plan_waiting=True), self.facts(), self.facts(stage="script_review", script=1),
+                 self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5),
+                 self.facts(notes_ranges=0, notes_requested=True,
+                            jobs={"notes": [{"id": 9, "kind": "audio_video_notes", "status": "failed", "error": "401"}],
+                                  "set": [{"id": 11, "kind": "set_candidate", "status": "failed", "error": "old", "set_id": "y"}]})]
+        for f in cases:
+            out = WS.sections(f)
+            opened = [x["key"] for x in out["sections"] if x["open"]]
+            flagged = [x["key"] for x in out["sections"] if x["blocking"]]
+            self.assertLessEqual(len(opened), 1, opened)
+            self.assertEqual(opened, [out["current"]] if out["current"] else [])
+            self.assertEqual(flagged, [out["blocker"]["section"]] if out["blocker"] else [])
+            if out["blocker"]:
+                self.assertEqual(out["current"], out["blocker"]["section"], "the blocker is the current step")
+            self.assertFalse(any(x["open"] for x in out["sections"] if x["status"] == "done"), "done steps are collapsed")
+        s = self.by(WS.sections(cases[-1]))
+        self.assertEqual((s["set"]["status"], s["set"]["open"], s["set"]["blocking"]), ("failed", False, False),
+                         "an old failure in a later step: red, one line, not open, not blocking")
+        # nothing blocks: the first step still to do in the episode's order is current (Talking shots, before the set)
+        f = self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5,
+                       set={"chosen": True, "label": "Office", "seats": 5, "people": 5, "candidates_waiting": 0},
+                       talking={"lines": 4, "keyed": 1})
+        f["stage"] = "producing"
+        out = WS.sections(f)
+        self.assertIsNone(out["blocker"])
+        self.assertEqual((out["current"], self.by(out)["production"]["open"]), ("talking", False),
+                         "while production renders, the next thing for you is the talking shots; nothing else is open")
+
     def test_script_first_episodes_have_no_audio_sections(self):
         s = self.by(WS.sections(self.facts(audio=False, stage="script_pending", notes_ranges=0, people_found=0, person_map=False)))
         for k in ("lines", "notes", "people", "plan"):

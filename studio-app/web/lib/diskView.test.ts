@@ -1,7 +1,7 @@
 // node --test: the Overview page's disk line, the yellow warning (80%) and the red banner (90%) naming the biggest users.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {biggestText, diskBanner, diskLine, reportLine, size} from './diskView.ts';
+import {biggestText, diskBanner, diskLine, diskNotice, reportLine, size} from './diskView.ts';
 
 const G = 1024 ** 3;
 const biggest = [
@@ -24,11 +24,12 @@ test('the disk line: used, size, percent and free', () => {
   assert.equal(diskLine(null), '');
 });
 
-test('no banner below 80%, a yellow warning from 80%, a red banner from 90% naming the biggest users', () => {
+test('no banner below 90%: the yellow level (80%) is a line in the card; a red banner from 90% naming the biggest users', () => {
   assert.equal(diskBanner(d({level: 'ok', percent: 54})), null);
-  const w = diskBanner(d({level: 'warn', percent: 82, free: 17 * G}));
-  assert.equal(w?.tone, 'warn');
-  assert.match(w!.text, /^The disk is 82% full \(17 GB free\)\. On the server, maintenance\.sh without options \(a dry run\)/);
+  assert.equal(diskNotice(d({level: 'ok', percent: 54})), '');
+  assert.equal(diskBanner(d({level: 'warn', percent: 82, free: 17 * G})), null, 'not a banner');
+  assert.match(diskNotice(d({level: 'warn', percent: 82, free: 17 * G})), /^The disk is 82% full \(17 GB free\)\. On the server, maintenance\.sh without options \(a dry run\)/);
+  assert.equal(diskNotice(d()), '', 'at 90% it is the banner instead');
   const b = diskBanner(d());
   assert.equal(b?.tone, 'bad');
   assert.match(b!.text, /91% full \(9\.6 GB free\): deploys and new clips can fail\./);

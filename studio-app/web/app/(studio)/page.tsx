@@ -3,7 +3,7 @@ import Link from 'next/link';
 import {when} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
-import {diskBanner, diskLine, reportLine, size} from '@/lib/diskView';
+import {diskBanner, diskLine, diskNotice, reportLine, size} from '@/lib/diskView';
 
 export default function Overview() {
   const {data: o, error} = useApi<any>('/overview', 10000);
@@ -40,6 +40,7 @@ export default function Overview() {
           {disk.report.consumers.map((c: any) => (
             <tr key={c.key}><td>{c.label}</td><td className="small" style={{textAlign: 'right', width: 120}}>{size(c.bytes)}</td></tr>))}
         </tbody></table></div>}
+        {diskNotice(disk) && <div className="warn small">{diskNotice(disk)}</div>}
         <p className="muted small" style={{marginBottom: 0}}>{reportLine(disk)}</p>
       </div>}
       <div className="card" style={{marginTop: 16}}>

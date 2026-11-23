@@ -4,6 +4,10 @@ in words; and a banner that says what is blocking the episode and where.
 
 `facts(db, ep)` gathers plain data; `sections(f)` is a pure function of it (tested directly). Statuses:
 
+Quiet by default (owner decision 2026-11-23): only the CURRENT step is open: the one that blocks the episode, or else
+the first step still to do in the episode's order (CURRENT_ORDER). Every other section is one collapsed line (a failed or
+waiting one keeps its red or plain badge and its one-line note). Only the current step is flagged "blocking".
+
     done        finished; the section starts collapsed
     action      needs the owner now: blocks the next step (expanded and flagged)
     failed      its last job failed (expanded and flagged; the message is shown)
@@ -46,7 +50,11 @@ SECTION_JOBS = {
     "set": ("set_candidate", "set_seat_suggest", "set_notes_read_video", "set_proposal"),
 }
 FLAGGED = ("action", "failed")
-OPEN = ("action", "failed", "todo", "running")
+# the step that is "current" when nothing blocks: the first of these still to do (Talking shots after the storyboard;
+# it never blocks, but it is the next thing to do for an audio episode)
+CURRENT_ORDER = ("lines", "notes", "people", "plan", "cast", "script", "storyboard", "talking", "set", "production",
+                 "review", "publishing")
+NOT_CURRENT = ("done", "not_needed", "waiting")
 
 
 def idx(stage: str) -> int:
@@ -273,11 +281,14 @@ def sections(f: dict) -> dict:
         # a failed job blocks only a step that is due (needs you now, or was in progress); an old failure in a step
         # that comes later (a set candidate long before production) shows red without blocking the episode
         s["blocking"] = base in FLAGGED or (bool(failed) and base == "running")
-        s["open"] = s["status"] in OPEN
         out[key] = s
     blocker = next((out[k] for k in FLOW if out[k]["blocking"]), None)
+    current = blocker["key"] if blocker else next((k for k in CURRENT_ORDER if out[k]["status"] not in NOT_CURRENT), None)
+    for k, s in out.items():
+        s["open"] = k == current                      # only the current step is open
+        s["blocking"] = blocker is not None and k == blocker["key"]   # and only the blocker is flagged
     running = [out[k]["title"] for k in FLOW if out[k]["status"] == "running"]
-    return {"sections": [out[k] for k in ORDER],
+    return {"sections": [out[k] for k in ORDER], "current": current,
             "blocker": {"section": blocker["key"], "title": blocker["title"], "message": blocker["note"]} if blocker else None,
             "running": running}
 

@@ -1,13 +1,21 @@
 // node --test: the workspace's banner, open sections, seat line and costs.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {bannerText, candidateCost, isOpen, jobLine, seatsLine, TONE} from './workspace.ts';
+import {bannerText, candidateCost, isOpen, jobLine, seatsLine, showLastError, TONE, workingText} from './workspace.ts';
 
-test('the banner names the blocking section, else what is running, else nothing', () => {
+test('a banner only for what truly blocks; work in progress is one quiet line; otherwise nothing', () => {
   assert.deepEqual(bannerText({blocker: {section: 'plan', title: 'Reference plan', message: 'Accept it.'}, running: ['Set']}),
     {tone: 'warn', text: 'Blocked at Reference plan: Accept it.'});
-  assert.equal(bannerText({blocker: null, running: ['Set']}).text, 'Working: Set. Nothing needs you right now.');
-  assert.equal(bannerText({blocker: null, running: []}).tone, 'good');
+  assert.equal(bannerText({blocker: null, running: ['Set']}), null);
+  assert.equal(bannerText({blocker: null, running: []}), null);
+  assert.equal(workingText({blocker: null, running: ['Set', 'Production']}), 'Working: Set, Production.');
+  assert.equal(workingText({running: []}), '');
+});
+
+test('the episode\'s last error only while it is in a failed stage', () => {
+  assert.equal(showLastError({stage: 'production_failed', last_error: 'render: out of memory'}), true);
+  assert.equal(showLastError({stage: 'video_review', last_error: 'render: out of memory'}), false, 'retried and fine since');
+  assert.equal(showLastError({stage: 'production_failed', last_error: ''}), false);
 });
 
 test('finished sections start collapsed; the owner\'s toggle wins', () => {

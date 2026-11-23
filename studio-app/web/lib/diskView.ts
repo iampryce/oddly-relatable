@@ -23,11 +23,17 @@ export function biggestText(d: any, n = 4): string {
 
 export type Banner = {tone: 'warn' | 'bad'; text: string} | null;
 
+// Quiet by default (2026-11-23): only the red level (90%: deploys and new clips can fail) is a banner; the yellow level
+// (80%) is a line in the Disk card (diskNotice).
+export function diskNotice(d: any): string {
+  if (d?.level !== 'warn') return '';
+  return `The disk is ${d.percent}% full (${size(d.free)} free). On the server, maintenance.sh without options (a dry run) lists what can be removed.`;
+}
+
 export function diskBanner(d: any): Banner {
-  if (!d || d.level === 'ok' || !d.level) return null;
+  if (!d || d.level !== 'critical') return null;
   const left = `${size(d.free)} free`;
   const how = 'On the server, maintenance.sh without options (a dry run) lists what can be removed.';
-  if (d.level === 'warn') return {tone: 'warn', text: `The disk is ${d.percent}% full (${left}). ${how}`};
   const big = biggestText(d);
   const report = d.report;
   const freeable = report?.would_free?.total ? ` The last report says about ${size(report.would_free.total)} could be freed.` : '';
