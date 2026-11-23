@@ -133,8 +133,9 @@ class WorkspaceRulesTest(unittest.TestCase):
     def test_the_plan_blocks_building_and_the_banner_says_where(self):
         out = WS.sections(self.facts(plan_waiting=True))
         s = self.by(out)
-        self.assertEqual([x["key"] for x in out["sections"]][:9],
-                         ["set", "people", "plan", "lines", "notes", "cast", "script", "storyboard", "production"])
+        self.assertEqual([x["key"] for x in out["sections"]][:10],
+                         ["set", "people", "plan", "lines", "notes", "cast", "script", "storyboard", "talking", "production"])
+        self.assertFalse(s["talking"]["blocking"], "Talking shots never block the episode")
         self.assertEqual((s["plan"]["status"], s["plan"]["blocking"], s["plan"]["open"]), ("action", True, True))
         self.assertEqual((s["lines"]["status"], s["lines"]["open"]), ("done", False), "finished: collapsed")
         self.assertEqual(s["script"]["status"], "waiting")
