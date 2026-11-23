@@ -11,6 +11,15 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import SetStaging from './SetStaging';
 import {candidateCost, seatsLine, statusTone} from '@/lib/workspace';
+import {spacingWarnings} from '@/lib/setStaging';
+
+// Seats closer than one head width at the smallest cast height: a warning with the numbers (never a refusal).
+export function SpacingWarning({seats, need, minHeight}: {seats: any[]; need: number; minHeight?: number}) {
+  const w = spacingWarnings(seats, need);
+  if (!w.length) return null;
+  return <div className="alert warn small" role="status"><strong>Seats too close for the cast's heads:</strong> {w.map(x => x.text).join('; ')}.
+    {' '}Their heads will overlap even at the smallest cast height{minHeight ? ` (${minHeight} px)` : ''}: move the seats apart on the picture, mark fewer seats, or keep them as they are.</div>;
+}
 
 // the picture's width: 360 px, narrower on a phone so the card never scrolls sideways
 function usePictureWidth(): number {
@@ -57,8 +66,9 @@ function SetCard({ep, x, data, reload}: {ep: any; x: any; data: any; reload: () 
       <ErrorBox error={error} />
       {x.url && x.width ? <SetStaging url={x.url} width={x.width} height={x.height} blocking={b} onChange={setB} size={pictureWidth} />
         : <div className="card empty small">No picture</div>}
+      <SpacingWarning seats={b.seats || (b.seat ? [b.seat] : [])} need={data.min_head_px} minHeight={data.min_height} />
       {x.suggested && <div className="small">
-        <strong>Suggested by the vision model:</strong> {x.suggested.summary}{x.staging_edited ? ' (your edits are kept; the suggestion is not applied by itself)' : ''}
+        <strong>Suggested by the vision model:</strong> {x.suggested.summary}{x.suggested.spacing?.length ? ` (close seats: ${x.suggested.spacing.map((w: any) => `${w.seats[0]} and ${w.seats[1]}, ${w.gap} px apart`).join("; ")})` : ""}{x.staging_edited ? ' (your edits are kept; the suggestion is not applied by itself)' : ''}
         {' '}<button className="btn sm" disabled={locked || !!busy} onClick={() => setB({...b, ...x.suggested.blocking})}>Use the suggestion</button></div>}
       {x.suggest_error && <div className="alert warn small">No suggested seats: {x.suggest_error}</div>}
       <div className="row" style={{gap: 6, flexWrap: 'wrap'}}>

@@ -129,6 +129,28 @@ def effective(tr: dict) -> list[dict]:
     return out
 
 
+def facing_notes(tr: dict) -> list[dict]:
+    """Who faces whom, per time range, for the 3D rig animator (owner correction 2026-11-23): each confirmed person's
+    facing as 'left' / 'right' or the character they face; 'camera' is left out (the renderer turns a listener towards
+    the speaker instead) and so are people nobody confirmed. Ignored Seating items are already removed by effective()."""
+    out = []
+    for r in effective(tr):
+        roles = r.get("roles", [])
+        who = {ro.get("role"): ro.get("who") for ro in roles if ro.get("who")}
+        facing = {}
+        for ro in roles:
+            k, f = ro.get("who"), ro.get("facing")
+            if not k or not f or f == "camera":
+                continue
+            if f in ("left", "right"):
+                facing[k] = f
+            elif who.get(f) and who[f] != k:
+                facing[k] = who[f]
+        if facing:
+            out.append({"start": r["start"], "end": r["end"], "facing": facing})
+    return out
+
+
 def range_index(ranges: list[dict], t: float) -> int | None:
     """The one range a moment belongs to: the latest range that has started by `t` and not ended. Neighbouring
     ranges overlap by a hundredth of a second at a cut, so a beat at the cut belongs to the range starting there."""

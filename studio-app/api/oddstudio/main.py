@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+import re
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
@@ -355,9 +356,11 @@ def list_sets(db: Session = Depends(get_db)):
                          key=lambda kv: -kv[1].get("created", 0)):
         a, pv = db.get(Asset, r.get("asset_id")), db.get(Asset, r.get("preview_asset_id"))
         out.append({"id": sid, **{k: v for k, v in r.items() if k not in ("asset_id", "preview_asset_id")},
-                    "url": storage().url(a.storage_key) if a else None, "preview_url": storage().url(pv.storage_key) if pv else None})
+                    "url": storage().url(a.storage_key) if a else None, "preview_url": storage().url(pv.storage_key) if pv else None,
+                    "spacing": sets.spacing_of(r.get("blocking"))})
     jobs = db.query(Job).filter_by(kind="set_candidate").order_by(Job.id.desc()).limit(10).all()
-    return {"sets": out, "jobs": [S.job(j) for j in jobs]}
+    from .acting import min_head_px
+    return {"sets": out, "jobs": [S.job(j) for j in jobs], "min_head_px": min_head_px()}
 
 
 @app.post("/api/sets/generate", dependencies=[Depends(current_user)])
@@ -384,7 +387,15 @@ def decide_set(sid: str, body: SetDecisionIn, db: Session = Depends(get_db), use
     r["status"] = "approved" if body.decision == "approve" else "rejected"
     r["decided_by"], r["decided_at"] = user, time_now()
     sets.save(db, recs)
-    return {"id": sid, **r}
+    spacing = sets.spacing_of(r.get("blocking")) if r["status"] == "approved" else []
+    if spacing and r.get("episode_id"):
+        db.add(Event(episode_id=r["episode_id"], kind="episode", message=f"Set {r.get('label', sid)} approved by {user} with "
+                                                                         f"close seats: " + "; ".join(w["text"] for w in spacing)))
+        db.commit()
+    return {"id": sid, **r, "spacing": spacing}
+
+
+SEAT_FACINGS = ("speaker", "camera", "away")
 
 
 def apply_blocking(r: dict, blocking: dict, strict: bool = False) -> None:
@@ -408,10 +419,21 @@ def apply_blocking(r: dict, blocking: dict, strict: bool = False) -> None:
         if isinstance(blocking.get("seats"), list):
             # several seats (feat/seating): each inside the image, the hips above the feet
             seats = []
-            for s in blocking["seats"][:8]:
+            n_seats = min(8, len(blocking["seats"]))
+            for i, s in enumerate(blocking["seats"][:8]):
                 v = {k: int(s[k]) for k in ("x", "hip_y", "feet_y")}
                 if not (0 <= v["x"] <= r["width"] and 0 <= v["hip_y"] < v["feet_y"] <= r["height"]):
                     raise HTTPException(422, "each seat must be inside the image, with the hips above the feet")
+                # where a seated character faces (feat/3d-rig PR 3); empty = the default (the first seat faces the
+                # camera, the others face the first seat)
+                f = s.get("facing") if isinstance(s, dict) else None
+                if f:
+                    f = str(f)
+                    m = re.fullmatch(r"seat:(\d)", f)
+                    if f not in SEAT_FACINGS and not (m and int(m.group(1)) < n_seats and int(m.group(1)) != i):
+                        raise HTTPException(422, f"seat {i + 1}: facing must be one of {', '.join(SEAT_FACINGS)} or "
+                                                 "seat:N (another seat)")
+                    v["facing"] = f
                 seats.append(v)
             blk["seats"] = seats
             blk.pop("seat", None)
@@ -471,7 +493,7 @@ def edit_set_staging(sid: str, body: StagingIn, db: Session = Depends(get_db), u
     db.commit()
     return {"id": sid, **{k: v for k, v in r.items() if k not in ("asset_id", "preview_asset_id")},
             "preview_url": storage().url(db.get(Asset, r["preview_asset_id"]).storage_key) if r.get("preview_asset_id") else None,
-            "episodes": checks}
+            "episodes": checks, "spacing": sets.spacing_of(r["blocking"])}
 
 
 def recheck_set_users(db: Session, sid: str, r: dict) -> list[dict]:

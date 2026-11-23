@@ -112,3 +112,48 @@ export function headView(yaw, headYaw = 0) {
   // the drawings face the viewer's right; a head turned to the left is the same drawing mirrored
   return {view, flip: view !== 'back' && view !== 'front' && a < 0, angle: a};
 }
+
+// Where a seated character faces (feat/3d-rig PR 3): the owner's choice on the seat (the set's staging) when there is
+// one:  camera | away | speaker | seat:N   (N: the seat's number in the set's staging, 0 = the first = the speaker's)
+// else nothing here: the renderer turns them by the scene (facingTarget below).
+export const FACE_ANGLE = 55;                                        // a seated body turned towards a seat (deg)
+export function seatFacing(seats, i) {
+  return (seats[i] || {}).facing || '';
+}
+export function seatYaw(seats, i) {
+  const f = seatFacing(seats, i), here = seats[i];
+  if (!here || f === 'camera') return 0;
+  if (f === 'away') return 180;
+  const n = f === 'speaker' ? 0 : Number(String(f).split(':')[1]);
+  const target = seats.find((s, j) => (s.n ?? j) === n);
+  if (!target || target === here || Math.abs(target.x - here.x) < 1) return 0;
+  return Math.sign(target.x - here.x) * FACE_ANGLE;
+}
+
+// Which way a character turns, by the scene (owner correction 2026-11-23): the speaker turns towards the person the
+// line addresses (look_at), else the reference plan's direction for them, else the others; everyone else turns as the
+// plan says (a direction or a person), else towards the current speaker. "camera" in the plan is read as towards the
+// speaker (a listener in a close shot still faces the speaker). Returns {x} (a point to face) or {dir} (-1 left, 1 right)
+// or null (face the camera).
+//   me: {key, x}; line: the current line or null; lastSpeaker: the key who spoke last; at: key -> x of those on stage;
+//   note: the plan's facing for this character now ('left' | 'right' | a character key | undefined).
+export function facingTarget(me, line, lastSpeaker, at, note) {
+  const speaking = line && line.speaker === me.key;
+  if (speaking && line.look_at && line.look_at !== me.key && at[line.look_at] !== undefined) return {x: at[line.look_at]};
+  if (note === 'left') return {dir: -1};
+  if (note === 'right') return {dir: 1};
+  if (note && note !== me.key && at[note] !== undefined) return {x: at[note]};
+  if (speaking) {
+    const others = Object.entries(at).filter(([k]) => k !== me.key).map(([, x]) => x);
+    return others.length ? {x: others.reduce((a, b) => a + b, 0) / others.length} : null;
+  }
+  const s = line?.speaker && line.speaker !== me.key ? line.speaker : lastSpeaker;
+  return s && s !== me.key && at[s] !== undefined ? {x: at[s]} : null;
+}
+export const SPEAKER_TURN = 65, LISTENER_TURN = 45, STANDING_TURN = 30;
+// The body's yaw for a target: towards its side at the given angle (a target right in front: the camera).
+export function turnTowards(target, x, angle) {
+  if (!target) return 0;
+  const d = target.dir ?? (Math.abs(target.x - x) < 30 ? 0 : Math.sign(target.x - x));
+  return d * angle;
+}

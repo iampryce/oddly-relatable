@@ -174,7 +174,9 @@ def run(db, set_id: str, image: Path, log=lambda m: None) -> dict | None:
     recs = sets.records(db)
     r = recs[set_id]
     r["suggested"] = {"blocking": blk, "info": info, "summary": text, "usage": usage, "estimated_usd": cost.get("usd"),
-                      "at": time.time()}
+                      "at": time.time(), "spacing": sets.spacing_of(blk)}
+    for w in r["suggested"]["spacing"]:
+        log(f"spacing: {w['text']}")
     r.pop("suggest_error", None)
     if r.get("status") == "candidate" and not r.get("staging_edited_at"):
         r["blocking"] = blk
