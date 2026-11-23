@@ -1,8 +1,11 @@
 """First-draft assembly of an audio-first episode (owner request 2026-11-23, Episode 14): a watchable 9:16 draft built
 from what exists, to judge the whole episode rather than single shots. Free and local; never published.
 
-- The picture: each scene's approved set plate (the wide view), shown whole (contained, with a blurred copy of the
-  plate filling the top and bottom) at 1080x1920.
+- The picture: each scene's approved set plate (the wide view) seen through a per-scene camera crop that fills the
+  whole 1080x1920 frame (no bars): computed to hold everyone in the scene with a safe margin of 6% of the frame width
+  on each side, centred on their heads and shoulders with the head line about a third of the way down; adjustable per
+  scene in the workspace. A set too narrow for everyone gets the closest crop inside the plate (never bars) and the
+  draft's notes name who falls outside the safe margin; a crop smaller than the frame is scaled up, and said.
 - The cast: every character in the scene's staging, at its seat in staging order (speaker first, as the rig seats
   them) or standing on the floor line, drawn from its own approved neutral pose at the height the rig uses for that
   set (acting.cast_height), so all heads share one scale. A seated figure keeps its upper body and has its legs
@@ -21,7 +24,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 DRAFT_W, DRAFT_H, FPS = 1080, 1920, 30
 END_CARD_S = 2.5
@@ -99,6 +102,74 @@ def clip_placement(place: dict, lay: dict, clip_size: tuple[int, int] = (720, 90
             "cut_pose_y": (clip_size[1] * (1 - CLIP_FADE) - lay["y"]) / lay["scale"]}
 
 
+SAFE_MARGIN = 0.06       # of the frame width, on each side
+HEAD_LINE = 1 / 3        # the heads' centre this far down the frame
+ASPECT = DRAFT_W / DRAFT_H
+IDENTITY = {"s": 1.0, "ox": 0.0, "oy": 0.0}
+
+
+def char_box(geo: dict, place: dict) -> dict:
+    """A placed character's box in plate pixels (from a placement made with IDENTITY): its sides, the top of the head,
+    the centre of the head and the shoulder line."""
+    s = place["scale"]
+    return {"left": place["x"], "right": place["x"] + geo["fig_w"] * s, "top": place["y"],
+            "head_y": place["y"] + geo["neck_y"] * s / 2, "shoulder_y": place["y"] + geo["vest_y"] * s}
+
+
+def camera(boxes: dict[str, dict], plate_w: int, plate_h: int) -> dict:
+    """The scene's crop of the plate (9:16, in plate pixels) and its notes: wide enough for everyone with SAFE_MARGIN of
+    the frame width on each side, the heads' centre at HEAD_LINE, kept inside the plate (no bars). A set too narrow
+    for everyone gets the closest crop inside the plate, and the notes say who is outside the safe margin."""
+    notes = []
+    lo = min(b["left"] for b in boxes.values())
+    hi = max(b["right"] for b in boxes.values())
+    head = sum(b["head_y"] for b in boxes.values()) / len(boxes)
+    w = (hi - lo) / (1 - 2 * SAFE_MARGIN)
+    h = w / ASPECT
+    max_w = min(plate_w, plate_h * ASPECT)
+    if w > max_w + 1e-6:
+        w, h = max_w, max_w / ASPECT
+    x = (lo + hi) / 2 - w / 2
+    y = head - h * HEAD_LINE
+    x, y = min(max(0.0, x), plate_w - w), min(max(0.0, y), plate_h - h)
+    crop = {"x": round(x, 2), "y": round(y, 2), "w": round(w, 2), "h": round(h, 2)}
+    notes += crop_notes(crop, boxes)
+    return {**crop, "notes": notes}
+
+
+def crop_notes(crop: dict, boxes: dict[str, dict]) -> list[str]:
+    """What the draft says about a crop: who is outside the safe margin, and any upscaling of the plate."""
+    out = []
+    m = SAFE_MARGIN * crop["w"]
+    cut = [k for k, b in boxes.items() if b["left"] < crop["x"] + m - 0.5 or b["right"] > crop["x"] + crop["w"] - m + 0.5]
+    if cut:
+        out.append(f"{', '.join(cut)} outside the safe margin: the seats are wider apart than a 9:16 crop of this set allows "
+                   "(adjust the crop, move the seat, or use a closer set view)")
+    if crop["w"] < DRAFT_W - 0.5:
+        out.append(f"the set plate is scaled up x{DRAFT_W / crop['w']:.2f} for this crop")
+    return out
+
+
+def check_crop(crop: dict, plate_w: int, plate_h: int) -> dict:
+    """An owner's crop: kept 9:16 and inside the plate (no bars); refused when it cannot be."""
+    w = float(crop["w"])
+    if w <= 50:
+        raise ValueError("the crop is too small")
+    h = w / ASPECT
+    if w > plate_w + 0.5 or h > plate_h + 0.5:
+        raise ValueError(f"a 9:16 crop {w:.0f} px wide does not fit inside this {plate_w}x{plate_h} set (it would leave bars)")
+    x, y = float(crop["x"]), float(crop["y"])
+    if x < -0.5 or y < -0.5 or x + w > plate_w + 0.5 or y + h > plate_h + 0.5:
+        raise ValueError("the crop must stay inside the set plate (no bars)")
+    return {"x": round(x, 2), "y": round(y, 2), "w": round(w, 2), "h": round(h, 2)}
+
+
+def crop_fit(crop: dict) -> dict:
+    """Plate px -> frame px for a crop: it fills the whole frame."""
+    s = DRAFT_W / crop["w"]
+    return {"s": s, "ox": -crop["x"] * s, "oy": -crop["y"] * s}
+
+
 def spots(staging: dict, cast: list[str], blocking: dict) -> dict[str, dict]:
     """Seats in staging order (speaker first, as the rig seats them); the rest stand, spread along the floor."""
     from .acting import seat_starts
@@ -132,7 +203,8 @@ def pose_geometry(fig: Image.Image) -> dict:
         hip = (b["hip_l"][1] + b["hip_r"][1]) / 2
     except Exception:            # noqa: BLE001 (the house proportions: legs are about 40% of the height)
         pass
-    return {"fig_h": fig.height, "neck_x": m["neck_x"], "hip_y": float(hip or 0.60 * fig.height), "head_w": m["head_w"]}
+    return {"fig_h": fig.height, "fig_w": fig.width, "neck_x": m["neck_x"], "neck_y": m["neck_y"], "vest_y": m["vest_y"],
+            "hip_y": float(hip or 0.60 * fig.height), "head_w": m["head_w"]}
 
 
 def seated(fig: Image.Image, geo: dict, legs: float) -> Image.Image:
@@ -148,17 +220,11 @@ def seated(fig: Image.Image, geo: dict, legs: float) -> Image.Image:
     return out
 
 
-def background(plate: Path, fit: dict) -> Image.Image:
+def background(plate: Path, crop: dict) -> Image.Image:
+    """The scene's crop of the set plate, filling the whole frame (no bars)."""
     with Image.open(plate) as im:
-        im = im.convert("RGB")
-        k = max(DRAFT_W / im.width, DRAFT_H / im.height)
-        fill = im.resize((round(im.width * k), round(im.height * k)), Image.BILINEAR)
-        left, top = (fill.width - DRAFT_W) // 2, (fill.height - DRAFT_H) // 2
-        fill = fill.crop((left, top, left + DRAFT_W, top + DRAFT_H)).filter(ImageFilter.GaussianBlur(28))
-        fill = Image.blend(fill, Image.new("RGB", fill.size, (0, 0, 0)), 0.45)
-        main = im.resize((round(im.width * fit["s"]), round(im.height * fit["s"])), Image.LANCZOS)
-        fill.paste(main, (round(fit["ox"]), round(fit["oy"])))
-        return fill
+        box = (crop["x"], crop["y"], crop["x"] + crop["w"], crop["y"] + crop["h"])
+        return im.convert("RGB").resize((DRAFT_W, DRAFT_H), Image.LANCZOS, box=box)
 
 
 def _font(size: int):
@@ -267,7 +333,8 @@ def render(db, ep, folder: Path, log=print) -> dict:
 
     # each scene's picture: the set, the cast at its places, the desk front over those behind it
     clips = keyed_clips(db, ep)
-    plans, sets_cache = [], {}
+    plans, sets_cache, notes = [], {}, []
+    cameras = draft_cameras(db, ep.id)
     for sc in scenes:
         sid = scene_sets.scene_set(ep, sc)
         if not sid:
@@ -284,13 +351,21 @@ def render(db, ep, folder: Path, log=print) -> dict:
                 cast.append(ln["speaker"])
         ratios = [fig_of(k)[1]["head_w"] / fig_of(k)[1]["fig_h"] for k in cast] or [TYPICAL_HEAD]
         h = cast_height(studio_sets.seats_of(spec), max(ratios))
-        fit = contain(spec["width"], spec["height"])
         where = spots(sc.staging or {}, cast, spec)
         tf = spec.get("table_front")
         for k, w in where.items():      # seated behind the desk front: upper body only, the desk drawn over the rest
             if tf and "hip_y" in w and tf["x0"] <= w["x"] <= tf["x1"] and w["hip_y"] < tf["y1"]:
                 w["behind_desk"] = True
-        plans.append({"sc": sc, "spec": spec, "cast": cast, "h": h, "fit": fit, "where": where,
+        # the camera: computed from everyone's place in the plate, unless the owner set this scene's crop
+        boxes = {k: char_box(fig_of(k)[1], placement(fig_of(k)[1], where[k], h, IDENTITY)) for k in cast}
+        cam = camera(boxes, spec["width"], spec["height"])
+        own = (cameras or {}).get(str(sc.id))
+        if own:
+            crop = check_crop(own, spec["width"], spec["height"])
+            cam = {**crop, "notes": crop_notes(crop, boxes), "own": True}
+        fit = crop_fit(cam)
+        notes += [f"scene {sc.position}: {n}" for n in cam["notes"]]
+        plans.append({"sc": sc, "spec": spec, "cast": cast, "h": h, "fit": fit, "where": where, "crop": cam,
                       "places": {k: placement(fig_of(k)[1], where[k], h, fit) for k in cast}})
 
     def figure_img(key: str, pl: dict, below_pose_y: float | None = None) -> tuple[Image.Image, tuple[int, int]]:
@@ -319,7 +394,7 @@ def render(db, ep, folder: Path, log=print) -> dict:
         return bool(tf and "hip_y" in w and tf["x0"] <= w["x"] <= tf["x1"] and w["hip_y"] < tf["y1"])
 
     def base(pl: dict, speaker: str | None, clip: dict | None) -> Image.Image:
-        img = background(Path(pl["spec"]["plate"]), pl["fit"])
+        img = background(Path(pl["spec"]["plate"]), pl["crop"])
         for k in pl["cast"]:
             if k == speaker and clip is not None:
                 fi, xy = figure_img(k, pl, clip["cut_pose_y"])
@@ -405,7 +480,10 @@ def render(db, ep, folder: Path, log=print) -> dict:
             raise RuntimeError(f"scene {plans[i]['sc'].position}: {r.stderr.strip()[-200:]}")
         pieces.append({"scene": plans[i]["sc"].position, "path": out, "start": t0, "end": t1})
     log(f"draft: {sum(1 for r in report if r['clip'])} of {len(report)} lines with a talking clip")
-    return {"draft": folder / "draft.mp4", "pieces": pieces, "lines": report, "seconds": round(total + END_CARD_S, 3)}
+    for n in notes:
+        log(f"draft: {n}")
+    return {"draft": folder / "draft.mp4", "pieces": pieces, "lines": report, "seconds": round(total + END_CARD_S, 3),
+            "notes": notes, "crops": {str(p["sc"].position): {k: p["crop"][k] for k in ("x", "y", "w", "h")} for p in plans}}
 
 
 # ------------------------------------------------------------------ the episode's Talking shots section (API)
@@ -505,6 +583,7 @@ def latest_draft(db, ep) -> dict | None:
     if j.status == "succeeded" and res.get("asset_id"):
         a = db.get(Asset, res["asset_id"])
         out.update({"url": storage().url(a.storage_key) if a else None, "label": a.label if a else "", "lines": res.get("lines"),
+                    "notes": res.get("notes") or [],
                     "with_clip": res.get("with_clip"), "seconds": res.get("seconds"),
                     "pieces": [{"scene": x["scene"], "url": storage().url(db.get(Asset, x["asset_id"]).storage_key)}
                                for x in res.get("pieces", []) if db.get(Asset, x["asset_id"])]})
@@ -594,4 +673,110 @@ def episode_draft(ctx: Ctx) -> dict:
                          label=f"{LABEL}: scene {pc['scene']}", content_type="video/mp4", job_id=job.id)
         pieces.append({"scene": pc["scene"], "asset_id": pa.id, "start": pc["start"], "end": pc["end"]})
     db.commit()
-    return {"asset_id": a.id, "pieces": pieces, "lines": res["lines"], "with_clip": with_clip, "seconds": res["seconds"]}
+    return {"asset_id": a.id, "pieces": pieces, "lines": res["lines"], "with_clip": with_clip, "seconds": res["seconds"],
+            "notes": res["notes"], "crops": res["crops"]}
+
+
+# ------------------------------------------------------------------ the draft's camera per scene (workspace)
+CAMERAS = "_draft_cameras"      # {episode id: {scene id: {x, y, w}}}: the owner's crops (else the computed one)
+
+
+def draft_cameras(db, eid: int) -> dict:
+    from .models import Setting
+    row = db.get(Setting, CAMERAS)
+    return dict(((row.value or {}) if row else {}).get(str(eid)) or {})
+
+
+def scene_cameras(db, ep, folder: Path) -> list[dict]:
+    """Each scene's plate, everyone's box on it, the computed crop and the owner's crop (if any), for the workspace."""
+    from . import scene_sets
+    from . import sets as studio_sets
+    from .acting import TYPICAL_HEAD, cast_height
+    from .models import Asset, Character, CharacterAsset
+    from .storage import storage
+    chars = {c.key: c for c in db.query(Character).all()}
+    own = draft_cameras(db, ep.id)
+    geos: dict[str, dict] = {}
+    out = []
+    for sc in sorted(ep.scenes, key=lambda s: s.position):
+        sid = scene_sets.scene_set(ep, sc)
+        spec = studio_sets.spec_for(db, sid, folder / f"set-{sid}") if sid else None
+        if spec is None:
+            out.append({"scene_id": sc.id, "scene": sc.position, "error": "no approved set"})
+            continue
+        cast = [k for k in (sc.staging or {}) if k in chars] or [k for k in (sc.characters or []) if k in chars]
+        for ln in sc.lines or []:
+            if ln.get("speaker") in chars and ln["speaker"] not in cast:
+                cast.append(ln["speaker"])
+        try:
+            for k in cast:
+                if k not in geos:
+                    pid = (chars[k].expressions or {}).get("neutral")
+                    a = db.get(CharacterAsset, int(pid[1:])) if pid and pid.startswith("p") else None
+                    if a is None or a.status != "approved":
+                        raise RuntimeError(f"{k} has no approved neutral pose")
+                    f = Image.open(storage().get_to_file(a.storage_key, folder / f"pose-{k}.png")).convert("RGBA")
+                    geos[k] = pose_geometry(f.crop(f.getchannel("A").getbbox() or (0, 0, f.width, f.height)))
+        except RuntimeError as e:
+            out.append({"scene_id": sc.id, "scene": sc.position, "error": str(e)})
+            continue
+        h = cast_height(studio_sets.seats_of(spec), max([geos[k]["head_w"] / geos[k]["fig_h"] for k in cast] or [TYPICAL_HEAD]))
+        where = spots(sc.staging or {}, cast, spec)
+        boxes = {k: char_box(geos[k], placement(geos[k], where[k], h, IDENTITY)) for k in cast}
+        cam = camera(boxes, spec["width"], spec["height"])
+        mine = own.get(str(sc.id))
+        rec = studio_sets.approved(db).get(sid) or {}
+        a = db.get(Asset, rec.get("asset_id")) if rec.get("asset_id") else None
+        out.append({"scene_id": sc.id, "scene": sc.position, "set_id": sid, "plate_url": storage().url(a.storage_key) if a else None,
+                    "plate": {"w": spec["width"], "h": spec["height"]},
+                    "boxes": {k: {x: round(v, 1) for x, v in b.items()} for k, b in boxes.items()},
+                    "computed": cam, "own": mine,
+                    "notes": crop_notes(check_crop(mine, spec["width"], spec["height"]), boxes) if mine else cam["notes"]})
+    return out
+
+
+@router.get("/episodes/{eid}/draft/cameras")
+def get_cameras(eid: int, db: Session = Depends(get_db)):
+    import tempfile
+    ep = _episode(db, eid)
+    with tempfile.TemporaryDirectory() as tmp:
+        return {"scenes": scene_cameras(db, ep, Path(tmp)), "aspect": "9:16", "safe_margin": SAFE_MARGIN}
+
+
+class CameraIn(BaseModel):
+    scene_id: int
+    crop: dict | None = None        # {x, y, w} in plate pixels (9:16); None: back to the computed crop
+
+
+@router.put("/episodes/{eid}/draft/cameras")
+def put_camera(eid: int, body: CameraIn, db: Session = Depends(get_db)):
+    """Free: this scene's crop for the draft (kept 9:16 and inside the plate), or back to the computed one."""
+    from . import scene_sets
+    from . import sets as studio_sets
+    from .models import Setting, StoryboardScene
+    import tempfile
+    ep = _episode(db, eid)
+    sc = db.get(StoryboardScene, body.scene_id)
+    if sc is None or sc.episode_id != ep.id:
+        raise HTTPException(404, "no such scene")
+    row = db.get(Setting, CAMERAS)
+    allc = dict(row.value or {}) if row else {}
+    mine = dict(allc.get(str(ep.id)) or {})
+    if body.crop is None:
+        mine.pop(str(sc.id), None)
+    else:
+        with tempfile.TemporaryDirectory() as tmp:
+            spec = studio_sets.spec_for(db, scene_sets.scene_set(ep, sc), Path(tmp))
+        if spec is None:
+            raise HTTPException(409, "the scene has no approved set")
+        try:
+            mine[str(sc.id)] = check_crop(body.crop, spec["width"], spec["height"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(422, str(e))
+    allc[str(ep.id)] = mine
+    if row:
+        row.value = allc
+    else:
+        db.add(Setting(key=CAMERAS, value=allc))
+    db.commit()
+    return get_cameras(eid, db)

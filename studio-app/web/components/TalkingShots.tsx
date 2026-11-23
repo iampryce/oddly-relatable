@@ -9,6 +9,7 @@ import {api} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {talkingTotal} from '@/lib/talkingShots';
+import DraftCameras from '@/components/DraftCameras';
 
 const IT = 'wavespeed-infinitetalk-fast';
 const usd = (x: number | null | undefined, d = 3) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
@@ -80,13 +81,15 @@ export default function TalkingShots({ep}: {ep: any}) {
           </tr>))}</tbody></table></div>
       <div className="card stack">
         <strong>First draft (free)</strong>
-        <p className="small muted">The whole episode at 1080×1920: the approved set, everyone at their seats from their approved neutral poses,
+        <p className="small muted">The whole episode at 1080×1920: each scene&apos;s crop of the approved set (filling the frame, no bars), everyone at their seats from their approved neutral poses,
           the speaker&apos;s keyed talking clip where one exists (else the neutral pose and a &ldquo;no clip yet&rdquo; mark), the recording
           as the sound and the end card. Saved in the Video Library as &ldquo;Draft: not for publishing&rdquo;; never offered to publishing.</p>
+        <details><summary>Camera per scene (the crop of the set; computed by default, yours to adjust)</summary><DraftCameras ep={ep} /></details>
         <div><button className="btn sm" disabled={d?.status === 'queued' || d?.status === 'running'} onClick={makeDraft}>Make the draft (free)</button></div>
         {d && d.status !== 'succeeded' && <div className={`small ${d.status === 'failed' ? 'bad' : 'muted'}`}>Draft {d.status}{d.error ? `: ${d.error}` : ''}</div>}
         {d?.url && <div className="stack small">
           <div>{d.label} · {d.seconds} s</div>
+          {(d.notes || []).map((n: string, i: number) => <div key={i} className="muted">Note: {n}</div>)}
           <video controls src={d.url} style={{width: 220}} />
           <div className="row" style={{gap: 8}}>{(d.pieces || []).map((p: any) => <a key={p.scene} href={p.url} target="_blank" rel="noreferrer">Scene {p.scene}</a>)}</div>
         </div>}

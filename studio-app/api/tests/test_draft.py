@@ -61,14 +61,73 @@ class PlacementTest(unittest.TestCase):
         self.assertAlmostEqual(stand["y"] + 1000 * stand["scale"], fit["oy"] + 1498 * fit["s"], places=6, msg="standing: feet on the floor")
 
 
+MORT = {"fig_h": 1400, "fig_w": 586, "neck_x": 292, "neck_y": 542, "vest_y": 619, "hip_y": 957, "head_w": 586}
+RALPH = {"fig_h": 1460, "fig_w": 590, "neck_x": 294, "neck_y": 560, "vest_y": 640, "hip_y": 1000, "head_w": 588}
+
+
+def boxes_for(seats: dict, h: float = 481) -> dict:
+    geo = {"m": MORT, "r": RALPH}
+    return {k: D.char_box(geo[k], D.placement(geo[k], seat, h, D.IDENTITY)) for k, seat in seats.items()}
+
+
+class CameraTest(unittest.TestCase):
+    def test_everyone_inside_the_safe_margin_the_frame_filled_and_heads_a_third_down(self):
+        boxes = boxes_for({"m": {"x": 180, "hip_y": 773, "feet_y": 837}, "r": {"x": 530, "hip_y": 920, "feet_y": 1068}})
+        cam = D.camera(boxes, 1024, 1536)
+        self.assertAlmostEqual(cam["w"] / cam["h"], 1080 / 1920, places=4, msg="9:16")
+        m = D.SAFE_MARGIN * cam["w"]
+        for k, b in boxes.items():
+            self.assertGreaterEqual(b["left"], cam["x"] + m - 0.5, k)
+            self.assertLessEqual(b["right"], cam["x"] + cam["w"] - m + 0.5, k)
+        self.assertTrue(0 <= cam["x"] and cam["x"] + cam["w"] <= 1024 and 0 <= cam["y"] and cam["y"] + cam["h"] <= 1536, "inside the plate")
+        fit = D.crop_fit(cam)
+        # no bars: the plate covers the whole frame
+        self.assertLessEqual(fit["ox"], 0.01)
+        self.assertLessEqual(fit["oy"], 0.01)
+        self.assertGreaterEqual(fit["ox"] + 1024 * fit["s"], 1080 - 0.01)
+        self.assertGreaterEqual(fit["oy"] + 1536 * fit["s"], 1920 - 0.01)
+        head = sum(b["head_y"] for b in boxes.values()) / 2
+        self.assertAlmostEqual((head - cam["y"]) / cam["h"], 1 / 3, delta=0.01, msg="the head line a third of the way down")
+        self.assertIn("scaled up", " ".join(cam["notes"]), "a crop narrower than 1080 plate px is upscaled, and said")
+        self.assertNotIn("outside the safe margin", " ".join(cam["notes"]))
+
+    def test_head_sizes_keep_their_ratio_through_the_crop_and_the_clip_still_matches(self):
+        seat_m, seat_r = {"x": 180, "hip_y": 773, "feet_y": 837}, {"x": 530, "hip_y": 920, "feet_y": 1068}
+        cam = D.camera(boxes_for({"m": seat_m, "r": seat_r}), 1024, 1536)
+        before = [D.placement(g, s_, 481, D.contain(1024, 1536)) for g, s_ in ((MORT, seat_m), (RALPH, seat_r))]
+        after = [D.placement(g, s_, 481, D.crop_fit(cam)) for g, s_ in ((MORT, seat_m), (RALPH, seat_r))]
+        self.assertAlmostEqual(before[0]["head_w"] / before[1]["head_w"], after[0]["head_w"] / after[1]["head_w"], places=9)
+        self.assertGreater(after[0]["head_w"], before[0]["head_w"], "the whole composition scales up with the crop")
+        lay = {"scale": 1.13, "x": 30, "y": 36}
+        cp = D.clip_placement(after[0], lay)
+        self.assertAlmostEqual(586 * lay["scale"] * cp["scale"], after[0]["head_w"], places=6, msg="the talking clip's head still matches")
+
+    def test_a_set_too_narrow_for_everyone_never_gets_bars_and_names_who_is_cut(self):
+        boxes = boxes_for({"m": {"x": 180, "hip_y": 773, "feet_y": 837}, "r": {"x": 940, "hip_y": 925, "feet_y": 1068}})
+        cam = D.camera(boxes, 1024, 1536)
+        self.assertAlmostEqual(cam["w"], 864, places=1, msg="the widest 9:16 crop inside a 1024x1536 plate")
+        self.assertAlmostEqual(cam["h"], 1536, places=1)
+        self.assertTrue(0 <= cam["x"] <= 1024 - 864)
+        self.assertIn("outside the safe margin", cam["notes"][0])
+        self.assertIn("m", cam["notes"][0])
+
+    def test_an_owners_crop_stays_inside_the_plate(self):
+        self.assertEqual(D.check_crop({"x": 100, "y": 50, "w": 540}, 1024, 1536), {"x": 100.0, "y": 50.0, "w": 540.0, "h": 960.0})
+        for bad in ({"x": 600, "y": 0, "w": 540}, {"x": 0, "y": 700, "w": 540}, {"x": 0, "y": 0, "w": 900}, {"x": -5, "y": 0, "w": 400}):
+            with self.assertRaises(ValueError):
+                D.check_crop(bad, 1024, 1536)
+
+
 def frame_at(ff: str, video, t: float, out) -> np.ndarray:
     subprocess.run([ff, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", str(out)], check=True)
     return np.asarray(Image.open(out).convert("RGB")).astype(int)
 
 
 def red_tag(f: np.ndarray) -> bool:
+    """The "no clip yet" mark: a large block of its own red (200, 30, 30) near the top of the frame."""
     band = f[100:220]
-    return bool(((band[..., 0] > 150) & (band[..., 1] < 90) & (band[..., 2] < 90)).sum() > 500)
+    red = (abs(band[..., 0] - 200) < 25) & (band[..., 1] < 60) & (band[..., 2] < 60)
+    return bool(red.sum() > 15000)
 
 
 def cyan(f: np.ndarray) -> int:
@@ -143,6 +202,32 @@ class DraftTest(ShotBase):
         self.assertTrue(red_tag(frame_at(self.ff, path, 5.0, self.media / "e.png")), "line 2 has no clip yet")
         rows = self.c.get(f"/api/episodes/{self.eid}/talking-shots").json()["lines"]
         self.assertEqual([r["status"] for r in rows], ["keyed", "not run"])
+
+
+class CameraFlowTest(ShotBase):
+    def test_the_workspace_shows_the_crop_and_the_owners_crop_is_used(self):
+        cams = self.c.get(f"/api/episodes/{self.eid}/draft/cameras").json()["scenes"]
+        self.assertEqual(len(cams), 1)
+        sc = cams[0]
+        self.assertTrue(sc["boxes"] and sc["computed"]["w"] > 0 and sc["own"] is None)
+        pw, ph = sc["plate"]["w"], sc["plate"]["h"]
+        r = self.c.put(f"/api/episodes/{self.eid}/draft/cameras", json={"scene_id": sc["scene_id"], "crop": {"x": 0, "y": 0, "w": pw + 50}})
+        self.assertEqual(r.status_code, 422, "never wider than the plate: that would leave bars")
+        own = {"x": 10, "y": 20, "w": round(pw * 0.6)}
+        r = self.c.put(f"/api/episodes/{self.eid}/draft/cameras", json={"scene_id": sc["scene_id"], "crop": own})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["scenes"][0]["own"]["w"], own["w"])
+        self.assertEqual(self.c.post(f"/api/episodes/{self.eid}/draft").status_code, 200)
+        self.assertEqual(self.env.run_jobs(["episode_draft"])[0][1], "succeeded")
+        from oddstudio.db import new_session
+        from oddstudio.models import Job
+        d = self.c.get(f"/api/episodes/{self.eid}/talking-shots").json()["draft"]
+        with new_session() as s:
+            res = s.get(Job, d["job_id"]).result
+        self.assertEqual(res["crops"]["1"]["w"], own["w"], "the draft used the owner's crop")
+        self.assertIsInstance(d["notes"], list)
+        r = self.c.put(f"/api/episodes/{self.eid}/draft/cameras", json={"scene_id": sc["scene_id"], "crop": None})
+        self.assertIsNone(r.json()["scenes"][0]["own"], "back to the computed crop")
 
 
 class TalkingSectionTest(ShotBase):

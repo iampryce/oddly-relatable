@@ -126,3 +126,28 @@ An approved set's card in the Set section has **Views of this room**:
 - a list of the view each shot will use.
 
 Missing views use the wide picture. See [SETS.md](SETS.md#views-of-one-set-featset-views).
+
+## Talking shots and the first draft (audio episodes)
+
+The **Talking shots** section sits between Storyboard and Production. It never blocks the episode.
+
+- **The table** lists every line with:
+  - its talking-shot status: not run, preparing, queued, running, done (keying), keyed, or failed with the reason;
+  - its audio length and cost: the estimate before a run (audio rounded up, 3 s minimum, $0.015/s on WaveSpeed InfiniteTalk fast), the charge after;
+  - its plan's cap used;
+  - a link to the keyed clip over the set.
+- **Run selected lines:**
+  - First it prepares any chosen line that has no plan yet, for free: no text writer and no rig render are used, and the cutout first frame is made if it is missing.
+  - Then it shows **one** confirm with the TOTAL estimate, each plan's cap and the experimental budget. Nothing starts before you accept.
+  - A paid call is never retried by itself: a failed line stays failed until you tick it and run it again.
+- **Make the draft (free)** builds the whole episode at 1080×1920:
+  - **Picture:** each scene's crop of the approved set plate, filling the frame with no bars.
+  - **Cast:** everyone at their seats, in staging order with the speaker first, from their approved neutral poses at the rig's cast height for that set, so all heads share one scale. Anyone seated behind a desk front shows only the upper body.
+  - **Speaker:** the keyed talking clip, placed exactly over the pose it was cut from. A line without one shows the neutral pose and a red "no clip yet" mark.
+  - **Sound:** the recording, so the script order and pauses are as recorded; then the end card from Settings.
+  - **Where it goes:** the Video Library, with its per-scene pieces, as "Draft: not for publishing". It is never the episode's video, so it is never offered to the publishing step.
+- **Camera per scene:**
+  - **Computed:** a 9:16 crop that holds everyone in the scene with a safe margin of 6% of the frame width on each side, with the heads about a third of the way down.
+  - **Too narrow a set:** if the set is too narrow for everyone (Episode 14's four seats span about 93% of a 2:3 plate), the crop is the closest one inside the plate. It never makes bars, and the draft's notes name who is outside the safe margin.
+  - **Upscaling:** a crop narrower than 1080 plate pixels is scaled up, and the notes say by how much.
+  - **Adjusting it:** the section shows each scene's plate with the crop rectangle, everyone's place and the safe-margin lines. Move or resize the crop (always 9:16, always inside the plate) and **Use this crop**; **Back to computed** undoes it.
