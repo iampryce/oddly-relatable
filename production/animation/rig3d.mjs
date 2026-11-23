@@ -68,6 +68,14 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
     return out;
   };
   const DRAWN_NECK = 1.08;
+  // the front half of a unit sphere, its picture projected straight from the front (u from x, v from y): seen from the
+  // front it shows the art exactly as drawn; turned, the art wraps round the curve
+  const wrapGeo = () => {
+    const g = new THREE.SphereGeometry(1, 48, 32, 0, Math.PI);
+    const pos = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, (pos.getX(i) + 1) / 2, (1 - pos.getY(i)) / 2);
+    return g;
+  };
   const unit = {cyl: new THREE.CylinderGeometry(1, 1, 1, 12, 1), ball: new THREE.SphereGeometry(1, 16, 12)};
 
   const R = {};
@@ -77,15 +85,18 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
     const hair = dominant(c.head, createCanvas, [0, 0, c.head.width, Math.max(1, Math.round(c.head.height * 0.22))]);
     const root = new THREE.Group(), body = new THREE.Group();
     root.add(body); scene.add(root);
-    // torso: an ellipsoid in the clothing colour around the 2D torso's box, the clothing art on its front, an ink rim
-    const tw = c.torso.width, th = c.torso.height, depth = tw * 0.62;
+    // torso: an ellipsoid in the clothing colour around the 2D torso's box, an ink rim, and the clothing art WRAPPED
+    // round its front half (feat/3d-rig: a flat card only narrowed when the body turned, so a turned body still read as
+    // a front torso; on the curved front the art foreshortens and its buttons, lapels, tie and scarf slide towards the
+    // far side, and a profile shows the side of the body). Deep enough that a profile is a body, not a card.
+    const tw = c.torso.width, th = c.torso.height, depth = tw * 0.8;
     const tc = {x: c.torsoOff.x + tw / 2, y: -(c.torsoOff.y + th / 2)};
     const torso = new THREE.Mesh(unit.ball, flat(srgb(...cloth)));
     torso.scale.set(tw / 2, th / 2, depth / 2); torso.position.set(tc.x, tc.y, 0); body.add(torso);
     const rim = new THREE.Mesh(unit.ball, new THREE.MeshBasicMaterial({color: INK, side: THREE.BackSide}));
     rim.scale.set(tw / 2 + lw * 0.7, th / 2 + lw * 0.7, depth / 2 + lw * 0.7); rim.position.copy(torso.position); body.add(rim);
-    const decal = new THREE.Mesh(planeGeo(), new THREE.MeshBasicMaterial({map: texFrom(toCanvas(c.torso)), transparent: true, alphaTest: 0.35}));
-    decal.scale.set(tw, th, 1); decal.position.set(tc.x, tc.y, depth / 2 * 0.97); body.add(decal);
+    const decal = new THREE.Mesh(wrapGeo(), new THREE.MeshBasicMaterial({map: texFrom(toCanvas(c.torso)), transparent: true, alphaTest: 0.35}));
+    decal.scale.set(tw / 2 * 1.004, th / 2 * 1.004, depth / 2 * 1.004); decal.position.set(tc.x, tc.y, 0); body.add(decal);
     // limbs: unit cylinders placed between joints each frame, balls at the joints, mitten hands, shoes
     const r = lw * 0.5;
     const tube = () => { const m = new THREE.Mesh(unit.cyl, flat(INK)); body.add(m); return m; };
