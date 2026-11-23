@@ -87,6 +87,8 @@ app.include_router(reference_plan.router)
 app.include_router(scene_sets.router)
 app.include_router(beats.router)
 app.include_router(shot_compare.router)
+from . import draft as episode_draft  # noqa: E402
+app.include_router(episode_draft.router)
 app.include_router(studio_bin.router)
 app.include_router(gpu.router)
 
@@ -209,8 +211,8 @@ def library(db: Session = Depends(get_db)):
         videos = [v for v in db.query(Asset).filter_by(episode_id=ep.id, kind="video").order_by(Asset.id.desc()).all()
                   if v.id not in gone_clips]
         if videos:
-            out.append({**S.episode_summary(ep), "videos": [{**S.asset(v), "comparison_clip": studio_bin.is_comparison_clip(v)}
-                                                            for v in videos]})
+            out.append({**S.episode_summary(ep), "videos": [{**S.asset(v), "comparison_clip": studio_bin.is_comparison_clip(v),
+                                                             "draft": "/draft/" in (v.storage_key or "")} for v in videos]})
     return out
 
 

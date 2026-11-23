@@ -837,6 +837,7 @@ from . import audio_production  # noqa: E402,F401
 from . import rig_check  # noqa: E402,F401
 from . import character_looks  # noqa: E402,F401
 from . import shot_compare  # noqa: E402,F401
+from . import draft  # noqa: E402,F401
 from . import set_proposals  # noqa: E402,F401
 from . import set_views  # noqa: E402,F401
 from . import head_angles  # noqa: E402,F401

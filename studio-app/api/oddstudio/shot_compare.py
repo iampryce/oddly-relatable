@@ -697,7 +697,7 @@ def approve(db: Session, pid: str, model: str, user: str):
 
 
 # ------------------------------------------------------------------ batch mode (one screen, one confirm)
-def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int) -> tuple[dict, bool]:
+def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int, talking_only: bool = False) -> tuple[dict, bool]:
     """The episode line's plan: the existing one (not failed), else a new one with its free preparation queued."""
     from .queue import enqueue
     recs = records(db)
@@ -715,7 +715,7 @@ def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int) -> t
                  "tone": tone_of(ln.get("text", ""), ln.get("expression"), None), "action_source": "phrase matcher",
                  "status": "preparing", "created": time.time(), "results": {}}
     save(db, recs)
-    enqueue(db, "shot_prepare", episode_id=ep.id, payload={"pid": pid})
+    enqueue(db, "shot_prepare", episode_id=ep.id, payload={"pid": pid, **({"talking_only": True} if talking_only else {})})
     return recs[pid], True
 
 
@@ -1207,20 +1207,30 @@ def compose(plate: Path, pose: Path, blocking: dict, plate_w: int, plate_h: int,
     return out
 
 
+_rig_module = None
+
+
+def rig_module():
+    """production/animation/rig_extract.py, loaded once (the rig's own measuring of an approved pose)."""
+    global _rig_module
+    if _rig_module is None:
+        import importlib.util
+        from .config import REPO_ROOT
+        spec = importlib.util.spec_from_file_location("rig_extract", REPO_ROOT / "production" / "animation" / "rig_extract.py")
+        _rig_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_rig_module)
+    return _rig_module
+
+
 def body_marks(fig) -> dict:
     """Where the head ends and the vest begins on the (alpha-cropped) approved pose, found by the rig's own measuring
     (production/animation/rig_extract.py): the neck, the shoulder line (the top of the vest) and the head's width.
     Falls back to the neck alone, then to the house-style proportions (head about 30% of the height)."""
-    import importlib.util
-
     import numpy as np
-    from .config import REPO_ROOT
     a = np.array(fig.convert("RGBA"))
     alpha = a[:, :, 3] > 128
     h = a.shape[0]
-    spec = importlib.util.spec_from_file_location("rig_extract", REPO_ROOT / "production" / "animation" / "rig_extract.py")
-    rx = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rx)
+    rx = rig_module()
     style, how = "v2", "rig"
     try:
         style = rx.detect_style(a)
@@ -1313,7 +1323,9 @@ def shot_prepare(ctx: Ctx) -> dict:
         wav = media.cut_audio(src, folder / "line.wav", p["start"], p["end"])
         aa = store_asset(db, ep_id=ep.id, src=wav, key=f"episodes/{ep.id}/shot-compare/{pid}/line.wav", kind="audio",
                          label="Shot comparison: the line's recorded audio", content_type="audio/wav", job_id=job.id)
-        write_action(db, pid, ep, sc, ctx.log)
+        talking_only = bool(job.payload.get("talking_only"))
+        if not talking_only:          # the Talking shots section needs no action text: no text call is made for it
+            write_action(db, pid, ep, sc, ctx.log)
         recs = records(db)
         recs[pid].update({"frame_asset_id": frame_assets["wide"], "frame_assets": frame_assets, "frame_errors": frame_errors,
                           **({"key_colour": colour} if colour else {}),
@@ -1321,6 +1333,8 @@ def shot_prepare(ctx: Ctx) -> dict:
                           "audio_seconds": round(media.probe(wav)["duration"] or p["seconds"], 3)})
         save(db, recs)
         db.commit()
+        if talking_only:
+            return {"pid": pid, "talking_only": True}
         # the rig render of the same line (free; a failure here does not block the AI comparison)
         try:
             from . import acting

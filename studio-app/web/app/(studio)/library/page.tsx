@@ -25,7 +25,8 @@ export default function Library() {
               <ul>{ep.videos.map((v: any) => (
                 <li key={v.id}><a href={v.url} target="_blank" rel="noreferrer">Revision {v.revision}</a>
                   <span className="muted"> · {when(v.created_at)} · {(v.size / 1e6).toFixed(1)} MB{v.id === ep.video_asset_id ? ' · current' : ''}</span>
-                  {v.comparison_clip && <> <span className="muted">· {v.label}</span> <DeleteButton kind="clip" id={v.id} label={`the comparison clip "${v.label}"`} onDone={reload} /></>}</li>))}</ul>
+                  {v.draft && <> <span className="badge warn">Draft: not for publishing</span> <span className="muted">· {v.label}</span> <DeleteButton kind="clip" id={v.id} label={`the draft "${v.label}"`} onDone={reload} /></>}
+                  {v.comparison_clip && !v.draft && <> <span className="muted">· {v.label}</span> <DeleteButton kind="clip" id={v.id} label={`the comparison clip "${v.label}"`} onDone={reload} /></>}</li>))}</ul>
             </div>
           </div>))}
       </div>
