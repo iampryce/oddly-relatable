@@ -23,6 +23,18 @@ class CommandTest(unittest.TestCase):
         with mock.patch("sys.platform", "darwin"):
             self.assertEqual(acting.node_command("node", ["r.mjs"], True), ["node", "r.mjs"], "macOS: headless-gl needs no X")
 
+    def test_the_3d_option_needs_a_display_on_linux(self):
+        self.assertIn("tool:gl-display", capabilities.CAPABILITIES["motion"]["providers"]["procedural-rig-3d"]["needs"])
+        with mock.patch("sys.platform", "linux"), mock.patch("shutil.which", lambda n: None):
+            with mock.patch.dict(os.environ, {"DISPLAY": ""}):
+                self.assertFalse(capabilities.tool_present("gl-display"), "no display and no xvfb-run: unavailable")
+            with mock.patch.dict(os.environ, {"DISPLAY": ":99"}):
+                self.assertTrue(capabilities.tool_present("gl-display"))
+        with mock.patch("sys.platform", "linux"), mock.patch("shutil.which", lambda n: "/usr/bin/xvfb-run"):
+            self.assertTrue(capabilities.tool_present("gl-display"))
+        with mock.patch("sys.platform", "darwin"):
+            self.assertTrue(capabilities.tool_present("gl-display"))
+
     def test_the_3d_option_sits_beside_the_2d_one(self):
         motion = capabilities.CAPABILITIES["motion"]["providers"]
         self.assertIn("procedural-rig", motion, "the 2D rig animator stays")

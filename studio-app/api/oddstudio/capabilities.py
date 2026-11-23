@@ -53,7 +53,7 @@ CAPABILITIES: dict[str, dict] = {
     "motion": {"label": "Motion and character animation", "section": "motion", "providers": {
         "procedural-rig": {"label": "Studio 2D rig animator (procedural, CPU, free)", "needs": ["tool:rhubarb"], "implemented": True,
                            "note": "performs the script's acting (gestures, walking, sitting, reactions) with Rhubarb lip sync"},
-        "procedural-rig-3d": {"label": "Studio 3D rig animator (three.js, CPU, free)", "needs": ["tool:rhubarb"], "implemented": True,
+        "procedural-rig-3d": {"label": "Studio 3D rig animator (three.js, CPU, free)", "needs": ["tool:rhubarb", "tool:gl-display"], "implemented": True,
                               "note": "the same acting with 3D stickmen built from the approved poses: they turn, walk and sit "
                                       "facing any direction; head angles from the approved drawings (else a mock); deterministic"},
         "fal": {"label": "fal.ai hosted open models (Wan 2.2, LTX-2)", "needs": ["fal_key"], "implemented": True,
@@ -94,6 +94,12 @@ def tool_present(name: str) -> bool:
     if name == "kokoro":
         from .kokoro import installed
         return installed()
+    if name == "gl-display":
+        # the 3D rig animator's headless-gl needs a display on Linux: an existing one or xvfb-run (in the worker image);
+        # elsewhere (macOS) it needs none. Without it, Settings shows the option as unavailable (no silent 2D fallback)
+        import os
+        import sys
+        return not sys.platform.startswith("linux") or bool(os.environ.get("DISPLAY")) or bool(shutil.which("xvfb-run"))
     if name == "rhubarb":
         from .analysis import rhubarb_bin
         return bool(rhubarb_bin())
