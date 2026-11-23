@@ -160,6 +160,7 @@ class GpuSettingsTest(GpuTestBase):
 
 class GpuSessionTest(GpuTestBase):
     def test_a_rented_session_is_launched_reused_and_terminated_when_idle(self):
+        gpu.clock = (lambda t: lambda: t)(time.time())   # frozen: "not idle yet" must not depend on how slow the machine is
         self.rented()
         plans = self.batch_ready()
         ids = [p["id"] for p in plans]
