@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Simulation of deploy.sh with public HTTPS against a fake /srv/stickman and stub docker / curl / sleep: no Docker, no
 # network. Checks that a bad Caddyfile stops the deploy before anything changes, that a proxy which does not route the
-# media upload to the API is rolled back, and that a good deploy passes. Run on Linux with bash (CI: ubuntu):
+# media upload to the API is rolled back, and that a good deploy passes; a backup that cannot be made (not enough free
+# space) stops the deploy before anything is built or changed, and the deploy asks for the newest 3 deploy-time backups
+# and room for its image build. Run on Linux with bash (CI: ubuntu):
 #   bash studio-app/deploy/tests/simulate-deploy.sh
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -14,7 +16,8 @@ printf 'PUBLIC_HOST=studio.example.test\nPUBLIC_PORT=8443\nPOSTGRES_PASSWORD=x\n
 for rel in old new; do
   mkdir -p "$R/releases/$rel/studio-app/deploy"
   cp "$HERE"/*.sh "$HERE"/*.yml "$HERE/Caddyfile" "$R/releases/$rel/studio-app/deploy/"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$R/releases/$rel/studio-app/deploy/backup.sh"   # simulated separately
+  # backup.sh is simulated separately (simulate-backups.sh): here it records what deploy.sh asked of it
+  printf '#!/usr/bin/env bash\necho "KEEP_DEPLOY=$KEEP_DEPLOY KEEP=$KEEP BACKUP_KIND=$BACKUP_KIND BACKUP_EXTRA_FREE=$BACKUP_EXTRA_FREE" > "%s/backup.env"\nexit ${BACKUP_RC:-0}\n' "$SIM" > "$R/releases/$rel/studio-app/deploy/backup.sh"
 done
 ln -s releases/old "$R/current"
 
@@ -39,6 +42,15 @@ export PATH="$SIM/bin:$PATH"
 fails=0
 check() { if eval "$1"; then echo "  ok    $2"; else echo "  FAIL  $2"; fails=$((fails + 1)); fi; }
 run() { env "$@" bash "$R/releases/new/studio-app/deploy/deploy.sh" new > "$SIM/out" 2>&1; echo $?; }
+
+echo "0. a backup that cannot be made stops the deploy before anything changes"
+rc=$(run BACKUP_RC=3 KEEP_DEPLOY=5)
+check '[[ $rc == 1 ]]' "deploy fails"
+check 'grep -q "stopped before building: the backup could not be made" "$SIM/out" && grep -q "still on old" "$SIM/out"' "the reason is printed"
+check '[[ "$(readlink "$R/current")" == releases/old && ! -s "$SIM/docker.log" ]]' "nothing was built, started or switched"
+check 'grep -q "KEEP_DEPLOY=3 KEEP= BACKUP_KIND=deploy BACKUP_EXTRA_FREE=5G" "$SIM/backup.env"' "deploy asks for the newest 3 deploy-time backups and 5G of build room (an older wrapper's KEEP_DEPLOY=5 is not used)"
+rc=$(run BACKUP_RC=3 DEPLOY_KEEP_BACKUPS=4 DEPLOY_BUILD_FREE=8G)
+check 'grep -q "KEEP_DEPLOY=4 KEEP= BACKUP_KIND=deploy BACKUP_EXTRA_FREE=8G" "$SIM/backup.env"' "DEPLOY_KEEP_BACKUPS and DEPLOY_BUILD_FREE set them"
 
 echo "1. an invalid Caddyfile stops the deploy before anything changes"
 rc=$(run CADDY_VALID=0)

@@ -6,7 +6,9 @@
 #   /srv/stickman/current -> releases/<git sha>
 #   /srv/stickman/shared/.env           secrets (mode 600, never in git)
 #   /srv/stickman/backups/<stamp>-<kind>/  backup.sh output (kind: nightly | deploy)
-# Steps: backup (if a release is running) -> build images tagged with the release -> switch `current` ->
+# Steps: backup (if a release is running; it first checks the free disk space, including $DEPLOY_BUILD_FREE for the
+# image build, default 5G, and stops the deploy before anything changes if there is not enough; it keeps the newest
+# $DEPLOY_KEEP_BACKUPS deploy-time backups, default 3) -> build images tagged with the release -> switch `current` ->
 # start (the API applies database migrations on start) -> health check. On a failed health check it rolls back to
 # the previous release's images automatically (see rollback.sh). With public HTTPS (PUBLIC_HOST), the new Caddyfile is
 # validated before anything changes, and the health check also goes THROUGH Caddy: the dashboard's /api/health and the
@@ -21,7 +23,13 @@ test -f "$dir/studio-app/deploy/docker-compose.yml" || { echo "deploy: $dir is n
 test -f "$ROOT/shared/.env" || { echo "deploy: $ROOT/shared/.env is missing" >&2; exit 1; }
 prev=$(readlink "$ROOT/current" 2>/dev/null | xargs -r basename || true)
 
-if [[ -n "$prev" ]]; then "$dir/studio-app/deploy/backup.sh"; fi
+# The deploy-time retention is set here (DEPLOY_KEEP_BACKUPS): a KEEP_DEPLOY passed in by an older installed
+# ci-deploy.sh is not used. Never a Docker volume: this script only builds, starts and health-checks containers.
+if [[ -n "$prev" ]]; then
+  KEEP_DEPLOY=${DEPLOY_KEEP_BACKUPS:-3} KEEP= BACKUP_KIND=deploy BACKUP_EXTRA_FREE=${DEPLOY_BUILD_FREE:-5G} \
+    "$dir/studio-app/deploy/backup.sh" \
+    || { echo "deploy: stopped before building: the backup could not be made (see above). Nothing was changed; still on $prev." >&2; exit 1; }
+fi
 
 # Public HTTPS (Caddy on PUBLIC_PORT) is added when shared/.env sets PUBLIC_HOST; see docker-compose.public.yml.
 compose() {

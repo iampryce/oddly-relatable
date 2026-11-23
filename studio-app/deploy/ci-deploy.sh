@@ -33,5 +33,6 @@ if [[ ! -d "$dir" ]]; then
   git -C "$REPO" archive "$sha" | tar -x -C "$dir"
   chmod -R a-w "$dir"
 fi
-KEEP_DEPLOY=${KEEP_DEPLOY:-5} "$dir/studio-app/deploy/deploy.sh" "$tree"
+# deploy.sh sets the deploy-time backup retention itself (DEPLOY_KEEP_BACKUPS, default 3) and checks free space first.
+"$dir/studio-app/deploy/deploy.sh" "$tree"
 echo "ci-deploy: done $tree"

@@ -24,7 +24,7 @@ set -euo pipefail
 ROOT=${STICKMAN_ROOT:-/srv/stickman}
 KEEP_RELEASES=${KEEP_RELEASES:-5}
 KEEP_NIGHTLY=${KEEP_NIGHTLY:-7}
-KEEP_DEPLOY=${KEEP_DEPLOY:-5}
+KEEP_DEPLOY=${KEEP_DEPLOY:-3}
 DUMP_DAYS=${DUMP_DAYS:-30}
 LOG_DAYS=${LOG_DAYS:-30}
 BUILD_CACHE_HOURS=${BUILD_CACHE_HOURS:-168}
@@ -139,8 +139,12 @@ prune_kind() {   # prune_kind <keep> <folders, oldest first>
     remove "backup $(basename "$b") ($(du -sh "$b" | cut -f1))" rm -rf -- "$b"
   done
 }
-mapfile -t nightly < <(ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort)
-mapfile -t deploys < <(ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort)
+# only complete backups (with SHA256SUMS) are counted and pruned; an incomplete folder is listed and left alone
+for b in $(ls -1d "$ROOT"/backups/*/ 2>/dev/null | sort); do
+  [[ -f "$b/SHA256SUMS" ]] || echo "  incomplete $(basename "$b") ($(du -sh "$b" | cut -f1)): no SHA256SUMS; not counted, not removed (check it, then remove it by hand)"
+done
+mapfile -t nightly < <(for b in $(ls -1d "$ROOT"/backups/*-nightly/ 2>/dev/null | sort); do [[ -f "$b/SHA256SUMS" ]] && echo "$b"; done)
+mapfile -t deploys < <(for b in $(ls -1d "$ROOT"/backups/*/ 2>/dev/null | grep -v -- '-nightly/$' | sort); do [[ -f "$b/SHA256SUMS" ]] && echo "$b"; done)
 prune_kind "$KEEP_NIGHTLY" "${nightly[@]}"
 prune_kind "$KEEP_DEPLOY" "${deploys[@]}"
 
