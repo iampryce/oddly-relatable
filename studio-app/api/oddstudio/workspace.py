@@ -27,10 +27,10 @@ from .workflow import STAGES
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 # the page's order (owner's list), then review, publishing and history
-ORDER = ("set", "people", "plan", "lines", "notes", "cast", "script", "storyboard", "production", "review", "publishing")
+ORDER = ("set", "people", "plan", "lines", "notes", "cast", "script", "storyboard", "talking", "production", "review", "publishing")
 TITLES = {"set": "Set", "people": "People / who is who", "plan": "Reference plan", "lines": "Lines and speakers",
           "notes": "Video notes", "cast": "Cast and poses", "script": "Script", "storyboard": "Storyboard",
-          "production": "Production", "review": "Review", "publishing": "Publishing"}
+          "talking": "Talking shots", "production": "Production", "review": "Review", "publishing": "Publishing"}
 # the order the episode moves through (what blocks first)
 FLOW = ("lines", "notes", "people", "plan", "cast", "script", "storyboard", "set", "production", "review", "publishing")
 SECTION_JOBS = {
@@ -42,6 +42,7 @@ SECTION_JOBS = {
     "production": ("scene_prepare", "scene_voice", "audio_slice", "render_episode", "plan_segments", "render_segment",
                    "join_segments"),
     "publishing": ("publish_youtube",),
+    "talking": ("shot_prepare", "shot_generate", "shot_key", "episode_draft"),
     "set": ("set_candidate", "set_seat_suggest", "set_notes_read_video", "set_proposal"),
 }
 FLAGGED = ("action", "failed")
@@ -233,9 +234,25 @@ def section_publishing(f: dict) -> dict:
     return _s("waiting", "After the final video is approved.")
 
 
+def section_talking(f: dict) -> dict:
+    """Talking shots (hosted, paid per line, started only by the owner) and the free first draft. Never blocks."""
+    t = f.get("talking") or {}
+    n, keyed = t.get("lines", 0), t.get("keyed", 0)
+    if not f.get("audio") or not n:
+        return _s("waiting", "After the storyboard scenes exist (audio episodes).")
+    if t.get("running"):
+        return _s("running", f"{keyed} of {n} lines keyed; {t['running']} running.", "running")
+    if t.get("failed"):
+        return _s("todo", f"{keyed} of {n} lines keyed; {t['failed']} failed (they stay failed until you run them again).")
+    if keyed == n:
+        return _s("done", f"All {n} lines have a keyed talking clip. Make the draft to watch the whole episode.")
+    return _s("todo", f"{keyed} of {n} lines have a keyed talking clip. Choose lines and run them (cost shown first), or make "
+                      "the draft with what exists.")
+
+
 RULES = {"lines": section_lines, "notes": section_notes, "people": section_people, "plan": section_plan,
          "cast": section_cast, "script": section_script, "storyboard": section_storyboard, "set": section_set,
-         "production": section_production, "review": section_review, "publishing": section_publishing}
+         "talking": section_talking, "production": section_production, "review": section_review, "publishing": section_publishing}
 
 
 def sections(f: dict) -> dict:
@@ -272,6 +289,14 @@ def _job(j: Job) -> dict:
     return {"id": j.id, "kind": j.kind, "status": j.status, "error": (j.error or "")[:500], "scene_id": j.scene_id,
             "character_id": j.character_id, "set_id": p.get("set_id"), "created_at": ts(j.created_at),
             "finished_at": ts(j.finished_at), "revision": j.revision}
+
+
+def _talking(db: Session, ep: Episode) -> dict:
+    try:
+        from .draft import talking_counts
+        return talking_counts(db, ep)
+    except Exception:   # noqa: BLE001 (the section is informative; it never breaks the workspace)
+        return {}
 
 
 def facts(db: Session, ep: Episode) -> dict:
@@ -320,6 +345,7 @@ def facts(db: Session, ep: Episode) -> dict:
     set_ids = {k for k, r in recs.items() if r.get("episode_id") == ep.id}
     by["set"] = [{**j, "scene_id": None, "character_id": None} for j in panel_jobs(db, ep, set_ids)]
     return {
+        "talking": _talking(db, ep) if audio else {},
         "audio": audio, "stage": ep.stage, "needs_trim": bool((tr.get("source_media") or {}).get("needs_trim")),
         "lines": len(lines), "unlabelled": sum(1 for ln in lines if not ln.get("speaker")),
         "speakers_without_character": [s for s in speakers if s not in keys] if audio else [],

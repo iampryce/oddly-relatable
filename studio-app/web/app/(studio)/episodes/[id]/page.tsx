@@ -17,11 +17,12 @@ import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
 import AudioPanel, {type AudioParts} from '@/components/AudioPanel';
 import EpisodeSetPicker from '@/components/EpisodeSetPicker';
+import TalkingShots from '@/components/TalkingShots';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
 import {bannerText, isOpen, jobLine, TONE, type Section} from '@/lib/workspace';
 
 const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
-const AUDIO_ONLY = ['people', 'plan', 'lines', 'notes'];
+const AUDIO_ONLY = ['people', 'plan', 'lines', 'notes', 'talking'];
 
 function loadOpen(id: string): Record<string, boolean> {
   try { return JSON.parse(window.localStorage.getItem(`episode-open-${id}`) || '{}') || {}; } catch { return {}; }
@@ -78,6 +79,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         : <p className="muted small">{ep.source === 'audio' ? 'The poses each character needs are listed once the scenes are built.' : 'The cast comes from the script.'}</p>}</>;
       case 'script': return <>{ep.format === 'long' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}{p.scenes}<ScriptTab {...ctx} /></>;
       case 'storyboard': return <StoryboardTab {...ctx} />;
+      case 'talking': return <TalkingShots ep={ep} />;
       case 'production': return <ProductionTab {...ctx} />;
       case 'review': return <ReviewTab {...ctx} />;
       case 'publishing': return <PublishTab {...ctx} />;

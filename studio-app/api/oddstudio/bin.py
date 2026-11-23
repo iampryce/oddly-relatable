@@ -162,7 +162,7 @@ def protect(db: Session, kind: str, ref: str) -> str | None:
 def is_comparison_clip(a) -> bool:
     """A motion-comparison video (the Leo & Ben comparison or the shot comparison), never an episode's own render."""
     key = a.storage_key or ""
-    return a.kind == "video" and ("/comparison/" in key or "/shot-compare/" in key)
+    return a.kind == "video" and ("/comparison/" in key or "/shot-compare/" in key or "/draft/" in key)
 
 
 def label_of(db: Session, kind: str, ref: str) -> str:
