@@ -507,7 +507,7 @@ def _line_plan(recs: dict, ep_id: int, scene_id: int, line: int) -> dict | None:
     return best
 
 
-def line_status(p: dict | None) -> tuple[str, str]:
+def line_status(p: dict | None, db=None) -> tuple[str, str]:
     """(status, message) of a line's talking shot: not run / preparing / queued / running / failed / keying / keyed."""
     if p is None:
         return "not run", ""
@@ -521,6 +521,9 @@ def line_status(p: dict | None) -> tuple[str, str]:
     if r.get("status") == "failed":
         return "failed", r.get("error") or ""
     k = r.get("key") or {}
+    if db is not None and k:
+        from .shot_compare import key_state
+        k = key_state(db, p["id"], IT, k) or {}
     if k.get("status") == "done":
         return "keyed", ""
     if k.get("status") == "failed":
@@ -537,7 +540,7 @@ def talking_lines(db, ep) -> list[dict]:
             if "start" not in ln:
                 continue
             p = _line_plan(recs, ep.id, sc.id, i)
-            st, msg = line_status(p)
+            st, msg = line_status(p, db)
             secs = SC.bill_seconds(p) if p else round(float(ln["end"]) - float(ln["start"]), 3)
             r = ((p or {}).get("results") or {}).get(IT) or {}
             row = {"scene_id": sc.id, "scene": sc.position, "line": i, "speaker": ln.get("speaker"), "text": ln.get("text", ""),

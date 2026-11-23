@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .db import Base
 
@@ -213,6 +213,13 @@ class Job(Base):
     cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
 
+def fit_text(value, limit: int) -> str:
+    """A text cut to its column's length (with an ellipsis), so a long label can never fail an insert (job 352: a
+    keyed copy's label longer than assets.label failed the whole keying job)."""
+    v = "" if value is None else str(value)
+    return v if len(v) <= limit else v[: limit - 1].rstrip() + "…"
+
+
 class Asset(Base):
     __tablename__ = "assets"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -223,6 +230,10 @@ class Asset(Base):
     kind: Mapped[str] = mapped_column(String(40))                    # video | storyboard-sheet | scene-reference | audio | report | manifest | thumbnail
     label: Mapped[str] = mapped_column(String(200), default="")
     storage_key: Mapped[str] = mapped_column(String(500))
+
+    @validates("label")
+    def _fit_label(self, _key, value):
+        return fit_text(value, 200)
     content_type: Mapped[str] = mapped_column(String(100))
     size: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[str] = mapped_column(String(64), default="")
@@ -290,6 +301,10 @@ class BinItem(Base):
     ref: Mapped[str] = mapped_column(String(80))                     # the item's id (a set's id is a string)
     label: Mapped[str] = mapped_column(String(300), default="")
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    @validates("label")
+    def _fit_label(self, _key, value):
+        return fit_text(value, 300)
     deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     deleted_by: Mapped[str] = mapped_column(String(120), default="")
     files: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)    # storage keys removed for good
