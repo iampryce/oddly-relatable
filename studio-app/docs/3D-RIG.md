@@ -32,3 +32,35 @@ API (`oddstudio/head_angles.py`):
 - the `head_angles` job.
 
 The drawings are character assets of kind `head-angle`. The asset's `expression` field holds the angle.
+
+## The renderer (PR 2)
+
+Settings › Motion has two rig animators side by side:
+- **Studio 2D rig animator:** unchanged, still available.
+- **Studio 3D rig animator (three.js, CPU, free):** the 3D one.
+
+Both use the same acting renderer (`production/animation/render-acting.mjs`). With the 3D option, the studio adds `"engine": "3d"` to the render spec and passes each character's approved head drawings (`cast[key].head_angles`).
+
+What stays the same:
+- the choreography: seats, walking, sitting down and standing up, timed actions, scene and set changes;
+- the shots, speech bubbles, captions, the optional hook banner and the end card.
+
+Only the characters are drawn differently (`production/animation/rig3d.mjs`):
+- **Body:** built from the approved 2D rig. A round torso in the clothing colour, with the approved clothing art on its front; black tube limbs with round joints; mitten hands; shoes in the shoe colour. Every frame keeps every limb at its length, so no body part is lost.
+- **Face:** the front head is the live 2D face, so the line's expression, lip sync, blinks and eye direction work as before.
+- **Turning:** the head picture follows where the body and head point: front, three-quarter, side or back, with left being the right drawing mirrored. Approved head drawings are used; any missing angle uses its mock.
+- **Seated:** the knees come apart and the shins hang straight down. The sitting angle is fitted to each character's leg length and the seat's marked feet line, so the soles reach the floor. A seat marked higher than the legs can reach leaves the feet hanging a little rather than stretching the legs; a seat marked too low keeps the thighs level.
+- **Desk front:** characters seated behind a desk are drawn before the desk front, so they sit behind it.
+- **Pictures:** the storyboard pictures ("Refresh stills") come from the same renderer, so they match the video.
+
+The pose maths is in `production/animation/rig3d-pose.mjs`, tested without the canvas or three.js packages.
+
+### Running on the server
+
+- **Packages:** the renderer uses `three@0.162.0`, the last three.js release that runs on WebGL 1, and `gl@8.1.6` (headless-gl), pinned in `skills/directing-stickman-videos/package.json`. headless-gl has a prebuilt binary for the worker's Linux (Debian 13, Node 22).
+- **Display:** headless-gl needs a display on Linux, so the studio runs the renderer under `xvfb-run`, a virtual display; nothing is shown anywhere. The worker image adds `xvfb xauth libgl1 libglx-mesa0 libgl1-mesa-dri libxi6`.
+- **No browser:** Chromium is not needed.
+- **Speed:** on a 4-core laptop CPU at 1080x1920, a frame takes about 0.12–0.17 s, against about 0.11 s for the 2D renderer. Each character's face is redrawn and uploaded only when it changes (the software renderer's texture upload is the costly part), and only the box around the characters is rendered.
+- **Determinism:** the same input gives the same frames.
+- **Deploying:** the image is built and rolled out as before; the deploy script's backup and rollback are unchanged.
+- **Check:** Settings › Motion › Test renders a short line with either rig animator.

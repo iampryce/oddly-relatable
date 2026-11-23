@@ -98,8 +98,42 @@ def head_ratio(rig: dict) -> float:
         return 0.0
 
 
+MOTION_2D, MOTION_3D = "procedural-rig", "procedural-rig-3d"
+
+
 def enabled(db) -> bool:
-    return get_section(db, "motion").get("provider") == "procedural-rig"
+    """The acting renderer draws the episode: the Studio 2D rig animator or the Studio 3D rig animator (feat/3d-rig)."""
+    return get_section(db, "motion").get("provider") in (MOTION_2D, MOTION_3D)
+
+
+def three_d(db) -> bool:
+    """Settings > Motion is the Studio 3D rig animator: the same acting, the characters drawn as 3D stickmen."""
+    return get_section(db, "motion").get("provider") == MOTION_3D
+
+
+def node_command(node_bin: str, args: list[str], three: bool) -> list[str]:
+    """The renderer's command line. The 3D rig animator draws with headless-gl, which needs a display on Linux: without
+    one (the worker) it runs under xvfb-run, a virtual display; nothing is shown anywhere."""
+    import os
+    import shutil
+    import sys
+    cmd = [node_bin, *args]
+    if three and sys.platform.startswith("linux") and not os.environ.get("DISPLAY") and shutil.which("xvfb-run"):
+        cmd = ["xvfb-run", "-a", "-s", "-screen 0 1920x1920x24", *cmd]
+    return cmd
+
+
+def head_angle_files(db, c, folder: Path) -> dict[str, str]:
+    """The character's approved head drawings (three-quarter, side, back) as local files for the 3D renderer; an angle
+    without an approved drawing is left out and the renderer uses its mock."""
+    from .head_angles import approved_angles
+    from .storage import storage
+    out = {}
+    for angle, a in approved_angles(db, c).items():
+        dst = folder / "head-angles" / c.key / f"{angle}{Path(a.storage_key).suffix or '.png'}"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        out[angle] = str(storage().get_to_file(a.storage_key, dst))
+    return out
 
 
 def infer_gesture(expression: str, index: int) -> str | None:
@@ -270,6 +304,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         # react or are looked at, so they have no line of their own to walk in on)
         on = k in first_scene_cast or not first_scene_cast or k not in speaking
         cast[k] = {"rig": str(rd), "height": HEIGHT, "lips": lips, "start": "on" if on else "off"}
+        if three_d(db):
+            cast[k]["head_angles"] = head_angle_files(db, c, folder)
     # one height for everyone, fitted to the episode's set: close seats draw the cast smaller so seated heads do not
     # pile up (the chairs in a generated set are often spaced for normal proportions, not for big-headed characters)
     h = cast_height(studio_sets.seats_of(st), max(ratios or [0.0]))
@@ -400,6 +436,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             **({"flip": True} if first is not None and scene_sets.is_reverse(db, scene_sets.scene_set(ep, first)) else {}),
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
             "timeline": "absolute" if absolute else "sequential"}
+    if three_d(db):
+        spec["engine"] = "3d"                         # the Studio 3D rig animator draws the characters
     if stills:
         spec["stills"] = still_times(lines, stills)   # the presentation (dialogue display) is the video's
     spec_file = folder / "acting.json"
@@ -408,8 +446,9 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     env = engine.env_for_node()
     if s.ffmpeg:
         env["FFMPEG"] = s.ffmpeg
-    r = subprocess.run([s.node_bin, str(ANIM / "render-acting.mjs"), str(spec_file), str(silent)], capture_output=True, text=True,
-                       encoding="utf-8", cwd=str(REPO_ROOT), env=env, timeout=s.job_timeout_seconds, stdin=subprocess.DEVNULL)
+    r = subprocess.run(node_command(s.node_bin, [str(ANIM / "render-acting.mjs"), str(spec_file), str(silent)], three_d(db)),
+                       capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT), env=env, timeout=s.job_timeout_seconds,
+                       stdin=subprocess.DEVNULL)
     if r.returncode != 0 or not silent.exists():
         raise engine.EngineRunError("the acting renderer failed: " + (r.stderr or r.stdout)[-800:])
     report = json.loads(r.stdout.strip().splitlines()[-1])

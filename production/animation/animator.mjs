@@ -172,7 +172,7 @@ function mouthShape(ctx, c, v, lw) {
   ctx.restore();
 }
 
-function drawHead(ctx, c0, p) {
+export function drawHead(ctx, c0, p) {
   const c = {...c0, ...(c0.faces[p.expression] || c0.faces.neutral)};
   ctx.drawImage(c.head, c.headOff.x, c.headOff.y);
   const lw = c.lw;
