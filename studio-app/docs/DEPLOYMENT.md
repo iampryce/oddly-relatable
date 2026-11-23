@@ -31,8 +31,7 @@
    - `OWNER_EMAIL`, and `OWNER_PASSWORD_HASH` from `python -m oddstudio.auth hash`.
    - Leave `COOKIE_SECURE=false` while access is by SSH tunnel over plain HTTP.
    - Optional provider keys (see `VOICE-AND-CASTING.md`).
-3. **Nightly backup:** add a root crontab line, or a systemd timer:
-   install `deploy/cron.d-oddstudio` as `/etc/cron.d/oddstudio` (nightly backup with `BACKUP_KIND=nightly`); see MAINTENANCE.md
+3. **Scheduled jobs:** install `deploy/cron.d-oddstudio` as `/etc/cron.d/oddstudio` (weekly housekeeping). There is no nightly backup since 2026-11-23: backups are made before every deploy. MAINTENANCE.md says how to add a nightly one back.
 4. **Recommended but separate (not done by this deployment):** the SSH hardening listed in `docs/VPS_PRODUCTION_READINESS.md`. That covers a named admin account, key-only login and no root password login.
 
 ## 3. Deploy a release
@@ -60,17 +59,17 @@ The first build downloads base images and packages: Debian, Node and Python pack
 
 ## 4. Backups
 
-`deploy/backup.sh`, run nightly and before every deploy, writes `/srv/stickman/backups/<UTC stamp>-<kind>/` (kind `nightly` or `deploy`, kept separately: see MAINTENANCE.md) with:
+`deploy/backup.sh`, run before every deploy (and before a restore), writes `/srv/stickman/backups/<UTC stamp>-<kind>/` (kind `nightly` or `deploy`, kept separately: see MAINTENANCE.md) with:
 - `db.dump`: `pg_dump -Fc` of all workflow state;
 - `media.tar.gz`: the `work_data` volume, which holds local media storage;
 - `SHA256SUMS`.
 
-**Retention:** the newest 7 nightly and 3 deploy-time backups, counted separately (complete backups only; see MAINTENANCE.md). A deploy changes its count with `DEPLOY_KEEP_BACKUPS`.
+**Retention:** the newest 3 deploy-time backups (complete backups only; see MAINTENANCE.md). Nightly backups are removed; any left from before are kept up to 7. A deploy changes its count with `DEPLOY_KEEP_BACKUPS`.
 - **Free space first:** every backup checks that the disk has room for it (plus 2G left free, and 5G for a deploy's image build) and otherwise stops with a clear message before writing anything; a backup that fails part-way removes its own incomplete folder.
 - Redis is not backed up: it only carries job IDs, and queued jobs are re-announced from PostgreSQL when a worker starts.
 - When S3 storage is used, media are in S3; enable bucket versioning and lifecycle rules there.
 
-**Off-box copy:** set `OFFSITE_S3=s3://<bucket>/<prefix>` for the cron job. It needs the AWS CLI and credentials limited to that prefix.
+**Off-box copy:** set `OFFSITE_S3=s3://<bucket>/<prefix>` where `backup.sh` runs. It needs the AWS CLI and credentials limited to that prefix.
 - The VPS readiness review requires an off-box target. Until one is configured, backups live only on the server's disk, and the owner can fetch them over SSH (`scp`).
 
 **Test a restore** at least once after the first deploy, on a copy if possible:

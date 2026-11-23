@@ -1,10 +1,10 @@
 # Oddly Relatable Studio scheduled jobs. Install as /etc/cron.d/oddstudio (see studio-app/docs/MAINTENANCE.md).
-# Times are the server's local time. Both scripts run from the current release.
+# Times are the server's local time. The script runs from the current release.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Nightly backup (database dump + media), keeping the newest 7 nightly backups (deploy-time backups are counted apart).
-30 3 * * * root BACKUP_KIND=nightly KEEP_NIGHTLY=7 /srv/stickman/current/studio-app/deploy/backup.sh >> /var/log/oddstudio-backup.log 2>&1
+# No nightly backup (removed 2026-11-23, after the disk filled up): deploy.sh makes a backup before every deploy and
+# keeps the newest 3. To add the nightly backup back, see studio-app/docs/MAINTENANCE.md.
 
 # Weekly housekeeping, Sunday 04:30, applied (owner decision 2026-11-21, after one verified manual --apply): removes
 # old releases and their images, unused images, the build cache above 10GB, and old backups and dumps (the newest of

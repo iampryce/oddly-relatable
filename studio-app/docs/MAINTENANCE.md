@@ -1,14 +1,21 @@
-# Server maintenance: nightly backup and weekly housekeeping
+# Server maintenance: backups and weekly housekeeping
 
 Nothing in this change is installed or run automatically. The owner installs it after this PR is merged and deployed, following the steps below.
 
 ## What changes
-- **Nightly backup** (`deploy/backup.sh` with `BACKUP_KIND=nightly`, 03:30 server time).
-  - It dumps the database and archives the media. Until now, backups only ran on deploys; no nightly job was installed.
-  - **Paused since 2026-11-23** (the disk filled up): line 7 of the installed `/etc/cron.d/oddstudio` is commented out with the prefix `# PAUSED 2026-11-23 (disk full): `. `backup.sh` and the deploy-time backups are unchanged, so every deploy still makes a backup first; the newest 30-day database dump in `db-dumps/` stays as it is. While paused, old-backup cleanup keeps the newest 3 complete backups, nightly or deploy-time. **Re-enable** (once there is room for a backup each night, about 2.5 GB plus 2 GB left free): `sed -i 's|^# PAUSED 2026-11-23 (disk full): ||' /etc/cron.d/oddstudio`, then `grep backup.sh /etc/cron.d/oddstudio` should show the line starting with `30 3 * * *`.
-- **Retention is counted per kind**, so frequent deploys can't push out the nightly history.
+- **Nightly backups are removed (2026-11-23, after the disk filled up). Only deploy-time backups exist now.**
+  - `deploy.sh` runs `deploy/backup.sh` before every deploy (database dump and media, with checksums) and keeps the newest 3 complete ones. `restore.sh` also makes one before it restores. Nothing else makes a backup: there is no cron line, systemd timer or scheduler in the studio for it.
+  - The nightly entry was deleted from the installed `/etc/cron.d/oddstudio` and from the repo copy `deploy/cron.d-oddstudio`. The installed file before the change is kept as `/root/oddstudio.cron.2026-11-23.bak`.
+  - `backup.sh` still accepts `BACKUP_KIND=nightly`, and `maintenance.sh` and `restore.sh` still handle any `-nightly` folders and dumps left from before.
+  - Without nightly backups, the database's history goes back only as far as the oldest kept deploy-time backup, and no new dumps go to `db-dumps/`.
+  - **To add them back** (first check there is room: about 2.5 GB per backup plus 2 GB left free, times the number kept): add this line to `/etc/cron.d/oddstudio`, and to `deploy/cron.d-oddstudio` in the repo so that a reinstall keeps it:
+    ```
+    30 3 * * * root BACKUP_KIND=nightly KEEP_NIGHTLY=7 /srv/stickman/current/studio-app/deploy/backup.sh >> /var/log/oddstudio-backup.log 2>&1
+    ```
+    Then `grep backup.sh /etc/cron.d/oddstudio` should show it. Cron picks up the change by itself.
+- **Retention is counted per kind**, so frequent deploys can't push out the nightly history (when nightly backups are on).
   - Folders are named `<stamp>-nightly` or `<stamp>-deploy`. Older unsuffixed folders count as deploy-time.
-  - **Nightly: the newest 7** (`KEEP_NIGHTLY`).
+  - **Nightly: the newest 7** (`KEEP_NIGHTLY`; none are made now).
   - **Deploy-time** (`deploy.sh`, `restore.sh`): **the newest 3** (2026-11-23, after a deploy-time backup filled the disk). `deploy.sh` sets this itself (`DEPLOY_KEEP_BACKUPS`, default 3), so the `KEEP_DEPLOY=5` that an older installed `ci-deploy.sh` passes is not used; `restore.sh` and `maintenance.sh` use `KEEP_DEPLOY` (default 3).
   - The old `KEEP` variable still works for `backup.sh` run by hand and sets the count for the kind being written.
   - **Only complete backups count** (a folder with `SHA256SUMS`). An incomplete folder is listed by `backup.sh` and `maintenance.sh` and left alone: check it, then remove it by hand.
@@ -28,7 +35,7 @@ Nothing in this change is installed or run automatically. The owner installs it 
 - **Projected free space:** the dry run ends with `projected free after --apply`, in the same units as `df -h`, counting the releases it would remove, the images no container uses, and the build cache above the cap.
 - **Tuning:** `KEEP_RELEASES`, `KEEP_NIGHTLY`, `KEEP_DEPLOY`, `DUMP_DAYS`, `LOG_DAYS`, `BUILD_CACHE_HOURS`, `BUILD_CACHE_MAX` and `JOURNAL_MAX` are environment variables.
 - **The 30-day database-dump folder** (`/srv/stickman/db-dumps/`):
-  - Each nightly backup also writes `<stamp>-nightly.dump` with a `.sha256` file there.
+  - Each nightly backup also wrote `<stamp>-nightly.dump` with a `.sha256` file there. With nightly backups removed, no new dumps are added; the existing ones age out after 30 days, except the newest, which is kept.
   - Dumps are kept for 30 days (`DUMP_DAYS`), pruned by age by the nightly job and by `maintenance.sh`. The newest dump is never removed, however old it is.
   - Dumps are small (about 135 KB today), so a month of database history costs little, while full backup folders (with about 1.2 GB of media each) are kept for a week.
 - **Restore** (`deploy/restore.sh`) takes any backup folder, whichever of the three name forms it has: `…-nightly`, `…-deploy` or an old unsuffixed one. It also takes a dump from `db-dumps/`, restoring the database only after checking the dump's `.sha256`.
@@ -42,7 +49,8 @@ Nothing in this change is installed or run automatically. The owner installs it 
 # 1. Look at the dry run first: nothing is removed.
 /srv/stickman/current/studio-app/deploy/maintenance.sh
 
-# 2. Install the scheduled jobs (nightly backup; weekly housekeeping with --apply).
+# 2. Install the scheduled jobs (weekly housekeeping with --apply; no nightly backup since 2026-11-23).
+#    Note: the repo copy runs maintenance.sh WITH --apply; the file installed on the server runs the dry run.
 install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-oddstudio /etc/cron.d/oddstudio
 
 # 3. The CI deploy wrapper lives outside the repo: reinstall it (check the hash first). Not needed for the retention:
