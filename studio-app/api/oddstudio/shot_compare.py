@@ -577,6 +577,8 @@ def view(db: Session, p: dict) -> dict:
     from .bin import hidden_ids
     gone = hidden_ids(db, "clip")
     for k, r in (p.get("results") or {}).items():
+        if r.get("key"):
+            r["key"] = key_state(db, p["id"], k, r["key"])
         kk = r.get("key") or {}
         if kk.get("status") == "done":
             kk["urls"] = {x: url(kk.get(f"{x}_asset_id")) for x in ("keyed", "over_set", "over_grey", "check")}
@@ -913,9 +915,9 @@ def frame_inputs(db: Session, p: dict, folder: Path) -> tuple[Path, dict]:
 
 
 def store_frame(db: Session, p: dict, framing: str, frame: Path, job_id=None) -> int:
-    what = "approved neutral pose alone on a flat key colour" if framing == "cutout" else "approved set + approved neutral pose"
+    what = "approved pose on key colour" if framing == "cutout" else "approved set and pose"
     return store_asset(db, ep_id=p["episode_id"], src=frame, key=f"episodes/{p['episode_id']}/shot-compare/{p['id']}/first-frame-{framing}.png",
-                       kind="scene-reference", label=f"Shot comparison first frame, {FRAME_WORDS[framing]} ({what})",
+                       kind="scene-reference", label=f"Shot comparison first frame: {framing} ({what})",
                        content_type="image/png", job_id=job_id).id
 
 
@@ -1417,6 +1419,7 @@ def shot_generate(ctx: Ctx) -> dict:
              check=check, seconds=tm["seconds"], request_id=tm["request_id"])
         return {"pid": pid, "model": model, "actual_usd": actual, "check": check}
     except Exception as e:
+        db.rollback()
         mark(status="failed", error=str(e)[:300])
         raise no_retry(e)
 
@@ -1481,7 +1484,7 @@ def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
                                                 lambda info: mark(progress=info), accepted=accepted)
         # the provider's own file first (it deletes outputs after 7 days), unchanged
         ra = store_asset(db, ep_id=p["episode_id"], src=raw, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}-raw.mp4",
-                         kind="video", label=f"Shot comparison: {m['label']}, the provider's file as delivered ({m['terms']})",
+                         kind="video", label=f"Shot comparison: {m['short']} on WaveSpeed, provider's file as delivered",
                          content_type="video/mp4", job_id=job.id)
         db.commit()
         info = stream_size(raw)
@@ -1492,7 +1495,7 @@ def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
         check = finish(raw, wav, p["seconds"], out, FRAME_SIZE[framing] if own_size else (W, H),
                        pad_colour=p["key_colour"] if keyed else "black")
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
-                         kind="video", label=f"Shot comparison: {m['label']} ({m['terms']})", content_type="video/mp4", job_id=job.id)
+                         kind="video", label=f"Shot comparison: {m['short']} on WaveSpeed, talking clip", content_type="video/mp4", job_id=job.id)
         mark(status="done", asset_id=va.id, raw_asset_id=ra.id, actual_usd=est["usd"], billed_seconds=est["billed_seconds"],
              per_second_usd=round(est["usd"] / max(0.001, p["seconds"]), 4), check=check, seconds=tm["seconds"],
              request_id=tm["request_id"], output_size=info, **meta)
@@ -1500,6 +1503,7 @@ def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
             queue_key(db, pid, model)
         return {"pid": pid, "model": model, "actual_usd": est["usd"], "check": check}
     except Exception as e:
+        db.rollback()
         mark(status="failed", error=str(e)[:300], **meta)
         raise no_retry(e)
 
@@ -1549,22 +1553,23 @@ def shot_key(ctx: Ctx) -> dict:
         s = get_settings()
         res = talking_key.key_clip(src, wav, colour, Path(spec["plate"]) if spec else None, folder / "out", s.ffmpeg, s.ffprobe)
         base = f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}"
-        kinds = {"keyed": ("video/webm", "keyed.webm", "keyed copy with transparency (VP9 WebM alpha)"),
-                 "over_set": ("video/mp4", "over-set.mp4", "keyed, over the episode's approved set (preview)"),
-                 "over_grey": ("video/mp4", "over-grey.mp4", "keyed, over mid-grey (preview)"),
-                 "check": ("image/png", "check.png", "keyed check frames at 10%, 50% and 90% (set above, grey below)")}
+        kinds = {"keyed": ("video/webm", "keyed.webm", "keyed copy (WebM alpha)"),
+                 "over_set": ("video/mp4", "over-set.mp4", "keyed, over the set"),
+                 "over_grey": ("video/mp4", "over-grey.mp4", "keyed, over grey"),
+                 "check": ("image/png", "check.png", "keyed check frames")}
         ids = {}
         for k, (ctype, name, what) in kinds.items():
             ids[f"{k}_asset_id"] = store_asset(db, ep_id=p["episode_id"], src=res["paths"][k], key=f"{base}-{name}",
                                                kind="scene-reference" if k == "check" else "video",
-                                               label=f"Shot comparison: {TALKING[model]['label']}, {what} ({TALKING[model]['terms']})",
+                                               label=f"Shot comparison: {TALKING[model]['short']} on WaveSpeed, {what}",
                                                content_type=ctype, job_id=job.id).id
         db.commit()
         mark(status="done", colour=colour, frames=res["frames"], check_at=res["check_at"], size=res["size"],
-             set_id=p.get("set_id"), error=None, **ids)
+             set_id=p.get("set_id"), error=None, terms=TALKING[model]["terms"], **ids)
         return {"pid": pid, "model": model, "frames": res["frames"]}
     except Exception as e:
-        mark(status="failed", error=str(e)[:300])
+        db.rollback()                 # a failed insert leaves the session unusable: record the failure on a clean one
+        mark(status="failed", error=f"{type(e).__name__}: {e}"[:300], job_id=job.id)
         raise
 
 
@@ -1572,16 +1577,33 @@ class KeyIn(BaseModel):
     model: str
 
 
+def key_state(db: Session, pid: str, model: str, k: dict | None) -> dict | None:
+    """The keying step as it really is: a key still marked queued or running whose job is no longer queued or running
+    (it failed or the worker stopped) is shown as failed, with that job's reason, so Key again is offered."""
+    if not k or k.get("status") not in ("queued", "running"):
+        return k
+    from .models import Job
+    jobs = [j for j in db.query(Job).filter(Job.kind == "shot_key").order_by(Job.id.desc()).limit(200).all()
+            if (j.payload or {}).get("pid") == pid and (j.payload or {}).get("model") == model]
+    if any(j.status in ("queued", "running") for j in jobs):
+        return k
+    last = jobs[0] if jobs else None
+    why = (last.error or "").strip() if last is not None else ""
+    return {**k, "status": "failed", "stale": True,
+            "error": f"the keying job{f' {last.id}' if last is not None else ''} stopped: {why or 'no reason recorded'}"[:300]}
+
+
 @router.post("/motion/shot/{pid}/key")
 def key_again(pid: str, body: KeyIn, db: Session = Depends(get_db)):
-    """Free: run the keying step again on a finished cutout clip (for example after it failed)."""
+    """Free: run the keying step again on a finished cutout clip (for example after it failed). It keys the stored
+    clip again; the clip itself and the provider's file are only read, and nothing is sent to any provider."""
     p = records(db).get(pid)
     if not p:
         raise HTTPException(404, "no such plan")
     r = (p.get("results") or {}).get(body.model) or {}
     if body.model not in TALKING or r.get("status") != "done" or r.get("framing") != "cutout" or not p.get("key_colour"):
         raise HTTPException(409, "only a finished cutout clip can be keyed")
-    if (r.get("key") or {}).get("status") in ("queued", "running"):
+    if (key_state(db, pid, body.model, r.get("key")) or {}).get("status") in ("queued", "running"):
         raise HTTPException(409, "already keying")
     job = queue_key(db, pid, body.model)
     return {"job_id": job.id}
@@ -1675,6 +1697,7 @@ def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
         gpu.touch(db, w["session"], clips=1)
         return {"pid": pid, "model": model, "actual_usd": actual, "gpu_seconds": gsec, "check": check}
     except Exception as e:
+        db.rollback()                 # a failed insert leaves the session unusable: record the failure on a clean one
         mark(status="failed", error=str(e)[:300], progress=None)
         if w is not None:
             if submitted:                      # the failed job's files do not stay on the worker
