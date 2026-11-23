@@ -5,6 +5,8 @@ Inputs are ONLY the studio's own approved art: the speaking character's approved
 scene's) approved set plate, composed locally into one first frame; and the line's own recorded audio, cut from the
 episode's recording. Frames or stills from the uploaded reference video never exist after analysis and are never used.
 The action description is written from the video notes' fixed-list words (staging and beats) and is editable.
+The owner may also upload their own first frame for a line (made from our approved art, which they confirm): it becomes
+a second plan beside the original-art one, with the same line audio, action and rig render, and its own Run buttons.
 
 Flow: plan (free, a local job: first frame, audio cut, rig render of the same line) -> the page shows, per model, the
 exact request (prompt, the image and audio sent), the estimated cost and the experimental budget's running total ->
@@ -30,7 +32,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -382,6 +384,13 @@ def make_plan(body: PlanIn, db: Session = Depends(get_db)):
     return {"plan": view(db, recs[pid]), "job_id": job.id}
 
 
+def frame_words(p: dict, model: str) -> str:
+    """What the first frame in a request is, in words (shown with the request)."""
+    if p.get("own_frame"):
+        return "your own first frame (uploaded; you confirmed it was made from our approved art)"
+    return f"the {framing_of(p, model)} first frame (approved set + approved neutral pose)"
+
+
 def framing_of(p: dict, model: str) -> str:
     """The first frame a model gets: the owner's choice for this plan, else the model's default."""
     return (p.get("framing") or {}).get(model) or ALL_MODELS[model]["framing"]
@@ -403,15 +412,16 @@ def view(db: Session, p: dict) -> dict:
         out["requests"] = [{"model": k, "label": m["label"], "endpoint": m["endpoint"], "price": m["price"],
                             "estimate": estimate(k, p["seconds"]), "framing": framing_of(p, k),
                             "frame_url": out["frame_urls"].get(framing_of(p, k)),
-                            "body": request_for(k, p["action"], f"<the {framing_of(p, k)} first frame shown>", "<the line audio shown above>", p["seconds"]),
-                            "sends": [f"the {framing_of(p, k)} first frame (approved set + approved neutral pose)"]
+                            "body": request_for(k, p["action"], "<your first frame shown>" if p.get("own_frame") else f"<the {framing_of(p, k)} first frame shown>",
+                                                "<the line audio shown above>", p["seconds"]),
+                            "sends": [frame_words(p, k)]
                                      + (["the line's own recorded audio"] if m["kind"] == "avatar" else []),
                             "result": p["results"].get(k)} for k, m in MODELS.items()]
         out["requests"] += [{"model": k, "label": m["label"], "backend": "gpu", "endpoint": f"our GPU worker: workflow {m['workflow']}",
                              "price": m["price"], "estimate": estimate(k, p["seconds"], db), "framing": framing_of(p, k),
                              "frame_url": out["frame_urls"].get(framing_of(p, k)) if m["kind"] != "dub" else None,
                              "body": gpu_job_preview(k, p), "blocked": gpu_blocked(p, k),
-                             "sends": ([f"the {framing_of(p, k)} first frame (approved set + approved neutral pose)"] if m["kind"] != "dub"
+                             "sends": ([frame_words(p, k)] if m["kind"] != "dub"
                                        else [f"this line's {MODELS[m['needs']]['label']} clip (made from our own art)"])
                                       + ["the line's own recorded audio"],
                              "result": p["results"].get(k)} for k, m in GPU_MODELS.items()]
@@ -535,7 +545,8 @@ def plan_for_line(db: Session, ep: Episode, sc: StoryboardScene, line: int) -> t
     from .queue import enqueue
     recs = records(db)
     for p in sorted(recs.values(), key=lambda p: -p.get("created", 0)):
-        if p["episode_id"] == ep.id and p["scene_id"] == sc.id and p["line"] == line and p.get("status") != "failed":
+        if (p["episode_id"] == ep.id and p["scene_id"] == sc.id and p["line"] == line and p.get("status") != "failed"
+                and not p.get("base_plan")):
             return p, False
     ln = sc.lines[line]
     if "start" not in ln:
@@ -581,12 +592,16 @@ def batch_view(db: Session, eid: int) -> dict:
     """The episode's latest plan per line (progress, actions, first frames, results) and the budget."""
     from . import fal, gpu
     latest: dict[tuple, dict] = {}
+    own: list[dict] = []
     for p in sorted(records(db).values(), key=lambda p: p.get("created", 0)):
         if p["episode_id"] == eid:
-            latest[(p["scene_id"], p["line"])] = p
+            if p.get("base_plan"):
+                own.append(p)          # the owner's own first frame: beside the line's plan, never instead of it
+            else:
+                latest[(p["scene_id"], p["line"])] = p
     led = fal.spent(db)
     plans = [view(db, p) for p in latest.values()]
-    return {"plans": plans, "ready": sum(1 for p in plans if p["status"] == "ready"),
+    return {"plans": plans, "own_plans": [view(db, p) for p in own], "ready": sum(1 for p in plans if p["status"] == "ready"),
             "preparing": sum(1 for p in plans if p["status"] == "preparing"),
             "spent_usd": round(led["total"], 4), "pending_usd": pending_usd(db), "budget_usd": fal.budget(db),
             "gpu": gpu.availability(db)}
@@ -615,6 +630,110 @@ def set_action(pid: str, body: ActionIn, db: Session = Depends(get_db)):
     save(db, recs)
     db.commit()
     return view(db, p)
+
+
+# ------------------------------------------------------------------ the owner's own first frame (a second arm)
+OWN_FRAME_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+OWN_FRAME_MAX_BYTES = 15 * 1048576
+OWN_FRAME_MAX_PIXELS = 40_000_000
+# what the second plan takes over from the original-art one: the same line, audio, action and rig render
+OWN_FRAME_COPY = ("episode_id", "scene_id", "line", "speaker", "text", "start", "end", "seconds", "action", "tone",
+                  "audio_asset_id", "audio_seconds", "set_id", "rig_asset_id", "rig_check", "rig_error")
+
+
+def own_frame_image(src: Path, out: Path) -> str:
+    """The owner's image as a first frame: transparency flattened onto white, centre-cropped to 9:16 when its shape
+    differs, scaled to W x H (the size of every first frame). Returns what was done, in words (shown with the request)."""
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(src) as im:
+            im.verify()                                   # a truncated or corrupt file fails here
+        with Image.open(src) as im:
+            w, h = im.size
+            if w * h > OWN_FRAME_MAX_PIXELS:
+                raise ValueError(f"the image is {w}x{h}; at most {OWN_FRAME_MAX_PIXELS // 1_000_000} megapixels")
+            im = ImageOps.exif_transpose(im)
+            rgba = im.convert("RGBA")
+    except ValueError:
+        raise
+    except Exception:                                     # noqa: BLE001 (not an image, decompression bomb, ...)
+        raise ValueError("the file is not a readable PNG, JPEG or WebP image")
+    w, h = rgba.size
+    flat = Image.new("RGB", rgba.size, (255, 255, 255))
+    flat.paste(rgba, mask=rgba.getchannel("A"))
+    notes = [f"your {w}x{h} image"]
+    want = W / H
+    if abs(w / h - want) > 0.01:                          # not 9:16: keep the centre
+        if w / h > want:
+            cw = round(h * want)
+            flat = flat.crop(((w - cw) // 2, 0, (w - cw) // 2 + cw, h))
+        else:
+            ch = round(w / want)
+            flat = flat.crop((0, (h - ch) // 2, w, (h - ch) // 2 + ch))
+        notes.append("centre-cropped to 9:16")
+    if flat.size != (W, H):
+        flat = flat.resize((W, H), Image.LANCZOS)
+        notes.append(f"scaled to {W}x{H}")
+    flat.save(out, "PNG")
+    return ", ".join(notes)
+
+
+@router.put("/motion/shot/{pid}/own-frame")
+async def own_frame(pid: str, request: Request, own_art: bool = False, db: Session = Depends(get_db),
+                    user: str = Depends(current_user)):
+    """Free: the owner's own first-frame image for this line. It becomes a SECOND plan beside the original-art one, with
+    the same line audio, action and rig render (nothing is prepared again and no text writer runs), so the same line can
+    be run twice, each request with its own estimate and its own Run. The image is the request body (PNG, JPEG or
+    WebP, at most 15 MB); `own_art` is the owner's confirmation that it was made from our own approved art."""
+    import tempfile
+    recs = records(db)
+    base = recs.get(pid)
+    if not base:
+        raise HTTPException(404, "no such plan")
+    if base.get("base_plan"):
+        raise HTTPException(409, "upload against the line's original-art plan")
+    if base.get("status") != "ready":
+        raise HTTPException(409, "the line's plan is not ready yet (its free preparation is still running or failed)")
+    if not own_art:
+        raise HTTPException(422, "confirm the image was made from our own approved art (no third-party picture or video frame)")
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if ctype not in OWN_FRAME_TYPES:
+        raise HTTPException(415, "upload a PNG, JPEG or WebP image")
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    if declared > OWN_FRAME_MAX_BYTES:
+        raise HTTPException(413, f"the image is larger than {OWN_FRAME_MAX_BYTES // 1048576} MB")
+    with tempfile.TemporaryDirectory() as tmp:
+        src, out = Path(tmp) / f"upload{OWN_FRAME_TYPES[ctype]}", Path(tmp) / "first-frame-own.png"
+        size = 0
+        with open(src, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > OWN_FRAME_MAX_BYTES:
+                    raise HTTPException(413, f"the image is larger than {OWN_FRAME_MAX_BYTES // 1048576} MB")
+                f.write(chunk)
+        if size == 0:
+            raise HTTPException(422, "the uploaded file is empty")
+        try:
+            note = own_frame_image(src, out)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        npid = uuid.uuid4().hex[:10]
+        a = store_asset(db, ep_id=base["episode_id"], src=out, key=f"episodes/{base['episode_id']}/shot-compare/{npid}/first-frame-own.png",
+                        kind="scene-reference", label="Shot comparison first frame: the owner's own image (confirmed made from our approved art)",
+                        content_type="image/png")
+    recs = records(db)
+    recs[npid] = {**{k: base.get(k) for k in OWN_FRAME_COPY}, "id": npid, "base_plan": pid,
+                  "action_source": "copied from the original-art plan", "status": "ready", "created": time.time(), "results": {},
+                  "frame_asset_id": a.id, "frame_assets": {f: a.id for f in FRAMINGS},
+                  "own_frame": {"asset_id": a.id, "by": user, "at": time.time(), "note": note, "own_art_confirmed": True}}
+    save(db, recs)
+    db.add(Event(episode_id=base["episode_id"], kind="episode",
+                 message=f"Shot comparison: {user} added their own first frame for line {base['line'] + 1} ({note}); free"))
+    db.commit()
+    return view(db, recs[npid])
 
 
 class BatchIn(BaseModel):
