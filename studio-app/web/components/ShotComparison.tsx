@@ -3,8 +3,10 @@
 // models; planning (first frames from our approved art, the line's own audio cut, the rig render) starts by itself for
 // every ticked line. One summary (exact clips, total estimate, budget with approved-but-uncharged runs against the cap)
 // and ONE "Run selected" confirm before anything paid runs. Results: one row per line, rig / i2v / avatar side by side.
+// A line can also get the owner's own first frame (uploaded, confirmed made from our approved art): a second plan beside
+// the original-art one, with the same audio and action, and every request has its own Run with its estimate.
 import {useEffect, useMemo, useState} from 'react';
-import {api} from '@/lib/api';
+import {api, uploadFile} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {DeleteButton} from '@/components/BinButtons';
@@ -32,6 +34,8 @@ export function ShotComparison() {
   const ALL = [...PAID, ...gpuModels.map(m => m.id)];
   const label = (m: string) => { const g = gpuModels.find(x => x.id === m); return LABEL[m] || (g ? `${g.short} (GPU)` : m); };
   const plans: any[] = batch.data?.plans || [];
+  const ownPlans: any[] = batch.data?.own_plans || [];
+  const ownOf = (p: any) => ownPlans.filter(o => o.base_plan === p.id);
   const planOf = (l: any) => plans.find(p => p.scene_id === l.scene_id && p.line === l.line);
   const chosen = lines.filter(l => picked.has(lineKey(l)));
   const chosenPlans = chosen.map(planOf).filter(Boolean);
@@ -68,6 +72,19 @@ export function ShotComparison() {
     if (!window.confirm(`Retry ${label(model)} for this line: estimated ${usd(est, 3)}?`)) return;
     try { await api(`/motion/shot/${p.id}/run`, {body: {model}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
+  const runOne = async (p: any, r: any) => {
+    const whose = p.own_frame ? 'your own first frame' : 'the original art';
+    if (!window.confirm(`Run ${r.label} on ${whose} for this line: estimated ${usd(r.estimate.usd, 3)}. fal.ai budget: ${usd(batch.data?.spent_usd)} spent + ${usd(batch.data?.pending_usd)} approved, of ${usd(batch.data?.budget_usd)}.`)) return;
+    try { await api(`/motion/shot/${p.id}/run`, {body: {model: r.model}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
+  };
+  const requests = (p: any) => (p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
+    <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}{r.backend === 'gpu' ? `, about ${r.estimate.gpu_seconds} GPU s` : ''}{p.own_frame ? ', your first frame' : `, ${r.framing} frame`}){r.blocked ? ` · cannot run: ${r.blocked}` : ''}{r.result ? ` · ${r.result.status}` : ''}</summary>
+      {r.sends && <div className="muted">Sends: {r.sends.join('; ')}</div>}
+      {r.estimate?.note && <div className="muted">{r.estimate.note}</div>}
+      {r.frame_url && <img src={r.frame_url} alt={`${p.own_frame ? 'your' : r.framing} first frame`} style={{width: 100}} />}
+      <pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre>
+      {!r.result && !r.blocked && <button className="btn sm" onClick={() => runOne(p, r)}>Run this ({usd(r.estimate.usd, 3)})</button>}
+    </details>));
   const saveAction = async (p: any, action: string) => {
     if (action.trim() === p.action) return;
     try { await api(`/motion/shot/${p.id}/action`, {method: 'PUT', body: {action}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
@@ -78,7 +95,7 @@ export function ShotComparison() {
     <div className="card stack" id="shot-comparison">
       <h2>Shot comparison: AI models vs the rig (batch)</h2>
       {opts?.gpu && <p className="small muted">{gpuLine(opts.gpu)}</p>}
-      <p className="muted small">Tick lines and models. The models get only our own approved art (the set plate with the speaker&apos;s approved neutral pose) and, for the avatar model, the line&apos;s own audio; nothing from the reference video. Planning is free and starts by itself; nothing paid runs until you click Run selected.</p>
+      <p className="muted small">Tick lines and models. The models get only our own approved art (the set plate with the speaker&apos;s approved neutral pose) and, for the avatar model, the line&apos;s own audio; nothing from the reference video. Planning is free and starts by itself; nothing paid runs until you click Run selected, or a request&apos;s own Run (its estimate is shown first). Under a line&apos;s requests you can add your own first frame as a second plan.</p>
       <ErrorBox error={err || batch.error} />
       <div className="row" style={{gap: 8, flexWrap: 'wrap'}}>
         <select aria-label="Episode" value={eid ?? ''} onChange={e => { setEid(e.target.value ? Number(e.target.value) : null); setPicked(new Set()); }}>
@@ -107,12 +124,16 @@ export function ShotComparison() {
               {picked.has(lineKey(l)) && p && <details><summary>show/edit action and requests</summary>
                 <div className="muted">Tone: {p.tone || '—'} · from {p.action_source || 'phrase matcher'}{p.action_cost ? ` · writer cost about ${usd(p.action_cost.usd, 4)}${p.action_cost.note ? ` (${p.action_cost.note})` : ''}` : ''}{p.action_note ? ` · ${p.action_note}` : ''}</div>
                 <textarea rows={2} defaultValue={p.action} onBlur={e => saveAction(p, e.target.value)} aria-label="action" />
-                {(p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
-                  <details key={r.model}><summary>show request: {r.label} ({usd(r.estimate.usd, 3)}{r.backend === 'gpu' ? `, about ${r.estimate.gpu_seconds} GPU s` : ''}, {r.framing} frame){r.blocked ? ` · cannot run: ${r.blocked}` : ''}</summary>
-                    {r.sends && <div className="muted">Sends: {r.sends.join('; ')}</div>}
-                    {r.estimate?.note && <div className="muted">{r.estimate.note}</div>}
-                    {r.frame_url && <img src={r.frame_url} alt={`${r.framing} first frame`} style={{width: 100}} />}
-                    <pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre></details>))}
+                {requests(p)}
+                {p.status === 'ready' && <OwnFrameUpload plan={p} onDone={batch.reload} onError={setErr} />}
+                {ownOf(p).map((o: any) => (
+                  <div key={o.id} className="stack" style={{borderLeft: '3px solid var(--line, #ddd)', paddingLeft: 8}}>
+                    <strong>Your own first frame</strong>
+                    <div className="muted">{o.own_frame?.note} · uploaded by {o.own_frame?.by} · same line audio, action and rig render as the original; free until you click Run</div>
+                    {o.frame_url && <img src={o.frame_url} alt="your own first frame" style={{width: 100}} />}
+                    <textarea rows={2} defaultValue={o.action} onBlur={e => saveAction(o, e.target.value)} aria-label="action for your first frame" />
+                    {requests(o)}
+                  </div>))}
               </details>}
             </div>);
         })}
@@ -126,8 +147,8 @@ export function ShotComparison() {
       </div>}
       {chosenPlans.length > 0 && <div className="table-wrap"><table>
         <thead><tr><th>Line</th>{columns.map(c => <th key={c}>{label(c)}</th>)}</tr></thead>
-        <tbody>{chosenPlans.map((p: any) => (
-          <tr key={p.id}><td className="small">&ldquo;{p.text}&rdquo; ({p.seconds} s)</td>
+        <tbody>{chosenPlans.flatMap((p: any) => [p, ...ownOf(p)]).map((p: any) => (
+          <tr key={p.id}><td className="small">&ldquo;{p.text}&rdquo; ({p.seconds} s){p.own_frame ? <div className="muted">your first frame</div> : null}</td>
             {columns.map(c => {
               const cell = clipCell(p, c);
               return <td key={c} className="small">
@@ -141,5 +162,27 @@ export function ShotComparison() {
                 {cell.failed && <div className="bad">{cell.failed} <button className="btn sm" onClick={() => retry(p, c, cell.estimate || 0)}>Retry</button></div>}
               </td>;
             })}</tr>))}</tbody></table></div>}
+    </div>);
+}
+
+// The owner's own first frame for a line (free): an image they made from our approved art, confirmed before upload.
+function OwnFrameUpload({plan, onDone, onError}: {plan: any; onDone: () => void; onError: (m: string) => void}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [ownArt, setOwnArt] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    if (!file) return;
+    setBusy(true);
+    try { await uploadFile(`/motion/shot/${plan.id}/own-frame`, file, {own_art: 'true'}); setFile(null); setOwnArt(false); onDone(); }
+    catch (e: any) { onError(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="row small" style={{gap: 8, flexWrap: 'wrap'}}>
+      <span>Use my own first frame (free):</span>
+      <input type="file" accept="image/png,image/jpeg,image/webp" aria-label="your own first frame" onChange={e => setFile(e.target.files?.[0] || null)} />
+      <label className="row" style={{gap: 4}}><input type="checkbox" checked={ownArt} onChange={e => setOwnArt(e.target.checked)} />
+        made from our own approved art (no third-party picture or video frame)</label>
+      <button className="btn sm" disabled={!file || !ownArt || busy} onClick={send}>{busy ? 'Uploading…' : 'Add as a second plan'}</button>
+      <span className="muted">PNG, JPEG or WebP up to 15 MB; cropped to 9:16 and scaled to 720×1280 if needed</span>
     </div>);
 }

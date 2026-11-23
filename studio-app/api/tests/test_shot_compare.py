@@ -327,6 +327,80 @@ class ShotCompareTest(ShotBase):
         self.assertIn("already approved and not yet run", r.text)
         self.assertEqual(self.sent, [], "approving queues; nothing is sent until the worker runs it")
 
+    def own_png(self, w=1000, h=1000) -> bytes:
+        import io
+        im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        im.paste((20, 90, 40, 255), (w // 4, h // 4, 3 * w // 4, 3 * h // 4))
+        b = io.BytesIO()
+        im.save(b, "PNG")
+        return b.getvalue()
+
+    def upload_own(self, pid, data, ctype="image/png", own_art=True):
+        return self.c.put(f"/api/motion/shot/{pid}/own-frame", params={"own_art": "true"} if own_art else {},
+                          content=data, headers={"Content-Type": ctype})
+
+    def test_my_own_first_frame_is_a_second_plan_beside_the_original(self):
+        providers.set_test_text_responder(lambda s, p: self.fail("adding my own frame makes no text call"))
+        p = self.plan()
+        self.assertEqual(self.upload_own(p["id"], self.own_png(), own_art=False).status_code, 422, "the own-art confirmation")
+        self.assertEqual(self.upload_own(p["id"], b"hello", ctype="text/plain").status_code, 415)
+        self.assertEqual(self.upload_own(p["id"], b"not a png at all").status_code, 422)
+        self.assertEqual(self.upload_own(p["id"], b"").status_code, 422)
+        self.assertEqual(self.c.put(f"/api/motion/shot/{p['id']}/own-frame", params={"own_art": "true"}, content=b"x",
+                                    headers={"Content-Type": "image/png", "Content-Length": str(SC.OWN_FRAME_MAX_BYTES + 1)}).status_code, 413)
+        r = self.upload_own(p["id"], self.own_png())
+        self.assertEqual(r.status_code, 200, r.text)
+        own = r.json()
+        self.assertEqual((own["base_plan"], own["status"]), (p["id"], "ready"))
+        self.assertEqual("your 1000x1000 image, centre-cropped to 9:16, scaled to 720x1280", own["own_frame"]["note"])
+        for k in ("line", "seconds", "action", "audio_asset_id", "rig_asset_id", "rig_error", "set_id"):
+            self.assertEqual(own.get(k), p.get(k), f"{k}: the same line, audio, action and rig render as the original")
+        self.assertTrue(own["audio_asset_id"])
+        self.assertNotEqual(own["frame_asset_id"], p["frame_asset_id"])
+        from oddstudio.db import new_session
+        from oddstudio.models import Asset
+        from oddstudio.storage import storage
+        with new_session() as s:
+            f = storage().get_to_file(s.get(Asset, own["frame_asset_id"]).storage_key, self.media / "own.png")
+        with Image.open(f) as im:
+            self.assertEqual((im.size, im.mode, im.getpixel((5, 5))), ((720, 1280), "RGB", (255, 255, 255)), "flattened onto white")
+        avatar = next(q for q in own["requests"] if q["model"] == "kling-avatar-v2-standard")
+        self.assertTrue(avatar["sends"][0].startswith("your own first frame"))
+        self.assertEqual(avatar["body"]["image_url"], "<your first frame shown>")
+        self.assertEqual(avatar["estimate"], next(q for q in p["requests"] if q["model"] == "kling-avatar-v2-standard")["estimate"])
+        self.assertEqual(self.upload_own(own["id"], self.own_png()).status_code, 409, "uploads go against the original-art plan")
+        # the batch keeps the original as the line's plan and lists mine beside it
+        b = self.c.get("/api/motion/shot-batch", params={"episode_id": self.eid}).json()
+        self.assertEqual([x["id"] for x in b["plans"] if x["line"] == 0], [p["id"]])
+        self.assertEqual([x["id"] for x in b["own_plans"]], [own["id"]])
+        r = self.c.post("/api/motion/shot-batch/plan", json={"episode_id": self.eid, "lines": [{"scene_id": self.sid, "line": 0}]})
+        self.assertEqual(r.json()["queued"], 0, "the original-art plan is reused, not replaced")
+        # the same line twice, each by its own Run
+        self.assertEqual(self.sent, [])
+        self.stub({"i2v": 5, "avatar": 3.04})
+        for pid in (p["id"], own["id"]):
+            self.assertEqual(self.c.post(f"/api/motion/shot/{pid}/run", json={"model": "kling-avatar-v2-standard"}).status_code, 200)
+        ran = self.env.run_jobs(["shot_generate"])
+        self.assertEqual([x[1] for x in ran], ["succeeded", "succeeded"], ran)
+        imgs = [b["image_url"] for _, b in self.sent]
+        self.assertIn("first-frame-medium.png", imgs[0])
+        self.assertIn(f"{own['id']}/first-frame-own.png", imgs[1])
+        self.assertEqual(self.sent[0][1]["audio_url"].split("?")[0], self.sent[1][1]["audio_url"].split("?")[0], "the same line audio")
+        self.assertEqual(self.sent[0][1]["prompt"], self.sent[1][1]["prompt"], "the same action text")
+        by_id = {x["id"]: x for x in self.c.get("/api/motion/shot").json()["plans"]}
+        for pid in (p["id"], own["id"]):
+            res = by_id[pid]["results"]["kling-avatar-v2-standard"]
+            self.assertEqual(res["status"], "done")
+            self.assertTrue(res["check"]["length_ok"])
+
+    def test_own_frame_needs_a_ready_plan_and_a_real_image(self):
+        self.assertEqual(self.upload_own("nope", self.own_png()).status_code, 404)
+        with self.assertRaises(ValueError):
+            SC.own_frame_image(self.media / "missing.png", self.media / "o.png")
+        tall = self.media / "tall.png"
+        Image.new("RGB", (720, 1280), (1, 2, 3)).save(tall)
+        self.assertEqual(SC.own_frame_image(tall, self.media / "o.png"), "your 720x1280 image", "already 9:16 at size: untouched")
+
     def test_results_keep_our_audio_and_the_line_length(self):
         p = self.plan()
         self.stub({"i2v": 5, "avatar": 3.04})
