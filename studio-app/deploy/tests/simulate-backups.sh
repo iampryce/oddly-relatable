@@ -2,7 +2,8 @@
 # Simulation of backup.sh, restore.sh and maintenance.sh against a fake /srv/stickman with a stub `docker`: no Docker,
 # no database, nothing outside a temporary folder. Checks the per-kind retention, the 30-day database-dump folder, and
 # restores from every kind of backup (nightly, deploy, old unsuffixed folders, a relative path, the oldest kept backup,
-# and a dump file). Run on Linux with bash 5 and GNU coreutils (CI: ubuntu):
+# and a dump file); the free-space check before a backup, the removal of a backup that fails part-way, and that only
+# complete backups count towards the retention (default 3 deploy-time). Run on Linux with bash 5 and GNU coreutils (CI: ubuntu):
 #   bash studio-app/deploy/tests/simulate-backups.sh
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -13,16 +14,32 @@ mkdir -p "$STICKMAN_ROOT"/{backups,shared,releases/r1} "$SIM/bin"
 ln -s releases/r1 "$STICKMAN_ROOT/current"
 echo "POSTGRES_PASSWORD=x" > "$STICKMAN_ROOT/shared/.env"
 
-# stub docker: pg_dump prints a unique dump; pg_restore and the media restore record what they received
+# stub df: SIM_AVAIL (bytes) stands in for the free space when set; otherwise the real df
+REAL_DF=$(command -v df)
+cat > "$SIM/bin/df" <<EOF
+#!/usr/bin/env bash
+if [[ -n "\${SIM_AVAIL:-}" && "\$*" == *--output=avail* ]]; then echo Avail; echo "\$SIM_AVAIL"; exit 0; fi
+exec "$REAL_DF" "\$@"
+EOF
+chmod +x "$SIM/bin/df"
+# stub docker: pg_dump prints a unique dump; pg_restore and the media restore record what they received; every call is
+# logged (no call may ever remove a volume); SIM_MEDIA_BYTES is the media volume's measured size; SIM_TAR_FAIL makes the
+# media archive fail half-written, as on 2026-11-23
 cat > "$SIM/bin/docker" <<EOF
 #!/usr/bin/env bash
 args="\$*"
+echo "\$args" >> "$SIM/docker.calls"
 if [[ "\$1" == compose ]]; then
   [[ "\$args" == *pg_dump* ]] && { echo "dump-\$(date +%s%N)"; exit 0; }
   [[ "\$args" == *pg_restore* ]] && { cat > "$SIM/restored.db"; exit 0; }
   exit 0                                                   # stop / start
 fi
 if [[ "\$1" == run ]]; then
+  [[ "\$args" == *"du -sk"* ]] && { echo "\${SIM_MEDIA_BYTES:-1048576}"; exit 0; }
+  if [[ "\$args" == *" tar "* && -n "\${SIM_TAR_FAIL:-}" ]]; then
+    for a in "\$@"; do [[ "\$a" == *:/backup ]] && head -c 5000 /dev/zero > "\${a%:/backup}/media.tar.gz"; done
+    echo "gzip: short write: No space left on device" >&2; exit 1
+  fi
   [[ "\$args" == *" tar "* ]] && echo "\$args" > "$SIM/tar.args"
   [[ "\$args" == *"find /data/work/uploads"* ]] && { printf 'hints-7-ef56ab78\nvideo-7-ab12cd34.mp4\n'; exit 0; }
   [[ "\$args" == *"rm -rf -- /data/work/uploads/"* ]] && { echo "\${@: -1}" >> "$SIM/uploads-removed"; exit 0; }
@@ -155,6 +172,44 @@ check 'grep -q "python -m oddstudio.bin purge --days 30 --dry-run" "$SIM/exec.lo
 rm -f "$SIM/exec.log"
 bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
 check 'grep -q "exec oddstudio-api-1 python -m oddstudio.bin purge --days 30$" "$SIM/exec.log"' "--apply purges the Bin inside the API container"
+
+echo "7. free space first, a failed backup cleans up after itself, only complete backups count"
+export STICKMAN_ROOT="$SIM/space"; S="$STICKMAN_ROOT/backups"
+mkdir -p "$S" "$STICKMAN_ROOT"/{shared,releases/r1}; ln -s releases/r1 "$STICKMAN_ROOT/current"
+echo "POSTGRES_PASSWORD=x" > "$STICKMAN_ROOT/shared/.env"
+backup env KEEP_DEPLOY=5; backup env KEEP_DEPLOY=5
+count() { ls -1d "$S"/*/ 2>/dev/null | wc -l; }
+complete_count() { local n=0 b; for b in "$S"/*/; do [[ -f "$b/SHA256SUMS" ]] && n=$((n + 1)); done; echo $n; }
+before=$(ls -1 "$S")
+G=1073741824
+out=$(SIM_AVAIL=$(( 3 * G )) SIM_MEDIA_BYTES=$(( 2 * G )) bash "$HERE/backup.sh" 2>&1); rc=$?
+check '[[ $rc == 3 ]]' "not enough room (2G media + 2G left free, 3G free): stops with exit code 3"
+check 'grep -q "not enough free disk space for a deploy backup" <<< "$out" && grep -q "have 3.0G\." <<< "$out" && grep -q "nothing was written" <<< "$out"' "the message says what is needed, what is free, and that nothing was written"
+check '[[ "$(ls -1 "$S")" == "$before" ]]' "no folder was written and no backup was removed"
+out=$(SIM_AVAIL=$(( 6 * G )) SIM_MEDIA_BYTES=$(( 2 * G )) BACKUP_EXTRA_FREE=5G bash "$HERE/backup.sh" 2>&1); rc=$?
+check '[[ $rc == 3 ]] && grep -q "for the deploy.s image build" <<< "$out"' "the deploy's build room counts too (6G free; 2G + 5G + 2G needed)"
+SIM_AVAIL=$(( 10 * G )) SIM_MEDIA_BYTES=$(( 2 * G )) BACKUP_EXTRA_FREE=5G backup env KEEP_DEPLOY=5
+check '[[ $(count) == 3 ]]' "with enough room (10G free) the backup is made"
+before=$(ls -1 "$S"); sleep 1.05
+out=$(SIM_TAR_FAIL=1 bash "$HERE/backup.sh" 2>&1); rc=$?
+check '[[ $rc != 0 ]]' "a media archive that fails half-written fails the backup"
+check '[[ "$(ls -1 "$S")" == "$before" ]]' "its incomplete folder is removed; every other backup stays"
+check 'grep -q "removed the incomplete" <<< "$out"' "and it says so"
+mkdir "$S/20200101T000000Z-deploy"; echo partial > "$S/20200101T000000Z-deploy/media.tar.gz"    # left by a killed run
+for i in 1 2; do backup; done
+check '[[ $(complete_count) == 3 ]]' "default deploy-time retention: the newest 3 complete backups"
+check '[[ -d "$S/20200101T000000Z-deploy" ]]' "an incomplete folder is neither counted nor removed"
+out=$(KEEP_DEPLOY=1 bash "$HERE/backup.sh" 2>&1); newest=$(ls -1d "$S"/*/ | sort | tail -n 1)
+check '[[ $(complete_count) == 1 && -f "$newest/SHA256SUMS" ]]' "KEEP_DEPLOY=1 keeps exactly the backup just made"
+mkdir "$S/$(date -u +%Y%m%dT%H%M%SZ)-deploy" 2>/dev/null; taken=$(ls -1 "$S" | sort | tail -n 1)
+backup env KEEP_DEPLOY=5
+check '[[ -d "$S/$taken" && $(ls -1 "$S" | sort | tail -n 1) != "$taken" ]]' "a stamp already taken is never written into: the backup takes the next second"
+rm -rf "${S:?}/$taken"
+check 'grep -q "20200101T000000Z-deploy/ is incomplete" <<< "$out"' "the incomplete folder is reported"
+out=$(bash "$HERE/maintenance.sh" 2>&1)
+check 'grep -q "incomplete 20200101T000000Z-deploy" <<< "$out" && ! grep -q "would remove  backup 20200101T000000Z" <<< "$out"' "maintenance lists the incomplete folder and leaves it"
+check '! grep -qE "volume (rm|prune)|system prune|down -v|down --volumes" "$SIM/docker.calls"' "no call ever removed a Docker volume"
+check '! grep -E "(tar -czf|du -sk)" "$SIM/docker.calls" | grep -v "oddstudio_work_data:/data:ro" | grep -q .' "backups only ever mount the media volume read-only"
 
 echo
 if (( fails )); then echo "simulate-backups: $fails check(s) FAILED"; exit 1; fi

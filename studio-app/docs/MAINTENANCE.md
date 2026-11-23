@@ -8,13 +8,16 @@ Nothing in this change is installed or run automatically. The owner installs it 
 - **Retention is counted per kind**, so frequent deploys can't push out the nightly history.
   - Folders are named `<stamp>-nightly` or `<stamp>-deploy`. Older unsuffixed folders count as deploy-time.
   - **Nightly: the newest 7** (`KEEP_NIGHTLY`).
-  - **Deploy-time** (`deploy.sh`, `restore.sh`): **the newest 5** (`KEEP_DEPLOY`).
-  - The old `KEEP` variable still works and sets the count for the kind being written. The currently installed `ci-deploy.sh` passes `KEEP=15` until it is reinstalled (step 3); the new one passes `KEEP_DEPLOY=5`.
+  - **Deploy-time** (`deploy.sh`, `restore.sh`): **the newest 3** (2026-11-23, after a deploy-time backup filled the disk). `deploy.sh` sets this itself (`DEPLOY_KEEP_BACKUPS`, default 3), so the `KEEP_DEPLOY=5` that an older installed `ci-deploy.sh` passes is not used; `restore.sh` and `maintenance.sh` use `KEEP_DEPLOY` (default 3).
+  - The old `KEEP` variable still works for `backup.sh` run by hand and sets the count for the kind being written.
+  - **Only complete backups count** (a folder with `SHA256SUMS`). An incomplete folder is listed by `backup.sh` and `maintenance.sh` and left alone: check it, then remove it by hand.
+- **Free space before every backup** (2026-11-23: the 531a40c deploy's backup filled the disk and was left half-written). `backup.sh` first checks that the disk has room for the media volume (without `work/uploads`), the database dump, and 2G left free afterwards (`BACKUP_HEADROOM`); a deploy also asks for 5G for its image build (`DEPLOY_BUILD_FREE`). Without that room it stops with exit code 3 and says what is needed and what is free; nothing is written and no backup is removed, and the deploy stops before building, still on the previous release.
+- **A backup that fails part-way removes its own incomplete folder** (only the one it created; it never writes into another backup's folder). The backup it has just made is never removed, and no script ever removes a Docker volume.
 - **Weekly housekeeping** (`deploy/maintenance.sh`, Sunday 04:30). Run by hand without options it is a **dry run**: it only lists what it would remove, with sizes. The weekly job runs it with `--apply` (owner decision 2026-11-21, after one verified manual run), which removes:
   - every release folder except the current one, any release a running container uses, and the 5 newest. The `oddstudio-api`/`oddstudio-web` images of removed releases go too, so `rollback.sh` keeps working for every kept release.
   - the unused `hello-world` and `nginx:1.27-alpine` images, but only if no container uses them.
   - dangling images, build cache older than 7 days, and any build cache above 10 GB (`BUILD_CACHE_MAX`; the least recently used goes first).
-  - backups beyond the newest 7 nightly and 5 deploy-time, counted separately. The newest backup is never removed.
+  - backups beyond the newest 7 nightly and 3 deploy-time, counted separately (complete backups only). The newest backup is never removed.
   - database dumps older than 30 days. The newest dump is never removed.
   - deploy logs older than 30 days, and the systemd journal above 100 MB.
 - **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; the weekly sweep catches anything a crash left behind. Backups also leave `work/uploads` out.
@@ -41,7 +44,8 @@ Nothing in this change is installed or run automatically. The owner installs it 
 # 2. Install the scheduled jobs (nightly backup; weekly housekeeping with --apply).
 install -o root -g root -m 644 /srv/stickman/current/studio-app/deploy/cron.d-oddstudio /etc/cron.d/oddstudio
 
-# 3. The CI deploy wrapper lives outside the repo: reinstall it so deploys keep 5 deploy-time backups (check the hash first).
+# 3. The CI deploy wrapper lives outside the repo: reinstall it (check the hash first). Not needed for the retention:
+#    deploy.sh sets the deploy-time count itself (3).
 sha256sum /srv/stickman/current/studio-app/deploy/ci-deploy.sh
 install -o root -g root -m 755 /srv/stickman/current/studio-app/deploy/ci-deploy.sh /srv/stickman/ci-deploy.sh
 

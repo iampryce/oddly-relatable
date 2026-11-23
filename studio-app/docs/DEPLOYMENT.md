@@ -65,7 +65,8 @@ The first build downloads base images and packages: Debian, Node and Python pack
 - `media.tar.gz`: the `work_data` volume, which holds local media storage;
 - `SHA256SUMS`.
 
-**Retention:** the newest 14. Change it with `KEEP=`.
+**Retention:** the newest 7 nightly and 3 deploy-time backups, counted separately (complete backups only; see MAINTENANCE.md). A deploy changes its count with `DEPLOY_KEEP_BACKUPS`.
+- **Free space first:** every backup checks that the disk has room for it (plus 2G left free, and 5G for a deploy's image build) and otherwise stops with a clear message before writing anything; a backup that fails part-way removes its own incomplete folder.
 - Redis is not backed up: it only carries job IDs, and queued jobs are re-announced from PostgreSQL when a worker starts.
 - When S3 storage is used, media are in S3; enable bucket versioning and lifecycle rules there.
 
