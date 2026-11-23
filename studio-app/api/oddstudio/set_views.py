@@ -357,7 +357,9 @@ def set_view_candidate(ctx: Ctx) -> dict:
     rec = sets.records(db).get(sid)
     if not rec or rec.get("status") != "approved":
         raise ValueError("the set's wide picture is not approved any more")
-    wide = db.get(Asset, rec["asset_id"])
+    wide = db.get(Asset, rec.get("asset_id")) if rec.get("asset_id") else None
+    if wide is None:
+        raise ValueError(f"the set {sid}'s wide picture is missing: regenerate or re-approve the set before drawing its views")
     folder = ctx.folder("sets", sid, "views")
     ref = storage().get_to_file(wide.storage_key, folder / Path(wide.storage_key).name)
     cfg = {**get_section(db, "image"), "provider": "openai", "fallback": "none", "size": sets.SET_SIZE, "use_reference": True,
