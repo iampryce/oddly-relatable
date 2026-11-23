@@ -153,6 +153,13 @@ def seats_of(blocking: dict) -> list[dict]:
     return list(blocking.get("seats") or ([blocking["seat"]] if blocking.get("seat") else []))
 
 
+def spacing_of(blocking: dict | None) -> list[dict]:
+    """Seat pairs closer than one head width at the smallest cast height (acting.spacing_warnings): a warning shown
+    on the Set panel whenever seats are marked, edited, suggested or approved. Never a refusal."""
+    from .acting import spacing_warnings
+    return spacing_warnings(seats_of(blocking or {}))
+
+
 def thumbnail_url(db, set_id: str) -> str | None:
     """A small picture of the set for the picker (studio sets: their approved image; repository plates: a copy
     stored once)."""

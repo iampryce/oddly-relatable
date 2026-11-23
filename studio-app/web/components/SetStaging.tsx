@@ -4,8 +4,10 @@
 // desk or table front (the part of the picture drawn again over seated characters, so they sit behind it), the floor
 // line (where standing feet rest), or the two ends of the standing area. Coordinates are the image's pixels.
 import {useState} from 'react';
+import {FACINGS, facingArrow, facingLabel, seatFacing} from '@/lib/setStaging';
 
-type Seat = {x: number; hip_y: number; feet_y: number};
+type Seat = {x: number; hip_y: number; feet_y: number; facing?: string};
+const ARROW: Record<string, string> = {'-1,0': '←', '1,0': '→', '0,1': '↓', '0,-1': '↑'};
 type Box = {x0: number; y0: number; x1: number; y1: number};
 type Mode = 'seat' | 'table' | 'floor' | 'stand' | null;
 
@@ -51,9 +53,21 @@ export default function SetStaging({url, width, height, blocking, onChange, size
         {seats.map((s, i) => <div key={i} title={`seat ${i + 1}${i === 0 ? ' (the speaker sits here first)' : ''}`}>
           <div style={{position: 'absolute', left: s.x * k - 9, top: s.hip_y * k - 9, width: 18, height: 18, borderRadius: 9,
             border: '3px solid gold', background: 'rgba(0,0,0,.45)', color: 'gold', fontSize: 10, lineHeight: '12px', textAlign: 'center', fontWeight: 700}}>{i + 1}</div>
-          <div style={{position: 'absolute', left: s.x * k - 12, top: s.feet_y * k, width: 24, borderTop: '2px solid gold'}} /></div>)}
+          <div style={{position: 'absolute', left: s.x * k - 12, top: s.feet_y * k, width: 24, borderTop: '2px solid gold'}} />
+          {(() => { const a = facingArrow(seats, i); return a && <div title={`seat ${i + 1} faces ${facingLabel(seatFacing(seats, i))}`}
+            style={{position: 'absolute', left: s.x * k + a.x * 16 - 7, top: s.hip_y * k - 30 + a.y * 6, color: 'gold', fontWeight: 900, fontSize: 16,
+              textShadow: '0 0 3px #000'}}>{ARROW[`${a.x},${a.y}`]}</div>; })()}</div>)}
         {tf && <div title="desk front" style={{position: 'absolute', left: tf.x0 * k, top: tf.y0 * k, width: (tf.x1 - tf.x0) * k, height: (tf.y1 - tf.y0) * k, border: '2px solid orange'}} />}
       </div>
+      {seats.length > 0 && <div className="stack small">{seats.map((s, i) => (
+        <label key={i} className="row" style={{gap: 6}}>Seat {i + 1}{i === 0 ? ' (speaker)' : ''} faces
+          <select aria-label={`seat ${i + 1} faces`} style={{width: 'auto'}} value={s.facing || ''}
+            onChange={e => put({seats: seats.map((o, j) => j === i ? {...o, facing: e.target.value || undefined} : o)})}>
+            <option value="">{facingLabel('')}</option>
+            {FACINGS.map(f => <option key={f} value={f}>{facingLabel(f)}</option>)}
+            {seats.map((_, j) => j !== i && <option key={j} value={`seat:${j}`}>{facingLabel(`seat:${j}`)}</option>)}
+          </select></label>))}
+        <span className="muted">The Studio 3D rig animator turns seated characters this way; by the scene, the speaker turns toward the person addressed and the others as the reference plan shows, else toward the speaker (the 2D rig animator draws everyone facing the camera).</span></div>}
       <details><summary className="small">Exact positions (pixels)</summary><div className="stack">
       <div className="row small" style={{gap: 4, flexWrap: 'wrap'}}>Floor line y {num(blocking.floor_y, n => put({floor_y: n}), 'floor line')}
         standing from x {num(blocking.stand_min_x, n => put({stand_min_x: n}), 'standing area from x')} to {num(blocking.stand_max_x, n => put({stand_max_x: n}), 'standing area to x')}</div>

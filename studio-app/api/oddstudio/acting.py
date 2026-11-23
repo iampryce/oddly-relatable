@@ -76,19 +76,54 @@ def episode_hook(db, ep) -> str:
 
 
 HEIGHT = 530          # a character's standing height in set pixels (the default)
-HEAD_OVERLAP = 0.25   # seated neighbours' heads may overlap by at most this share of a head's width
+HEAD_OVERLAP = 0.0    # seated neighbours' heads never overlap (owner decision 2026-11-23; was 25%)
+MIN_HEIGHT = 318      # the floor on the cast height (60% of the default), so figures never get tiny
+TYPICAL_HEAD = 0.42   # a head's width / the figure's height for the studio's characters (when no rig is at hand)
+
+
+def row_neighbours(seats: list[dict], row_tol: float) -> list[tuple[int, int, int]]:
+    """(seat number, seat number, px apart) for seats side by side in the same row: neighbours by x whose hips are
+    less than row_tol apart in height (a seat behind a desk and the audience row in front of it never collide).
+    Seat numbers are 1-based, in the set's order (as the Set panel shows them)."""
+    pts = sorted(((s["x"], s.get("hip_y", 0), i + 1) for i, s in enumerate(seats or [])), key=lambda p: p[0])
+    out = []
+    for i, (x, y, n) in enumerate(pts):
+        # the nearest seat to the right in the same row
+        nxt = next(((x2, n2) for x2, y2, n2 in pts[i + 1:] if abs(y2 - y) < row_tol), None)
+        if nxt:
+            out.append((n, nxt[1], int(round(nxt[0] - x))))
+    return out
 
 
 def cast_height(seats: list[dict], head_ratio: float, default: int = HEIGHT) -> int:
     """The characters' height for a set: the default, unless the set's seats are too close together for heads this
-    big (head width = head_ratio x height); then the largest height at which neighbouring seated heads overlap by at
-    most HEAD_OVERLAP of a head's width."""
-    xs = sorted(s["x"] for s in seats or [])
-    gaps = [b - a for a, b in zip(xs, xs[1:]) if b > a]
-    if not gaps or head_ratio <= 0:
+    big (head width = head_ratio x height); then the largest height at which neighbouring seated heads do not overlap
+    at all (HEAD_OVERLAP), never below MIN_HEIGHT (then the Set panel warns about the seats)."""
+    if head_ratio <= 0:
+        return default
+    gaps = [g for _, _, g in row_neighbours(seats, head_ratio * default) if g > 0]
+    if not gaps:
         return default
     fit = min(gaps) / ((1 - HEAD_OVERLAP) * head_ratio)
-    return int(min(default, max(default * 0.5, fit)))
+    return int(min(default, max(MIN_HEIGHT, fit)))
+
+
+def min_head_px(head_ratio: float = TYPICAL_HEAD) -> int:
+    """One head width at the smallest cast height: seats closer than this always make neighbours' heads overlap."""
+    return int(-(-head_ratio * MIN_HEIGHT // 1))
+
+
+def spacing_warnings(seats: list[dict], head_ratio: float = TYPICAL_HEAD) -> list[dict]:
+    """Seats side by side closer than one head width at the smallest cast height, in words with the numbers. A
+    warning only: most generated sets space their chairs for normal proportions, and refusing them would block them."""
+    need = min_head_px(head_ratio)
+    out = []
+    for a, b, gap in row_neighbours(seats, need):
+        if gap < need:
+            out.append({"seats": [a, b], "gap": gap, "need": need,
+                        "text": f"seats {a} and {b} are {gap} px apart; need {need} px (one head width at the smallest "
+                                f"cast height, {MIN_HEIGHT} px): their heads will overlap"})
+    return out
 
 
 def head_ratio(rig: dict) -> float:
@@ -438,6 +473,12 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             "timeline": "absolute" if absolute else "sequential"}
     if three_d(db):
         spec["engine"] = "3d"                         # the Studio 3D rig animator draws the characters
+        if ep.source == "audio" and absolute:
+            # who faces whom, from the reference plan (the recording's times are the timeline's)
+            from .reference_plan import facing_notes
+            fn = facing_notes(ep.audio_transcript or {})
+            if fn:
+                spec["facing_notes"] = fn
     if stills:
         spec["stills"] = still_times(lines, stills)   # the presentation (dialogue display) is the video's
     spec_file = folder / "acting.json"
