@@ -31,8 +31,12 @@ export function ShotComparison() {
   const [busy, setBusy] = useState(false);
   const lines: any[] = opts?.lines || [];
   const gpuModels: any[] = opts?.gpu_models || [];
-  const ALL = [...PAID, ...gpuModels.map(m => m.id)];
-  const label = (m: string) => { const g = gpuModels.find(x => x.id === m); return LABEL[m] || (g ? `${g.short} (GPU)` : m); };
+  const talking: any[] = opts?.talking || [];
+  const ALL = [...PAID, ...talking.map(m => m.id), ...gpuModels.map(m => m.id)];
+  const label = (m: string) => { const g = gpuModels.find(x => x.id === m); const t = talking.find(x => x.id === m);
+    return LABEL[m] || (t ? `${t.short} (WaveSpeed)` : g ? `${g.short} (GPU)` : m); };
+  // the talking-shot provider from Settings is ticked once the options arrive; the fallback is never ticked by itself
+  useEffect(() => { if (opts?.talking_provider) setModels(ms => new Set([...ms, opts.talking_provider])); }, [opts?.talking_provider]);
   const plans: any[] = batch.data?.plans || [];
   const ownPlans: any[] = batch.data?.own_plans || [];
   const ownOf = (p: any) => ownPlans.filter(o => o.base_plan === p.id);
@@ -63,7 +67,7 @@ export function ShotComparison() {
   const runSelected = async () => {
     if (!summary?.clips) return;
     const g = summary.gpu?.clips ? `\n${summary.gpu.clips} self-hosted clip(s), estimated ${usd(summary.gpu.estimate_usd, 3)} of GPU time. ${gpuLine(summary.gpu)}` : '';
-    if (!window.confirm(`Run ${summary.clips} clip(s): estimated ${usd(summary.total_usd)}. fal.ai budget: ${usd(summary.spent_usd)} spent + ${usd(summary.pending_usd)} approved, of ${usd(summary.budget_usd)}.${g}`)) return;
+    if (!window.confirm(`Run ${summary.clips} clip(s): estimated ${usd(summary.total_usd)}. Experimental budget: ${usd(summary.spent_usd)} spent + ${usd(summary.pending_usd)} approved, of ${usd(summary.budget_usd)}.${g}`)) return;
     setBusy(true); setErr('');
     try { await api('/motion/shot-batch/run', {body: {plan_ids: ids.split(','), models: [...models], framing, confirm: true, expected_usd: summary.total_usd}}); await batch.reload(); }
     catch (e: any) { setErr(e.message); } finally { setBusy(false); }
@@ -74,7 +78,7 @@ export function ShotComparison() {
   };
   const runOne = async (p: any, r: any) => {
     const whose = p.own_frame ? 'your own first frame' : 'the original art';
-    if (!window.confirm(`Run ${r.label} on ${whose} for this line: estimated ${usd(r.estimate.usd, 3)}. fal.ai budget: ${usd(batch.data?.spent_usd)} spent + ${usd(batch.data?.pending_usd)} approved, of ${usd(batch.data?.budget_usd)}.`)) return;
+    if (!window.confirm(`Run ${r.label} on ${whose} for this line: estimated ${usd(r.estimate.usd, 3)}${r.estimate?.note ? ` (${r.estimate.note})` : ''}${p.talking && r.provider ? `. This plan's talking cap: ${usd(p.talking.spent_usd, 3)} of ${usd(p.talking.cap_usd)} used` : ''}. Experimental budget: ${usd(batch.data?.spent_usd)} spent + ${usd(batch.data?.pending_usd)} approved, of ${usd(batch.data?.budget_usd)}.`)) return;
     try { await api(`/motion/shot/${p.id}/run`, {body: {model: r.model}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
   };
   const requests = (p: any) => (p.requests || []).filter((r: any) => models.has(r.model)).map((r: any) => (
@@ -83,8 +87,26 @@ export function ShotComparison() {
       {r.estimate?.note && <div className="muted">{r.estimate.note}</div>}
       {r.frame_url && <img src={r.frame_url} alt={`${p.own_frame ? 'your' : r.framing} first frame`} style={{width: 100}} />}
       <pre style={{whiteSpace: 'pre-wrap'}}>{r.endpoint}{'\n'}{JSON.stringify(r.body, null, 1)}</pre>
+      {r.terms && <div className="muted">Terms: {r.terms}. Not for publishing until confirmed.</div>}
+      {r.seed !== undefined && r.seed !== null && <label className="row small" style={{gap: 4}}>Seed
+        <input type="number" min={0} defaultValue={r.seed} style={{width: 130}} aria-label={`seed for ${r.label}`}
+          onBlur={e => Number(e.target.value) !== r.seed && edit(`/motion/shot/${p.id}/seed`, {model: r.model, seed: Number(e.target.value)})} /></label>}
+      {r.blocked?.startsWith('make the') && !p.own_frame && <button className="btn sm" onClick={() => edit(`/motion/shot/${p.id}/frame`, {framing: r.framing}, 'POST')}>Make the {r.framing === 'head' ? 'head-and-shoulders' : r.framing} first frame (free)</button>}
       {!r.result && !r.blocked && <button className="btn sm" onClick={() => runOne(p, r)}>Run this ({usd(r.estimate.usd, 3)})</button>}
     </details>));
+  const edit = async (path: string, body: any, method = 'PUT') => {
+    try { await api(path, {method, body}); await batch.reload(); } catch (e: any) { setErr(e.message); }
+  };
+  const talkingBox = (p: any) => p.talking && (p.requests || []).some((r: any) => r.provider && models.has(r.model)) && (
+    <div className="stack small" style={{borderLeft: '3px solid var(--line, #ddd)', paddingLeft: 8}}>
+      <strong>Talking shots (WaveSpeed)</strong>
+      <label>Prompt (neutral wording only; attitude comes from the scene&apos;s expression setting){p.talking.prompt_is_default ? ' · default' : ''}
+        <textarea rows={3} defaultValue={p.talking.prompt} aria-label="talking-shot prompt"
+          onBlur={e => e.target.value.trim() !== p.talking.prompt && edit(`/motion/shot/${p.id}/talking-prompt`, {prompt: e.target.value})} /></label>
+      <label className="row" style={{gap: 4}}>This plan&apos;s hard cap (USD): ${p.talking.spent_usd.toFixed(3)} used of
+        <input type="number" min={0.05} max={10} step={0.05} defaultValue={p.talking.cap_usd} style={{width: 90}} aria-label="plan cap"
+          onBlur={e => Number(e.target.value) !== p.talking.cap_usd && edit(`/motion/shot/${p.id}/talking-cap`, {cap_usd: Number(e.target.value)})} /></label>
+    </div>);
   const saveAction = async (p: any, action: string) => {
     if (action.trim() === p.action) return;
     try { await api(`/motion/shot/${p.id}/action`, {method: 'PUT', body: {action}}); await batch.reload(); } catch (e: any) { setErr(e.message); }
@@ -103,9 +125,11 @@ export function ShotComparison() {
         {['rig', ...ALL].map(m => <label key={m} className="row small" style={{gap: 4}}><input type="checkbox" checked={models.has(m)}
           onChange={e => { const n = new Set(models); if (e.target.checked) n.add(m); else n.delete(m); setModels(n); }} />{label(m)}
           {gpuModels.find(g => g.id === m && !g.pinned) && <span className="muted"> (workflow not pinned)</span>}</label>)}
-        {PAID.map(m => <label key={m} className="small row" style={{gap: 4}}>{LABEL[m]} framing
+        {[...PAID, ...talking.map(t => t.id)].map(m => { const t = talking.find(x => x.id === m);
+          const def = t ? t.framing : m.includes('avatar') ? 'medium' : 'wide';
+          return <label key={m} className="small row" style={{gap: 4}}>{label(m)} framing
           <select value={framing[m] || ''} onChange={e => setFraming(f => { const n = {...f}; if (e.target.value) n[m] = e.target.value; else delete n[m]; return n; })}>
-            <option value="">default ({m.includes('avatar') ? 'medium' : 'wide'})</option><option value="wide">wide</option><option value="medium">medium</option></select></label>)}
+            <option value="">default ({def === 'head' ? 'head and shoulders' : def})</option><option value="wide">wide</option><option value="medium">medium</option><option value="head">head and shoulders</option></select></label>; })}
       </div>
       {opts && <div className="stack small">
         <div className="row" style={{gap: 6}}><strong>Lines</strong>
@@ -124,6 +148,7 @@ export function ShotComparison() {
               {picked.has(lineKey(l)) && p && <details><summary>show/edit action and requests</summary>
                 <div className="muted">Tone: {p.tone || '—'} · from {p.action_source || 'phrase matcher'}{p.action_cost ? ` · writer cost about ${usd(p.action_cost.usd, 4)}${p.action_cost.note ? ` (${p.action_cost.note})` : ''}` : ''}{p.action_note ? ` · ${p.action_note}` : ''}</div>
                 <textarea rows={2} defaultValue={p.action} onBlur={e => saveAction(p, e.target.value)} aria-label="action" />
+                {talkingBox(p)}
                 {requests(p)}
                 {p.status === 'ready' && <OwnFrameUpload plan={p} onDone={batch.reload} onError={setErr} />}
                 {ownOf(p).map((o: any) => (
@@ -132,6 +157,7 @@ export function ShotComparison() {
                     <div className="muted">{o.own_frame?.note} · uploaded by {o.own_frame?.by} · same line audio, action and rig render as the original; free until you click Run</div>
                     {o.frame_url && <img src={o.frame_url} alt="your own first frame" style={{width: 100}} />}
                     <textarea rows={2} defaultValue={o.action} onBlur={e => saveAction(o, e.target.value)} aria-label="action for your first frame" />
+                    {talkingBox(o)}
                     {requests(o)}
                   </div>))}
               </details>}
@@ -157,6 +183,7 @@ export function ShotComparison() {
                 {cell.gpu && <div className="muted">{cell.gpu}</div>}
                 {cell.binned && <div className="muted">clip in the Bin</div>}
                 {cell.cost && <div>{cell.cost}</div>}
+                {cell.terms && <div className="muted">{cell.terms}</div>}
                 {cell.check && <div className={cell.lengthOk ? 'muted' : 'bad'}>{cell.check}</div>}
                 {cell.state && <div className="muted">{cell.state}</div>}
                 {cell.failed && <div className="bad">{cell.failed} <button className="btn sm" onClick={() => retry(p, c, cell.estimate || 0)}>Retry</button></div>}

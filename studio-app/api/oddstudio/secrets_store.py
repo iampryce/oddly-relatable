@@ -32,6 +32,7 @@ SECRETS = {
     "runpod_api_key": "RUNPOD_API_KEY",          # rented GPU sessions (gpu.py); used only by the studio, never sent to a pod
     "gpu_worker_token": "GPU_WORKER_TOKEN",      # our own GPU machine's worker token (mode "own")
     "fal_key": "FAL_KEY",
+    "wavespeed_api_key": "WAVESPEED_API_KEY",   # hosted talking shots (shot comparison); never logged or returned
 }
 _cache: tuple[float, dict] | None = None
 TTL = 5.0

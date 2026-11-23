@@ -17,6 +17,7 @@ import unittest
 from oddstudio import engine, fal, providers
 from oddstudio import shot_compare as SC
 
+FAL_MODELS = [k for k in SC.MODELS if k not in SC.TALKING]   # the talking shots have their own tests (test_talking_shots.py)
 LINE = {"line_id": "l1", "speaker": "mortimer", "text": "I leave everything to the cat.", "start": 1.0, "end": 4.0,
         "expression": "smug", "shot": "medium"}
 LINE2 = {"line_id": "l2", "speaker": "mortimer", "text": "I, Mortimer the Magnificent, hereby leave Winifred nothing.",
@@ -280,7 +281,7 @@ class ShotCompareTest(ShotBase):
         from oddstudio.storage import storage
         with new_session() as s:
             for f, a in p["frame_assets"].items():
-                self.assertEqual(Image.open(storage().get_to_file(s.get(Asset, a).storage_key, self.media / f"{f}.png")).size, (720, 1280))
+                self.assertEqual(Image.open(storage().get_to_file(s.get(Asset, a).storage_key, self.media / f"{f}.png")).size, SC.FRAME_SIZE[f])
         # the geometry, measured on a plain plate (a real plate has dark lines of its own)
         plain = self.media / "plain.png"
         Image.new("RGB", (941, 1672), (200, 180, 150)).save(plain)
@@ -305,7 +306,7 @@ class ShotCompareTest(ShotBase):
         self.assertEqual(r.json()["requests"][1]["framing"], "wide")
         self.assertEqual(self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "close"}).status_code, 422)
         self.c.put(f"/api/motion/shot/{p['id']}/framing", json={"model": "kling-avatar-v2-standard", "framing": "medium"})
-        for m in SC.MODELS:
+        for m in FAL_MODELS:
             self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": m})
         self.env.run_jobs(["shot_generate"])
         sent = {("avatar" if "avatar" in e else "i2v"): b for e, b in self.sent}
@@ -404,7 +405,7 @@ class ShotCompareTest(ShotBase):
     def test_results_keep_our_audio_and_the_line_length(self):
         p = self.plan()
         self.stub({"i2v": 5, "avatar": 3.04})
-        for m in SC.MODELS:
+        for m in FAL_MODELS:
             self.assertEqual(self.c.post(f"/api/motion/shot/{p['id']}/run", json={"model": m}).status_code, 200)
         ran = self.env.run_jobs(["shot_generate"])
         self.assertEqual([x[1] for x in ran], ["succeeded", "succeeded"], ran)

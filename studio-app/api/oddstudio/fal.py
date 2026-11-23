@@ -91,17 +91,18 @@ def budget(db) -> float:
     return float(get_section(db, "motion").get("budget_usd") or 25.0)
 
 
-def check_budget(db, cost: float) -> None:
+def check_budget(db, cost: float, who: str = "fal.ai") -> None:
+    """The experimental budget (Settings > Motion), shared by every hosted video provider (fal.ai, WaveSpeed)."""
     led, cap = spent(db), budget(db)
     if led["total"] + cost > cap + 1e-9:
-        raise ProviderError(f"fal.ai: estimated ${cost:.2f} would exceed the experimental budget "
+        raise ProviderError(f"{who}: estimated ${cost:.2f} would exceed the experimental budget "
                             f"(${led['total']:.2f} of ${cap:.2f} used); raise it in Settings > Motion to continue")
 
 
-def reserve(db, model: str, cost: float, note: str) -> None:
+def reserve(db, model: str, cost: float, note: str, who: str = "fal.ai") -> None:
     """Refuse when the cap would be exceeded; otherwise record the request's cost."""
     from .models import Setting
-    check_budget(db, cost)
+    check_budget(db, cost, who)
     led = spent(db)
     led["total"] = round(led["total"] + cost, 4)
     led["requests"] = (led.get("requests") or [])[-200:] + [{"model": model, "usd": cost, "note": note[:120], "at": time.time()}]

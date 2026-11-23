@@ -36,7 +36,9 @@ DEFAULTS: dict[str, dict] = {
     "vision": {"provider": "none", "model": "", "fallback": "none", "notes_cap_usd": 0.5},
     # Character animation. Only the procedural rig is planned for production use; generative motion is evaluated
     # per provider before it is enabled (see capabilities.py).
-    "motion": {"provider": "none", "model": "", "fallback": "none", "budget_usd": 25.0},
+    "motion": {"provider": "none", "model": "", "fallback": "none", "budget_usd": 25.0,
+               # talking shots in the shot comparison: which hosted provider, and the hard cap per plan (all its runs)
+               "talking_provider": "wavespeed-infinitetalk-fast", "talking_plan_cap_usd": 0.50},
     "lipsync": {"provider": "rhubarb", "fallback": "none"},
     "sound": {"provider": "none", "model": "", "fallback": "none"},
     # dialogue_display: what new episodes show of the dialogue (bubbles | none | captions); each episode can change it
@@ -106,6 +108,13 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         raise ValueError(f"production.dialogue_display must be one of {', '.join(DIALOGUE_DISPLAYS)}")
     if key == "gpu":
         check_gpu(value)
+    if key == "motion":
+        from .shot_compare import TALKING
+        if "talking_provider" in value and value["talking_provider"] not in TALKING:
+            raise ValueError(f"motion.talking_provider must be one of {', '.join(TALKING)}")
+        cap = value.get("talking_plan_cap_usd", 0.5)
+        if not (isinstance(cap, (int, float)) and 0 < cap <= 10):
+            raise ValueError("motion.talking_plan_cap_usd must be more than 0 and at most 10")
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
