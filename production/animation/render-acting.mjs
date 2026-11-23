@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {loadRig, drawCharacter, drawHead, renderVideo, loadImage, createCanvas, envelope, ease, clamp, lerp, hipHeight} from './animator.mjs';
 import {registerBannerFonts, layoutBanner, drawBanner} from './banner.mjs';
-import {seatYaw, facingTarget, turnTowards, SPEAKER_TURN, LISTENER_TURN, STANDING_TURN} from './rig3d-pose.mjs';
+import {seatYaw, facingTarget, turnTowards, listenerGaze, SPEAKER_TURN, LISTENER_TURN, STANDING_TURN} from './rig3d-pose.mjs';
 
 const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const OUT = process.argv[3];
@@ -306,14 +306,24 @@ function pose(k, t) {
   p.blink = blink(k, t);
   // eyes: the speaker looks at look_at / the nearest character; listeners look at the speaker
   const cur = spec.lines.find(l => t >= l.start && t < l.end + 0.4);
-  let target = null;
-  if (cur) target = cur.speaker === k ? (cur.look_at || nearestOtherAt(k, t)) : cur.speaker;
+  // listeners (PR 4): the speaker, or the person the plan has them facing, or down on a sad / worried reaction, or a
+  // short glance at another listener now and then
+  let target = null, down = false;
+  if (cur && cur.speaker === k) target = cur.look_at || nearestOtherAt(k, t);
+  else if (cur) {
+    const others = KEYS.filter(o => o !== k && o !== cur.speaker && C[o] && locomotion(o, t).x > -100 && locomotion(o, t).x < SET.width + 100);
+    const g = listenerGaze(k, t, cur, others, noteFacing(k, t));
+    target = g.target; down = g.down;
+  }
   if (actTarget) target = actTarget;
   let look = {x: 0, y: 0.1};
   if (L.walking) look = {x: 0.8 * L.dir, y: 0};
+  else if (down) { look = {x: 0, y: 0.9}; p.headNod += 7; }
   // a target outside this render's cast (the spec builder adds everyone a line references; this guards older specs)
   else if (target && target !== k && C[target]) look = {x: clamp((locomotion(target, t).x - x) / 160, -1, 1), y: 0.05};
   const lk = looks[k]; lk.x += (look.x - lk.x) * 0.35; lk.y += (look.y - lk.y) * 0.35; p.look = {...lk};
+  // the 3D rig turns the head towards where the eyes look (the body turns by the scene, below)
+  if (!L.walking) p.headYaw = clamp(lk.x, -1, 1) * 30;
   // arms
   for (const side of [-1, 1]) {
     const key = side < 0 ? 'L' : 'R';

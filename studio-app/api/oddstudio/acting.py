@@ -250,14 +250,11 @@ def still_times(lines: list[dict], n: int) -> list[float]:
 
 
 def face_for(rig_faces: set[str], c, expression: str) -> str:
-    """The rig face for a line's expression, matched like the pose engine (exact, then loose), else neutral."""
-    e = (expression or "").lower()
-    if e in rig_faces:
-        return e
-    for name in rig_faces:
-        if name in e or e in name:
-            return name
-    return "neutral"
+    """The rig face for a line's expression: exact, then loose, then the nearest approved one of the same family
+    (casting.closest_expression), else neutral. A missing expression never stops a render."""
+    from .casting import closest_expression
+    f = closest_expression(expression, rig_faces)
+    return f if f in rig_faces else "neutral"
 
 
 # ---------------------------------------------------------------- lip sync

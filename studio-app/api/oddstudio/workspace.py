@@ -129,15 +129,20 @@ def section_cast(f: dict) -> dict:
                             f"{', '.join(f['speakers_without_character'][:4])}.", "cast")
     if not f["cast_rows"]:
         return _s("waiting", "The cast comes from the speakers (audio) or the script.")
-    missing = [r for r in f["cast_rows"] if r.get("missing") or (not r.get("locked") and (r.get("art_status") != "approved"
-                                                                                          or r.get("missing_expressions")))]
+    # only a character without any approved art blocks (feat/3d-rig PR 4): an expression without its own pose uses the
+    # nearest approved one (a note), and leftover poses waiting for review are not blockers
+    missing = [r for r in f["cast_rows"] if r.get("missing") or (not r.get("locked") and r.get("art_status") != "approved")]
     if missing:
         names = ", ".join(r.get("name") or r["key"] for r in missing[:4])
-        waiting = sum(1 for r in missing if r.get("awaiting_review"))
         return _s("action" if f["script"] else "todo",
-                  f"Poses still needed for {names}" + (f" ({waiting} with poses to review under Characters)" if waiting else "")
-                  + ": production stays blocked until every character on screen has approved poses.", "poses")
-    return _s("done", f"{len(f['cast_rows'])} character(s), all poses approved.")
+                  f"Approved poses still needed for {names}: production stays blocked until every character on screen has "
+                  "approved art.", "poses")
+    subs = [f"{r.get('name') or r['key']}: {', '.join(f'{a} uses {b}' for a, b in r['fallbacks'].items())}"
+            for r in f["cast_rows"] if r.get("fallbacks")]
+    note = f"{len(f['cast_rows'])} character(s) with approved art."
+    if subs:
+        note += " Expressions without their own pose use the nearest approved one (" + "; ".join(subs[:4]) + ")."
+    return _s("done", note)
 
 
 def section_script(f: dict) -> dict:
