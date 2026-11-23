@@ -39,7 +39,8 @@ What `maintenance.sh` keeps; everything else of these kinds is listed by the dry
 | Backups | the **newest 3 complete deploy-time** backups (`KEEP_DEPLOY`; it refuses fewer than 3), the newest 7 nightly ones (none are made now), and always the newest backup | older complete backups. Incomplete folders are listed, never removed. |
 
 - **"Previous" means the deploy order**, not the folders' dates. `deploy.sh` and `rollback.sh` add a line to `/srv/stickman/releases.log` for each release that goes live. Until that log has entries (the first deploys after this change), the order the release images were built stands in for it.
-- **Never touched:** Docker volumes, the database, media, running containers, `incoming/`, `shared/` and `repo/`. The two exceptions were approved earlier and are unchanged: upload leftovers in `work/uploads` (temporary files, older than 24 hours) and Bin items older than 30 days (see below).
+- **Never touched:** Docker volumes, the database, media, running containers, `incoming/`, `shared/` and `repo/`.
+- **Listed only, never removed (owner decision 2026-11-23):** upload leftovers in `work/uploads` older than 24 hours, and Bin items older than 30 days. Both are listed by the dry run and by `--apply`, but neither removes them. Remove Bin items with the Bin page's Delete forever or Empty Bin.
 - **Rollback after `--apply`:** `rollback.sh` works for the previous release. For an older release, its images are gone, so it says "run deploy.sh" (the images are rebuilt from the release folder, if it is still kept).
 
 ## The disk report and the Overview page
@@ -58,8 +59,8 @@ What `maintenance.sh` keeps; everything else of these kinds is listed by the dry
 
   The page only reads; nothing can be removed from it.
 - Before the first report exists, the card shows the live numbers and says to run `maintenance.sh` without options (a dry run) on the server.
-- **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; the weekly sweep catches anything a crash left behind. Backups also leave `work/uploads` out.
-- **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media, apart from `work/uploads`) and running containers.
+- **Upload leftovers** (audio-first Stage 1b): files in `work/uploads` inside the media volume that are older than 24 hours (`UPLOAD_HOURS`). This is a video whose audio was never extracted, or frames sampled for hints. These files are temporary and normally deleted within seconds; `maintenance.sh` lists anything a crash left behind but no longer removes it (2026-11-23). Backups also leave `work/uploads` out.
+- **What it never touches:** `/srv/stickman/incoming` (kept on the owner's request), `shared/`, `repo/`, the Docker volumes (database and media) and running containers.
 - **Build cache cap** (owner decision 2026-11-20): every deploy builds images and refreshes the Docker build cache, so with frequent deploys nothing in it is ever older than 7 days and the age rule frees nothing; the cache had grown to 45 GB. `--apply` therefore also caps it with `docker builder prune --max-used-space $BUILD_CACHE_MAX` (default 10GB). The 10 GB kept covers the recent layers, so normal deploys stay fast; a deploy after a large dependency change rebuilds those layers and takes a few minutes longer.
 - **Deploy lock:** `--apply` holds the deploy lock (`/srv/stickman/.ci-deploy.lock`, the one `ci-deploy.sh` takes). If a deploy is running, the releases, images and build-cache steps are skipped and the rest still runs; a deploy that starts while maintenance holds the lock fails with "another deploy is running" and can be re-run.
 - **Projected free space:** the dry run ends with `projected free after --apply`, in the same units as `df -h`, with the share of releases, images, build cache, backups and journal.
@@ -114,7 +115,7 @@ sed -i 's#deploy/maintenance.sh >>#deploy/maintenance.sh --apply >>#' /etc/cron.
   - **Refused, with the reason:** anything another non-deleted episode uses, locked artwork, and rendered or published episodes.
   - Deleting an episode never deletes its characters or sets.
 - **Bin page:** Restore, Delete forever and Empty Bin. The confirm lists exactly what goes and the space freed. Rows and files are removed, only inside the studio's storage and work folders.
-- **Weekly purge:** `maintenance.sh --apply` (weekly only once `--apply` is turned on, install step 4) removes items that have been in the Bin for more than 30 days (`BIN_DAYS`), inside the API container (`python -m oddstudio.bin purge`), and logs each one. The dry run only lists them.
+- **No automatic purge (2026-11-23):** `maintenance.sh` only lists items that have been in the Bin for more than 30 days (`BIN_DAYS`), even with `--apply`. To remove them, use Delete forever or Empty Bin on the Bin page. `python -m oddstudio.bin purge` still exists to run by hand inside the API container.
 - **Backups:** until purged, binned items are still in the database and storage, so backups cover them as before.
 - **Bulk actions** show the list and count first:
   - Characters: "Delete all rejected / never-approved poses";
