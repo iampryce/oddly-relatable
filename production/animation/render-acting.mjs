@@ -357,11 +357,14 @@ function pose(k, t) {
     const atX = Object.fromEntries(KEYS.filter(o => o === k || locomotion(o, t).x > -100).map(o => [o, o === k ? x : locomotion(o, t).x]));
     const line = spec.lines.find(l => t >= l.start - 0.2 && t < l.end + 0.3) || null;
     const target = facingTarget({key: k, x}, line, lastSpeakerAt(t), atX, noteFacing(k, t));
-    const angle = L.sitting !== undefined ? (line && line.speaker === k ? SPEAKER_TURN : LISTENER_TURN) : STANDING_TURN;
-    const want = p.seatChoice ?? turnTowards(target, x, angle);
+    // by the scene: seated turns are wider than standing ones; sitting down or standing up blends the two, and blends
+    // into the owner's seat choice (never through the camera direction)
+    const u = L.sitting !== undefined ? ease.inOut(clamp(L.sitting)) : 0;
+    const seatedTurn = turnTowards(target, x, line && line.speaker === k ? SPEAKER_TURN : LISTENER_TURN);
+    const scene = lerp(turnTowards(target, x, STANDING_TURN), seatedTurn, u);
+    const want = p.seatChoice !== null && p.seatChoice !== undefined ? lerp(scene, p.seatChoice, u) : scene;
     yaws[k] = yaws[k] === null ? want : yaws[k] + (want - yaws[k]) * 0.12;
-    const u = L.sitting !== undefined ? ease.inOut(clamp(L.sitting)) : 1;
-    p.yaw3d = yaws[k] * u;
+    p.yaw3d = yaws[k];
   }
   p.kneeDir = kneeDir; p.hip = {x, y: hipY}; p.seated = !!L.seated; p.seatedFeetY = L.seatedFeetY; p.onStage = x > -150 && x < SET.width + 150;
   return p;
