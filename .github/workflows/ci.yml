@@ -38,6 +38,9 @@ jobs:
       - name: Deploy with the HTTPS proxy checks (simulation)
         working-directory: .
         run: bash studio-app/deploy/tests/simulate-deploy.sh
+      - name: Housekeeping keep-limits and the disk report (simulation)
+        working-directory: .
+        run: bash studio-app/deploy/tests/simulate-maintenance.sh
 
   renderer:
     name: Renderer unit tests

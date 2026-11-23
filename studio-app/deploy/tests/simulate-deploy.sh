@@ -65,6 +65,7 @@ rc=$(run UPLOAD_CODE=502 UPLOAD_BODY="bad gateway")
 check '[[ $rc == 1 ]]' "deploy fails"
 check '[[ "$(readlink "$R/current")" == releases/old ]]' "current points back to the old release"
 check 'grep -q "rolling back to old" "$SIM/out"' "the rollback ran"
+check '[[ "$(tail -n 1 "$R/releases.log" | cut -d" " -f2)" == old ]]' "releases.log records the release that is live again"
 
 echo "3. a page from the dashboard instead of the API is not good enough"
 rc=$(run UPLOAD_CODE=404 UPLOAD_BODY="<html>not found</html>")
@@ -80,6 +81,7 @@ rc=$(run UPLOAD_CODE=401)
 check '[[ $rc == 0 ]]' "deploy succeeds"
 check '[[ "$(readlink "$R/current")" == releases/new ]]' "current points to the new release"
 check 'grep -q "also through the HTTPS proxy" "$SIM/out"' "the proxy checks ran"
+check '[[ "$(tail -n 1 "$R/releases.log")" =~ ^[0-9-]+T[0-9:]+Z\ new$ ]]' "releases.log records the release that went live (the deploy order maintenance.sh keeps by)"
 
 echo
 if (( fails )); then echo "simulate-deploy: $fails check(s) FAILED"; exit 1; fi

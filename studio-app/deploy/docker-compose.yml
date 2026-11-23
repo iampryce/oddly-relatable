@@ -60,7 +60,10 @@ services:
     image: oddstudio-api:${RELEASE:-dev}
     restart: unless-stopped
     environment: *app-env
-    volumes: [work_data:/data]
+    # The housekeeping report (deploy/maintenance.sh writes it) for the Overview page's disk card: read-only.
+    volumes:
+      - work_data:/data
+      - ${STICKMAN_REPORTS:-/srv/stickman/reports}:/srv/reports:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

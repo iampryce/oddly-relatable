@@ -90,6 +90,11 @@ tr:last-child td { border-bottom: 0; }
 .alert.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .alert.info { background: var(--busy-soft); color: var(--busy); border-color: var(--busy); }
 .alert.good { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+.disk-bar { height: 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; margin: 10px 0 12px; }
+.disk-bar > span { display: block; height: 100%; border-radius: 999px; }
+.disk-bar > span.good { background: var(--good); }
+.disk-bar > span.warn { background: var(--warn); }
+.disk-bar > span.bad { background: var(--bad); }
 /* the episode workspace: collapsible sections with a status badge */
 .ws-section { padding: 12px 16px; }
 .ws-section.ws-blocking { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn), var(--shadow); }

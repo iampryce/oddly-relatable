@@ -61,8 +61,10 @@ healthy() {
   code=${out##*$'\n'}
   [[ "$code" == 401 || "$code" == 404 ]] && [[ "${out%$'\n'*}" == *'"detail"'* ]]
 }
+# releases.log: one line per release that went live (UTC time, release), the deploy order maintenance.sh keeps by
+went_live() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $1" >> "$ROOT/releases.log" || true; }
 for i in $(seq 1 30); do
-  if healthy; then echo "deploy: $rel is healthy"$( (( public )) && echo " (also through the HTTPS proxy)"); exit 0; fi
+  if healthy; then went_live "$rel"; echo "deploy: $rel is healthy"$( (( public )) && echo " (also through the HTTPS proxy)"); exit 0; fi
   sleep 5
 done
 echo "deploy: $rel did not become healthy" >&2
@@ -70,5 +72,6 @@ if [[ -n "$prev" ]]; then
   echo "deploy: rolling back to $prev" >&2
   ln -sfn "releases/$prev" "$ROOT/current"
   compose "$prev" up -d --remove-orphans
+  went_live "$prev"
 fi
 exit 1
