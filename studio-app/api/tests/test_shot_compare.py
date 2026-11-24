@@ -394,6 +394,58 @@ class ShotCompareTest(ShotBase):
             self.assertEqual(res["status"], "done")
             self.assertTrue(res["check"]["length_ok"])
 
+    def test_a_landscape_own_frame_stays_16_9_through_the_upload_and_the_result(self):
+        """A 1080x608 band frame (16:9) is kept whole: not centre-cropped to 9:16; the plan keeps its size; the request
+        sends it as the start image; the returned clip is finished landscape (1280x720), not letterboxed in 720x1280."""
+        p = self.plan()
+        r = self.upload_own(p["id"], self.own_png(1080, 608))
+        self.assertEqual(r.status_code, 200, r.text)
+        own = r.json()
+        self.assertEqual(own["own_frame"]["note"], "your 1080x608 image, kept 16:9 (landscape), scaled to 1280x720")
+        self.assertEqual(own["own_frame"]["size"], [1280, 720])
+        from oddstudio.db import new_session
+        from oddstudio.models import Asset
+        from oddstudio.storage import storage
+        with new_session() as s:
+            f = storage().get_to_file(s.get(Asset, own["frame_asset_id"]).storage_key, self.media / "own-wide.png")
+        with Image.open(f) as im:
+            self.assertEqual(im.size, (1280, 720), "landscape kept, nothing cropped")
+            # the image is whole: its centre square (the green block) is still centred, not cut to a 9:16 strip
+            self.assertEqual(im.getpixel((640, 360)), (20, 90, 40))
+            self.assertEqual(im.getpixel((330, 360)), (20, 90, 40), "the left part of the block survives (a 9:16 crop would cut it)")
+        self.stub({"i2v": 5, "avatar": 3.04})
+        self.assertEqual(self.c.post(f"/api/motion/shot/{own['id']}/run", json={"model": "kling-2.6-pro-i2v"}).status_code, 200)
+        ran = self.env.run_jobs(["shot_generate"])
+        self.assertEqual([x[1] for x in ran], ["succeeded"], ran)
+        endpoint, body = self.sent[-1]
+        self.assertIn("image-to-video", endpoint)
+        self.assertIn(f"{own['id']}/first-frame-own.png", body["start_image_url"])
+        self.assertFalse(body["generate_audio"], "audio off: the $0.07/s rate")
+        res = next(x for x in self.c.get("/api/motion/shot").json()["plans"] if x["id"] == own["id"])["results"]["kling-2.6-pro-i2v"]
+        self.assertEqual(res["status"], "done")
+        self.assertTrue(res["check"]["length_ok"])
+        with new_session() as s:
+            v = storage().get_to_file(s.get(Asset, res["asset_id"]).storage_key, self.media / "own-wide.mp4")
+        self.assertEqual(SC.stream_size(v), "1280x720", "the result keeps the frame's landscape shape")
+
+    def test_own_frame_shapes(self):
+        """Portrait and square images take the 9:16 path as before; landscape ones become 16:9, cropped only when needed."""
+        cases = [((720, 1280), "your 720x1280 image", (720, 1280)),
+                 ((1080, 1920), "your 1080x1920 image, scaled to 720x1280", (720, 1280)),
+                 ((1000, 1000), "your 1000x1000 image, centre-cropped to 9:16, scaled to 720x1280", (720, 1280)),
+                 ((1280, 720), "your 1280x720 image, kept 16:9 (landscape)", (1280, 720)),
+                 ((1080, 608), "your 1080x608 image, kept 16:9 (landscape), scaled to 1280x720", (1280, 720)),
+                 ((2000, 1000), "your 2000x1000 image, centre-cropped to 16:9, scaled to 1280x720", (1280, 720))]
+        for (w, h), note, size in cases:
+            src, out = self.media / f"in-{w}x{h}.png", self.media / f"out-{w}x{h}.png"
+            Image.new("RGB", (w, h), (1, 2, 3)).save(src)
+            self.assertEqual(SC.own_frame_image(src, out), note)
+            with Image.open(out) as im:
+                self.assertEqual(im.size, size, f"{w}x{h}")
+        self.assertEqual(SC.result_size({}), (720, 1280), "the original-art plan's clips stay 9:16")
+        self.assertEqual(SC.result_size({"own_frame": {"note": "older plan"}}), (720, 1280), "older own-frame plans: 9:16 as before")
+        self.assertEqual(SC.result_size({"own_frame": {"size": [1280, 720]}}), (1280, 720))
+
     def test_own_frame_needs_a_ready_plan_and_a_real_image(self):
         self.assertEqual(self.upload_own("nope", self.own_png()).status_code, 404)
         with self.assertRaises(ValueError):

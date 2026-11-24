@@ -219,7 +219,7 @@ function OwnFrameUpload({plan, onDone, onError}: {plan: any; onDone: () => void;
       <label className="row" style={{gap: 4}}><input type="checkbox" checked={ownArt} onChange={e => setOwnArt(e.target.checked)} />
         made from our own approved art (no third-party picture or video frame)</label>
       <button className="btn sm" disabled={!file || !ownArt || busy} onClick={send}>{busy ? 'Uploading…' : 'Add as a second plan'}</button>
-      <span className="muted">PNG, JPEG or WebP up to 15 MB; cropped to 9:16 and scaled to 720×1280 if needed</span>
+      <span className="muted">PNG, JPEG or WebP up to 15 MB; a landscape image stays 16:9 (1280×720), any other is made 9:16 (720×1280); cropped at the centre only if its shape differs</span>
     </div>);
 }
 
