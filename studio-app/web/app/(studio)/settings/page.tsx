@@ -364,6 +364,10 @@ export default function Settings() {
               <option value="v1">v1: original style (rollback)</option>
               <option value="v2">v2: adult minimal stick-figure style, cinematic sets</option></select>
             <p className="muted small">Applies to new pose sheets, restyles and set candidates. Approved art is never changed by switching.</p></div>
+          <div style={{marginTop: 12}}><label className="row small" style={{gap: 6}}>
+            <input type="checkbox" checked={!!v.auto_approve_face_expressions} onChange={e => set('auto_approve_face_expressions', e.target.checked)} />
+            Approve face expressions automatically</label>
+            <p className="muted small">Face expressions are drawn by code on a character&apos;s approved neutral (only the brows, eyelids and mouth change), so the character cannot drift. On: they are approved as they are made. The neutral drawing itself always needs your approval.</p></div>
         </>)}</Section>
       </div>
     </>);

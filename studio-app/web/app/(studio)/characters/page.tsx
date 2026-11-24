@@ -165,7 +165,9 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
       {poses.length > 0 && <div className="poses">{poses.map((p: any) => (
         <div key={p.id} className="pose">
           <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt={`${c.name} ${p.expression}`} loading="lazy" /></a>
-          <div className="small">{p.expression}</div>
+          <div className="small">{p.expression}{p.made_by === 'face' ? <span className="badge good" title="Drawn by code on the approved neutral: only the face changes">face</span>
+            : p.made_by === 'reference' ? <span className="badge good" title="Your own drawing, used unchanged">your drawing</span>
+            : <span className="badge warn" title="Drawn separately by an image generator: hair, clothes or colours can differ">AI-drawn</span>}</div>
           <span className={`badge ${p.status === 'approved' ? 'good' : p.status === 'rejected' ? 'bad' : 'warn'}`}>{isCandidate(p, c.assets) ? 'Candidate' : p.status}</span>
           {!c.locked && (() => { const r = poseRigText(p, c.rig_check_job); return r && <div className={`small ${r.tone}`} style={{marginTop: 4}} title={p.rig_check?.message}>{r.text}</div>; })()}
           {!c.locked && <div style={{marginTop: 4}}><DeleteButton kind="pose" id={p.id} label={`${c.name}'s ${p.expression} pose (${p.status})`} onDone={reload} /></div>}
@@ -180,7 +182,22 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
               const v = window.prompt('Face expressions to draw on the approved neutral (comma separated). Available: smug, shocked, angry, deadpan, worried, happy, laughing', 'smug, shocked, angry, deadpan, worried, happy');
               if (v) act.run('faces', async () => setFollow(await api(`/characters/${c.id}/face-expressions`, {body: {expressions: v.split(',').map(x => x.trim()).filter(Boolean)}})));
             }}>Face expressions from the neutral</button>
-          <span className="muted">$0, no AI: only the face changes; approve each pose</span></div>)}
+          <span className="muted">$0, no AI: only the face changes</span></div>)}
+      {!c.locked && (() => {
+        const inReview = everyPose.filter((p: any) => p.status === 'review');
+        const faces = inReview.filter((p: any) => p.made_by === 'face');
+        const others = inReview.filter((p: any) => p.made_by === 'generator');
+        if (!faces.length && !others.length) return null;
+        return (<div className="row small" style={{gap: 6}}>
+          {faces.length > 0 && <button className="btn sm good" disabled={!!act.busy}
+            onClick={() => act.run('faces-ok', () => api(`/characters/${c.id}/face-expressions/approve-all`, {method: 'POST'}))}>
+            Approve all face expressions ({faces.length})</button>}
+          {others.length > 0 && <button className="btn sm danger" disabled={!!act.busy}
+            onClick={() => { if (window.confirm(`Reject the ${others.length} other pose(s) in review (drawn separately by an image generator, so they drift)? Approved poses are not touched; rejected ones stay in the history.`))
+              act.run('others-no', () => api(`/characters/${c.id}/poses/reject-other-review`, {method: 'POST'})); }}>
+            Reject other poses in review ({others.length})</button>}
+        </div>);
+      })()}
       {c.art_status === 'approved' && <HeadAngles characterId={c.id} locked={c.locked} />}
       {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
         <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}

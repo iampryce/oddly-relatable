@@ -256,6 +256,53 @@ def face_expressions(cid: int, body: FaceExpressionsIn, db: Session = Depends(ge
     return S.job(job)
 
 
+FACE_MARK = "-face-job"          # storage key of a pose drawn by code on the approved neutral (tasks.face_expressions)
+FROM_REFERENCE_MARK = "-from-reference-"   # a reference drawing used unchanged (reference_as_pose)
+
+
+@router.post("/characters/{cid}/face-expressions/approve-all")
+def approve_all_face_expressions(cid: int, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """The owner approves every face expression waiting in review (and nothing else). Each replaces the earlier approved
+    pose of its expression; when two face versions of one expression wait, the newest wins."""
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    faces = (db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
+                                             CharacterAsset.status == "review",
+                                             CharacterAsset.storage_key.contains(FACE_MARK))
+             .order_by(CharacterAsset.id).all())
+    if not faces:
+        raise HTTPException(409, "no face expressions are waiting in review")
+    for a in faces:
+        decide(db, c, a, True)
+        db.flush()
+    refresh_art(db, c)
+    db.add(Event(episode_id=c.episode_id, kind="approval",
+                 message=f"{c.name}: {len(faces)} face expression(s) approved by {user}: {', '.join(a.expression for a in faces)}"))
+    db.commit()
+    queue_rig_check(db, c)
+    return out(db, c)
+
+
+@router.post("/characters/{cid}/poses/reject-other-review")
+def reject_other_review(cid: int, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """The owner rejects every pose in review that is NOT a face expression or a reference used as the neutral: the
+    drawings an image generator made separately (they redraw the character, so they drift). Rejected poses stay in
+    the history; approved poses are never touched."""
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    old = [a for a in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review")
+           if FACE_MARK not in (a.storage_key or "") and FROM_REFERENCE_MARK not in (a.storage_key or "")]
+    for a in old:
+        a.status = "rejected"
+    refresh_art(db, c)
+    db.add(Event(episode_id=c.episode_id, kind="character",
+                 message=f"{c.name}: {len(old)} other pose(s) in review rejected by {user}"))
+    db.commit()
+    return out(db, c)
+
+
 class PosesIn(BaseModel):
     expressions: list[str] = Field(min_length=1, max_length=12)
 
