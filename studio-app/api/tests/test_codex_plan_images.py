@@ -164,7 +164,7 @@ class CodexPlanImagesTest(unittest.TestCase):
         (self.ctl / "approve").write_text("1")                                  # the owner enters the code
         for _ in range(100):
             st = c.get("/api/settings/codex").json()
-            if st["login"] == "chatgpt" and st["pending"] is None:
+            if st["login"] == "chatgpt" and st["pending"] is None and st["last"]:   # the result is recorded
                 break
             time.sleep(0.05)
         self.assertEqual(st["login"], "chatgpt")
