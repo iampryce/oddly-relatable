@@ -112,3 +112,50 @@ The owner's choice is stored on the seat (`facing`: `speaker` | `camera` | `away
 - **Choices:** only that character's usable (approved) expressions are offered. A line whose expression has no pose shows which one it uses.
 - **What changes:** only the storyboard line (`PUT /api/episodes/{id}/scenes/{scene}/lines/{n}/expression`). The script, its approval and the storyboard's approval stay as they are. The change applies to the stills and the next render.
 - **When:** from storyboard review through video review; not during a render.
+
+## 3D camera, Gate 1
+
+A first look at native 3D characters through a perspective camera, for the owner to judge the new look. It is separate from the Studio 3D rig animator above, which is unchanged, and nothing in the studio uses it yet.
+
+**What is drawn.** Uncle Mortimer, seated on a plain chair, seen from the front and from a three-quarter view (38°):
+- **Body:** flat toon shading (two tones) with black ink outlines. Rounded parts get an inside-out copy pushed out along their normals and drawn in ink behind them; the chair's boxes get a slightly bigger inside-out box.
+- **Head:** a ball. The face (eyes, pupils, brows, mouth) is drawn as vector shapes into a picture pressed onto the ball's front, so it turns and foreshortens with the head. No old face picture is used, and no three-quarter drawings are needed.
+- **Mouth:** a shape for each of Rhubarb's visemes (A–H, X), sized to the face's mouth, as in the 2D renderer.
+- **Expressions:** brow and eye settings per expression (neutral only for now).
+- **Hair:** a mass on the top and back and the side tufts, in the hair colour. The hairline is painted with an ink edge where the hair meets the ball.
+- **Clothing:** the torso in the clothing colour, with its details (neckline, collar, buttons, pockets) drawn as shapes. Stick limbs, mitten hands and shoes as before.
+
+**The character spec.** Each character is a small file, `production/animation/cast3d/<key>.json`. It holds:
+- the colours;
+- the head size and where it sits;
+- the hair shapes;
+- the face's feature positions, as fractions of the head radius;
+- the torso's size and outline;
+- the clothing kind and its details;
+- shoulder and hip positions, arm, leg and shoe sizes.
+
+Mortimer's numbers were measured once from his approved neutral pose and its acting rig. The 3D character is built from these numbers only, never from the picture, so the old art can be retired.
+
+**Files.**
+- `production/animation/cam3d.mjs`: the renderer and the character builder.
+- `production/animation/cam3d-math.mjs`: the pure maths (camera orbit, framing, planar picture mapping, outline shells, the seated body, mouth shapes, expressions), tested by `cam3d-math.test.mjs`.
+- `production/animation/cam3d-still.mjs`: the stills and the comparison picture.
+
+**Running.** It uses the same packages and display as the rig animator:
+
+```
+xvfb-run -a node production/animation/cam3d-still.mjs --spec production/animation/cast3d/uncle-mortimer.json \
+  --out <folder> [--ref <approved pose png>] [--yaw 38] [--ss 2] [--bench 10]
+```
+
+It writes `front.png` and `three-quarter.png`. With `--ref`, it also writes `comparison.png`: the old approved art labelled "reference only", then the 3D front and three-quarter views. The reference is only read and never stored. Timings are printed as JSON.
+
+**Speed.** Measured at 1080x608 in a Linux container (8 vCPU, software WebGL):
+- **Plain frame:** about 30 ms.
+- **2x supersampled frame** (the smoothed stills): about 75–90 ms.
+- **Setup:** about 1 s, which builds the character and paints the hairline and face.
+- **Peak memory:** about 320–400 MB.
+
+The same input gives the same picture every time.
+
+**Not in Gate 1:** animation, the other characters, expressions beyond neutral, and use in episodes.
