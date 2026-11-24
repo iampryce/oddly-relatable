@@ -173,6 +173,14 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
+      {!c.locked && everyPose.some((p: any) => p.expression === 'neutral' && p.status === 'approved') && (
+        <div className="row small" style={{gap: 6}}>
+          <button className="btn sm" disabled={!!act.busy} title="Only the face changes (brows, eyelids, mouth); every other pixel is the approved neutral, so the character cannot drift"
+            onClick={() => {
+              const v = window.prompt('Face expressions to draw on the approved neutral (comma separated). Available: smug, shocked, angry, deadpan, worried, happy, laughing', 'smug, shocked, angry, deadpan, worried, happy');
+              if (v) act.run('faces', async () => setFollow(await api(`/characters/${c.id}/face-expressions`, {body: {expressions: v.split(',').map(x => x.trim()).filter(Boolean)}})));
+            }}>Face expressions from the neutral</button>
+          <span className="muted">$0, no AI: only the face changes; approve each pose</span></div>)}
       {c.art_status === 'approved' && <HeadAngles characterId={c.id} locked={c.locked} />}
       {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
         <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}

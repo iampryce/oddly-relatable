@@ -850,3 +850,35 @@ from . import set_views  # noqa: E402,F401
 from . import head_angles  # noqa: E402,F401
 from . import seat_suggest  # noqa: E402,F401
 from . import room_read  # noqa: E402,F401
+
+
+@task
+def face_expressions(ctx: Ctx) -> dict:
+    """Expressions drawn by code on the character's approved neutral (face_expressions.py): only the face changes,
+    every other pixel is the approved drawing. Each new pose goes to review; nothing is approved here."""
+    from . import face_expressions as FE
+    db, job = ctx.db, ctx.job
+    c = db.get(Character, job.character_id)
+    neutral = (db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", expression="neutral", status="approved")
+               .order_by(CharacterAsset.id.desc()).first())
+    if neutral is None:
+        raise RuntimeError(f"{c.name} has no approved neutral pose to draw expressions on")
+    work = ctx.folder("characters", c.key, f"face-job{job.id}")
+    src = storage().get_to_file(neutral.storage_key, work / "neutral.png")
+    made = []
+    for exp, f in FE.make(src, list(job.payload.get("expressions", [])), work):
+        info = engine.analyse_pose(f)
+        key = f"characters/{c.key}/poses/{'v2/' if neutral.style_version == 'v2' else ''}{exp}-face-job{job.id}.png"
+        storage().put_file(key, f, "image/png")
+        a = CharacterAsset(character_id=c.id, kind="pose", expression=exp, storage_key=key, sha256=sha256_file(f),
+                           width=info["width"], height=info["height"], feet=info["feet"], figure_height=info["figure_height"],
+                           status="review", style_version=neutral.style_version)
+        db.add(a)
+        db.flush()
+        made.append({"expression": exp, "asset_id": a.id})
+        ctx.log(f"{exp}: drawn on the approved neutral (pose {neutral.id})")
+    if c.art_status != "approved":
+        c.art_status = "review"
+    event(db, c.episode_id, "character", f"{c.name}: {len(made)} face expression(s) drawn on the approved neutral, awaiting review")
+    db.commit()
+    return {"made": made, "neutral": neutral.id}
