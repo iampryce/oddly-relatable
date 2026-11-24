@@ -231,6 +231,31 @@ def reference_as_pose(cid: int, body: ReferenceAsPoseIn, db: Session = Depends(g
     return out(db, c)
 
 
+class FaceExpressionsIn(BaseModel):
+    expressions: list[str] = Field(min_length=1, max_length=12)
+
+
+@router.post("/characters/{cid}/face-expressions")
+def face_expressions(cid: int, body: FaceExpressionsIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Expressions drawn by code on the approved neutral: only the face changes, so the character cannot drift. No AI
+    call, no cost. Each pose goes to review and is approved one by one (no sheet: a sheet approval would also approve
+    other poses waiting in review)."""
+    from .face_expressions import EXPRESSIONS
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    exps = clean_expressions(body.expressions)
+    bad = [e for e in exps if e not in EXPRESSIONS]
+    if bad:
+        raise HTTPException(422, f"no face drawing for {', '.join(bad)}; available: {', '.join(EXPRESSIONS)}")
+    if not db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", expression="neutral", status="approved").first():
+        raise HTTPException(409, f"approve {c.name}'s neutral pose first: the expressions are drawn on it")
+    job = enqueue(db, "face_expressions", episode_id=c.episode_id, character_id=c.id, payload={"expressions": exps})
+    db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: face expressions requested by {user}: {', '.join(exps)}"))
+    db.commit()
+    return S.job(job)
+
+
 class PosesIn(BaseModel):
     expressions: list[str] = Field(min_length=1, max_length=12)
 
