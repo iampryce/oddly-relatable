@@ -54,7 +54,10 @@ DEFAULTS: dict[str, dict] = {
         "only from the general genre."),
         # House style of all new character and set images: v1 (the original look, kept as rollback) | v2 (adult minimal
         # stick-figure style, owner decision 2026-11-20). Existing approved art is never changed by switching.
-        "style_version": "v1"},
+        "style_version": "v1",
+        # Owner's choice (off by default): face expressions drawn by code on an APPROVED neutral (face_expressions.py)
+        # are approved as they are made. Only the face changes, so the approved drawing stays the character.
+        "auto_approve_face_expressions": False},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -104,6 +107,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         from .house_style import STYLE_VERSIONS
         if value["style_version"] not in STYLE_VERSIONS:
             raise ValueError(f"creative.style_version must be one of {', '.join(STYLE_VERSIONS)}")
+    if key == "creative" and "auto_approve_face_expressions" in value and not isinstance(value["auto_approve_face_expressions"], bool):
+        raise ValueError("creative.auto_approve_face_expressions must be true or false")
     if key == "production" and value.get("dialogue_display", "none") not in DIALOGUE_DISPLAYS:
         raise ValueError(f"production.dialogue_display must be one of {', '.join(DIALOGUE_DISPLAYS)}")
     if key == "gpu":

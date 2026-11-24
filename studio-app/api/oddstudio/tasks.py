@@ -877,8 +877,22 @@ def face_expressions(ctx: Ctx) -> dict:
         db.flush()
         made.append({"expression": exp, "asset_id": a.id})
         ctx.log(f"{exp}: drawn on the approved neutral (pose {neutral.id})")
-    if c.art_status != "approved":
-        c.art_status = "review"
-    event(db, c.episode_id, "character", f"{c.name}: {len(made)} face expression(s) drawn on the approved neutral, awaiting review")
-    db.commit()
-    return {"made": made, "neutral": neutral.id}
+    auto = bool(get_section(db, "creative").get("auto_approve_face_expressions"))
+    if auto:
+        # the owner's standing choice (Settings): approving a face version retires the earlier approved pose of that
+        # expression, as a manual approval does
+        from .routes_characters import decide, queue_rig_check, refresh_art
+        for m in made:
+            decide(db, c, db.get(CharacterAsset, m["asset_id"]), True)
+            db.flush()
+        refresh_art(db, c)
+        event(db, c.episode_id, "approval", f"{c.name}: {len(made)} face expression(s) drawn on the approved neutral and "
+                                            f"approved by the owner's setting (auto-approve face expressions)")
+        db.commit()
+        queue_rig_check(db, c)
+    else:
+        if c.art_status != "approved":
+            c.art_status = "review"
+        event(db, c.episode_id, "character", f"{c.name}: {len(made)} face expression(s) drawn on the approved neutral, awaiting review")
+        db.commit()
+    return {"made": made, "neutral": neutral.id, "approved_by_setting": auto}

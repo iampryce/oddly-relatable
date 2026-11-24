@@ -94,5 +94,59 @@ class FaceExpressionsJobTest(unittest.TestCase):
         self.assertEqual(poses, [("neutral", "approved"), ("shocked", "review"), ("smug", "review")])
 
 
+class FaceApprovalsTest(FaceExpressionsJobTest):
+    """Approve-all, reject-the-others and the owner's auto-approve setting."""
+
+    def approved_neutral(self):
+        ref = next(a for a in self.assets() if a[1] == "reference")[0]
+        self.c.post(f"/api/characters/{self.cid}/reference-as-pose", json={"asset_id": ref})
+        pose = next(a for a in self.assets() if a[1] == "pose")[0]
+        self.c.post(f"/api/character-assets/{pose}/decision", json={"decision": "approve"})
+
+    def generator_pose(self, expression):
+        from oddstudio.db import new_session
+        from oddstudio.models import CharacterAsset
+        with new_session() as s:
+            a = CharacterAsset(character_id=self.cid, kind="pose", expression=expression, status="review",
+                               storage_key=f"characters/ronald/poses/{expression}-job99-a1.png")
+            s.add(a)
+            s.commit()
+            return a.id
+
+    def poses(self):
+        return sorted((e, s) for _, k, e, s in self.assets() if k == "pose")
+
+    def test_setting_is_off_by_default_and_must_be_a_boolean(self):
+        cre = self.c.get("/api/settings").json()["sections"]["creative"]
+        self.assertIs(cre["auto_approve_face_expressions"], False)
+        self.assertEqual(self.c.put("/api/settings/creative", json={**cre, "auto_approve_face_expressions": "yes"}).status_code, 422)
+
+    def test_approve_all_touches_only_face_poses_and_reject_others_only_generator_poses(self):
+        self.approved_neutral()
+        old = self.generator_pose("smug")
+        self.c.post(f"/api/characters/{self.cid}/face-expressions", json={"expressions": ["smug", "shocked"]})
+        self.env.run_jobs(["face_expressions"])
+        made = {a["expression"]: a["made_by"] for a in self.c.get("/api/characters").json()[-1]["assets"] if a["kind"] == "pose" and a["status"] == "review"}
+        self.assertIn("generator", made.values())
+        r = self.c.post(f"/api/characters/{self.cid}/face-expressions/approve-all")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn(("smug", "approved"), self.poses())
+        self.assertIn(("shocked", "approved"), self.poses())
+        self.assertIn(("smug", "review"), self.poses())             # the generator pose was not approved
+        r = self.c.post(f"/api/characters/{self.cid}/poses/reject-other-review")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.poses(), [("neutral", "approved"), ("shocked", "approved"), ("smug", "approved"), ("smug", "rejected")])
+        self.assertEqual(self.c.post(f"/api/characters/{self.cid}/face-expressions/approve-all").status_code, 409)
+        self.assertTrue(old)
+
+    def test_owner_setting_approves_face_expressions_as_they_are_made(self):
+        self.approved_neutral()
+        cre = self.c.get("/api/settings").json()["sections"]["creative"]
+        self.assertEqual(self.c.put("/api/settings/creative", json={**cre, "auto_approve_face_expressions": True}).status_code, 200)
+        self.c.post(f"/api/characters/{self.cid}/face-expressions", json={"expressions": ["deadpan"]})
+        self.env.run_jobs(["face_expressions"])
+        self.assertIn(("deadpan", "approved"), self.poses())
+
+
 if __name__ == "__main__":
     unittest.main()
