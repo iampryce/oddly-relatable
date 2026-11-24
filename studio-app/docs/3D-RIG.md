@@ -113,6 +113,20 @@ The owner's choice is stored on the seat (`facing`: `speaker` | `camera` | `away
 - **What changes:** only the storyboard line (`PUT /api/episodes/{id}/scenes/{scene}/lines/{n}/expression`). The script, its approval and the storyboard's approval stay as they are. The change applies to the stills and the next render.
 - **When:** from storyboard review through video review; not during a render.
 
+## What the 3D camera will read (2026-11-24)
+
+The storyboard now holds, as plain data for every renderer (see EPISODE-WORKSPACE.md, "Frame layout, the reaction sheet
+and the shot list"):
+- **the shot list** per scene (`shots` in the render spec): start, end, type, the camera in words, who is on screen,
+  whose shoulder;
+- **the reaction sheet** per line (`lines[].reactions[].beats`): word, time, approved expression, head move, strength,
+  reason;
+- **the frame layout** (`layout: "band"`): a 16:9 picture band in the 9:16 frame. The 3D rig animator draws its
+  characters into the band at the band's offset (`view.oy`).
+
+The 2D and the 3D rig animators carry the shots and beats without acting on them; the 3D camera drives its cuts and the
+listeners' reactions from them.
+
 ## 3D camera, Gate 1
 
 A first look at native 3D characters through a perspective camera, for the owner to judge the new look. It is separate from the Studio 3D rig animator above, which is unchanged, and nothing in the studio uses it yet.
