@@ -382,13 +382,60 @@ def make_cutout(png: Path) -> bool:
     first = img.getpixel(corners[0])
     if any(max(abs(a - b) for a, b in zip(img.getpixel(c)[:3], first[:3])) > 24 for c in corners):
         return False
+    original = img.copy()
     for c in corners:
         if img.getpixel(c)[3] > 16:
             ImageDraw.floodfill(img, c, (0, 0, 0, 0), thresh=40)
+    if sum(first[:3]) / 3 < 235:
+        img = clear_enclosed_background(img, original, first[:3])
     if sum(first[:3]) / 3 < 200:
         img = defringe(img, first[:3])
     img.save(png)
     return True
+
+
+def clear_enclosed_background(img: Image.Image, original: Image.Image, bg: tuple, min_frac: float = 0.0001,
+                              local_tol: int = 10) -> Image.Image:
+    """Make background pockets the corner flood fill cannot reach transparent: the gaps between an arm and the body,
+    or inside a bag handle, are closed off by the outline, so they kept the background colour and showed as grey
+    slivers on a set. The background is often a gentle gradient, so a candidate (a plain grey region of at least
+    min_frac of the image, roughly the background's brightness) is compared with the ORIGINAL background just around
+    it (pixels the flood fill cleared nearby), not the corner: within local_tol it is background. A similar but
+    different grey (hair, a moustache) differs from the background next to it and stays. Thin lines and anti-aliased
+    specks are never seeds (the mask is eroded first). Only applied on non-white backgrounds: on white, the big white
+    eyes would match."""
+    import numpy as np
+    from PIL import ImageDraw, ImageFilter
+    a = np.array(img.convert("RGBA")).astype(np.int32)
+    o = np.array(original.convert("RGB")).astype(np.int32)
+    rgb = a[:, :, :3]
+    cleared = a[:, :, 3] == 0
+    plain = (rgb.max(2) - rgb.min(2) <= 10) & (np.abs(rgb.mean(2) - float(np.mean(bg[:3]))) <= 40) & ~cleared
+    if not plain.any():
+        return img
+    mask = Image.fromarray((plain * 255).astype(np.uint8))
+    seeds = np.array(mask.filter(ImageFilter.MinFilter(5))) > 0
+    min_px = int(img.width * img.height * min_frac)
+    h, w = plain.shape
+    done = np.zeros_like(plain)
+    for y, x in zip(*np.nonzero(seeds)):
+        if done[y, x]:
+            continue
+        m = mask.copy()
+        ImageDraw.floodfill(m, (int(x), int(y)), 128)
+        region = np.array(m) == 128
+        done |= region
+        if region.sum() < min_px:
+            continue
+        ys, xs = np.nonzero(region)
+        y0, y1, x0, x1 = max(0, ys.min() - 80), min(h, ys.max() + 81), max(0, xs.min() - 80), min(w, xs.max() + 81)
+        near_bg = cleared[y0:y1, x0:x1]
+        if near_bg.sum() < 50:
+            continue
+        local = o[y0:y1, x0:x1][near_bg].mean(0)
+        if np.abs(rgb[region].mean(0) - local).max() <= local_tol:
+            a[region, 3] = 0
+    return Image.fromarray(a.astype(np.uint8), "RGBA")
 
 
 def defringe(img: Image.Image, bg: tuple, rounds: int = 3) -> Image.Image:
