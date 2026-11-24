@@ -178,6 +178,59 @@ def upload_reference(cid: int, body: ReferenceIn, db: Session = Depends(get_db))
     return out(db, c)
 
 
+class ReferenceAsPoseIn(BaseModel):
+    asset_id: int
+    expression: str = Field(default="neutral", max_length=40)
+
+
+@router.post("/characters/{cid}/reference-as-pose", status_code=201)
+def reference_as_pose(cid: int, body: ReferenceAsPoseIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    """Use the owner's own reference drawing itself as a pose (normally the neutral), unchanged: no generator redraws
+    it, so the character's identity is exactly that drawing. Only the flat background is cut out. The pose goes to
+    review: the owner's approval makes it official, as for any pose. A pose sheet started afterwards then draws the
+    other expressions from this exact neutral."""
+    import tempfile
+    from pathlib import Path
+    from . import engine
+    from .storage import sha256_file
+    from .tasks import style_version
+    c = get_char(db, cid)
+    if c.locked:
+        raise HTTPException(409, "locked character")
+    a = db.get(CharacterAsset, body.asset_id)
+    if not a or a.character_id != c.id or a.kind != "reference":
+        raise HTTPException(404, "that is not one of this character's reference images")
+    exp = body.expression.strip().lower()
+    if not EXPRESSION.match(exp):
+        raise HTTPException(422, f"invalid expression name {exp!r}")
+    if db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
+                                       CharacterAsset.expression == exp,
+                                       CharacterAsset.status.in_(("review", "approved"))).first():
+        raise HTTPException(409, f"{c.name} already has a {exp} pose in review or approved")
+    version = style_version(db)
+    with tempfile.TemporaryDirectory() as tmp:
+        f = storage().get_to_file(a.storage_key, Path(tmp) / "ref.png")
+        png = Path(tmp) / f"{exp}-from-reference-{a.id}.png"
+        Image.open(f).convert("RGBA").save(png)
+        engine.make_cutout(png)
+        try:
+            info = engine.analyse_pose(png)
+        except Exception as e:
+            raise HTTPException(422, f"the reference could not be used as a pose: {e}") from e
+        key = f"characters/{c.key}/poses/{'v2/' if version == 'v2' else ''}{png.name}"
+        storage().put_file(key, png, "image/png")
+        pose = CharacterAsset(character_id=c.id, kind="pose", expression=exp, storage_key=key, sha256=sha256_file(png),
+                              width=info["width"], height=info["height"], feet=info["feet"],
+                              figure_height=info["figure_height"], status="review", style_version=version)
+    db.add(pose)
+    if c.art_status != "approved":
+        c.art_status = "review"
+    db.add(Event(episode_id=c.episode_id, kind="character",
+                 message=f"{c.name}: reference {a.id} used unchanged as the {exp} pose by {user} (awaiting approval)"))
+    db.commit()
+    return out(db, c)
+
+
 class PosesIn(BaseModel):
     expressions: list[str] = Field(min_length=1, max_length=12)
 
