@@ -180,7 +180,10 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
         Show all poses ({everyPose.length - visiblePoses(c.assets, false).length} superseded, rejected or extra hidden)</label> : null}
       {!c.locked && (
         <div className="stack">
-          <div className="row">{refs.map((r: any) => <a key={r.id} href={r.url} target="_blank" rel="noreferrer" className="small">reference</a>)}
+          <div className="row">{refs.map((r: any) => <span key={r.id} className="small"><a href={r.url} target="_blank" rel="noreferrer">reference</a>
+            {!c.locked && !everyPose.some((p: any) => p.expression === 'neutral' && ['review', 'approved'].includes(p.status)) &&
+              <> <button className="btn sm" disabled={!!act.busy} title="Use this exact drawing as the neutral pose (no redraw); it then waits for your approval"
+                onClick={() => act.run('refpose', () => api(`/characters/${c.id}/reference-as-pose`, {body: {asset_id: r.id}}))}>Use as neutral pose</button></>}</span>)}
             <label className="btn sm" style={{display: 'inline-block', margin: 0}}>Upload visual reference<input type="file" accept="image/png,image/jpeg" hidden onChange={e => upload(e.target.files?.[0])} /></label></div>
           <div><label htmlFor={`exprs-${c.id}`}>Expression sheet (comma separated; neutral is drawn first and anchors the rest; one image each, started only by you)</label>
             <div className="row"><input id={`exprs-${c.id}`} style={{flex: 1}} value={exprs} onChange={e => setExprs(e.target.value)} />

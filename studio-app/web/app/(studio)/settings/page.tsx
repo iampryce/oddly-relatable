@@ -21,7 +21,7 @@ const CREDENTIALS: [string, string][] = [
   ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (hosted talking shots)'],
   ['runpod_api_key', 'RunPod API key (rented GPU sessions; stays on the studio)'], ['gpu_worker_token', 'GPU worker token (our own GPU machine)'],
 ];
-const NEED_LABEL = (n: string) => n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :
+const NEED_LABEL = (n: string) => n === 'tool:codex' ? 'Codex installed and signed in with ChatGPT on the server' : n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :
   (CREDENTIALS.find(([k]) => k === n)?.[1] || n.replace(/_/g, ' '));
 
 function useSection(name: string, value: any) {
@@ -110,7 +110,7 @@ function ProviderRows({cap, reload}: {cap: any; reload: () => unknown}) {
         <thead><tr><th>Provider</th><th>Status</th><th>Real worker test</th></tr></thead>
         <tbody>{Object.entries(cap.providers).map(([pid, p]: [string, any]) => (
           <tr key={pid}>
-            <td><strong>{p.label}</strong>{p.default_model && <div className="muted small">default model {p.default_model}</div>}{p.note && <div className="muted small">{p.note}</div>}</td>
+            <td><strong>{p.label}</strong>{p.default_model && <div className="muted small">default model {p.default_model}</div>}{p.cost_label && <div className="small"><span className="badge good">{p.cost_label}</span></div>}{p.note && <div className="muted small">{p.note}</div>}</td>
             <td className="small">
               {!p.implemented ? <span className="badge">not integrated</span> : p.verified ? <span className="badge good">verified</span> :
                 p.configured ? <span className="badge warn">configured, not verified</span> : <span className="badge bad">not configured</span>}
@@ -285,6 +285,46 @@ function Credentials({creds, reload}: {creds: any; reload: () => unknown}) {
     </div>);
 }
 
+// Codex on the ChatGPT plan: sign the server's Codex CLI in with a device code, without a terminal. The login itself
+// stays on the server (never shown); this card only shows the state, the link and the one-time code.
+function CodexCard({reload}: {reload: () => unknown}) {
+  const {data, reload: again} = useApi<any>('/settings/codex', 3000);
+  const {busy, error, run} = useAction(async () => { await again(); await reload(); });
+  const [started, setStarted] = useState<any>(null);
+  const pending = data?.pending || started;
+  useEffect(() => { if (data && !data.pending) setStarted(null); }, [data]);
+  const login = data?.login;
+  const mins = pending ? Math.max(0, Math.round((pending.expires_at * 1000 - Date.now()) / 60000)) : 0;
+  return (
+    <div className="card stack" id="codex">
+      <h2>Codex (ChatGPT plan)</h2>
+      <p className="muted small">Images and text through your ChatGPT subscription: $0 per call (plan allowance), no API credits.
+        Turn on device code login in ChatGPT &gt; Settings &gt; Security first.</p>
+      <ErrorBox error={error} />
+      <div>{!data ? <span className="muted">Checking…</span> :
+        !data.installed ? <span className="badge bad">Codex is not installed on the server</span> :
+        login === 'chatgpt' ? <span className="badge good">Signed in with ChatGPT</span> :
+        login === 'api-key' ? <span className="badge bad">Signed in with an API key (refused: it would bill the API). Sign out, then sign in with ChatGPT.</span> :
+        <span className="badge warn">Not signed in</span>}</div>
+      {pending && login !== 'chatgpt' && (
+        <div className="stack">
+          <div>1. Open <a href={pending.url} target="_blank" rel="noopener noreferrer">{pending.url}</a> and sign in to ChatGPT.</div>
+          <div>2. Enter this code: <strong style={{fontSize: '1.4em', letterSpacing: 2}}>{pending.code}</strong> <span className="muted small">(expires in about {mins} min)</span></div>
+          <div className="muted small">Only enter this code if you pressed Sign in here. This page updates by itself when you are signed in.</div>
+        </div>)}
+      {data?.last?.result === 'not signed in' && !pending && login !== 'chatgpt' &&
+        <div className="muted small">The last sign-in did not complete (cancelled or the code expired).</div>}
+      <div className="row">
+        {data?.installed && login !== 'chatgpt' && !pending &&
+          <button className="btn" disabled={!!busy} onClick={() => run('login', async () => setStarted(await api('/settings/codex/login', {method: 'POST'})))}>Sign in with ChatGPT</button>}
+        {pending && login !== 'chatgpt' &&
+          <button className="btn" disabled={!!busy} onClick={() => run('cancel', () => api('/settings/codex/cancel', {method: 'POST'}))}>Cancel</button>}
+        {(login === 'chatgpt' || login === 'api-key') &&
+          <button className="btn" disabled={!!busy} onClick={() => { if (confirm('Sign the server out of Codex? Codex images and text stop until you sign in again.')) run('logout', () => api('/settings/codex/logout', {method: 'POST'})); }}>Sign out</button>}
+      </div>
+    </div>);
+}
+
 export default function Settings() {
   const {data, error, reload} = useApi<any>('/settings', 4000);
   const [notice, setNotice] = useState('');
@@ -302,6 +342,7 @@ export default function Settings() {
       {notice && <div className="card"><span className="badge">{notice}</span></div>}
       <div className="grid cols-2">
         <Credentials creds={data.credentials || {}} reload={reload} />
+        <CodexCard reload={reload} />
         {CAP_ORDER.filter(id => caps[id]).map(id => <CapabilityCard key={id} id={id} cap={caps[id]} sections={s} data={data} reload={reload} />)}
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (

@@ -154,6 +154,11 @@ def check_gpu(v: dict) -> None:
         raise ValueError("gpu.gpu_type is not a GPU type name")
 
 
+def _codex_login() -> str:
+    from .providers import codex_login_state
+    return codex_login_state()
+
+
 def integrations_status() -> dict:
     """Which credentials and tools are present. Values are never returned."""
     import shutil
@@ -166,6 +171,7 @@ def integrations_status() -> dict:
         "fish_api_key": bool(secret("fish_api_key")),
         "piper": bool(shutil.which(s.piper_bin)),
         "codex_cli": bool(shutil.which(s.codex_bin)),
+        "codex_login": _codex_login(),
         "youtube": bool(secret("youtube_client_id") and secret("youtube_client_secret") and secret("youtube_refresh_token")),
         "storage": storage_config()["backend"],
         "s3_bucket_set": bool(storage_config()["bucket"]),

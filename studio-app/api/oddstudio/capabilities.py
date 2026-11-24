@@ -26,7 +26,8 @@ CAPABILITIES: dict[str, dict] = {
     "script": {"label": "Script and story generation", "section": "text", "providers": {
         "openai": {"label": "OpenAI", "needs": ["openai_api_key"], "implemented": True, "default_model": "gpt-4.1-mini"},
         "anthropic": {"label": "Anthropic Claude", "needs": ["anthropic_api_key"], "implemented": True, "default_model": "claude-sonnet-5-5"},
-        "codex-cli": {"label": "Codex CLI (ChatGPT subscription)", "needs": ["tool:codex"], "implemented": True},
+        "codex-cli": {"label": "Codex CLI (ChatGPT subscription)", "needs": ["tool:codex"], "implemented": True,
+                      "note": "$0 per call (ChatGPT plan allowance); needs a ChatGPT sign-in on the server"},
     }},
     "transcription": {"label": "Audio transcription and speech analysis", "section": "transcription", "providers": {
         "openai": {"label": "OpenAI transcription (word timestamps)", "needs": ["openai_api_key"], "implemented": True, "default_model": "whisper-1"},
@@ -38,7 +39,9 @@ CAPABILITIES: dict[str, dict] = {
     }},
     "image": {"label": "Character and image generation", "section": "image", "providers": {
         "openai": {"label": "OpenAI Images API", "needs": ["openai_api_key"], "implemented": True, "default_model": "gpt-image-2"},
-        "codex-cli": {"label": "Codex CLI image generation (workstation only)", "needs": ["tool:codex"], "implemented": True},
+        "codex-cli": {"label": "Codex (ChatGPT plan)", "needs": ["tool:codex"], "implemented": True, "cost_label": "$0 (plan allowance)",
+                      "note": "$0 per image (ChatGPT plan allowance; stops when the plan limit is reached); needs a ChatGPT "
+                              "sign-in on the server; never falls back to a paid provider"},
         "comfyui": {"label": "ComfyUI workflow (GPU server)", "needs": ["setting:comfyui.url"], "implemented": False,
                     "note": "connection test only; no image workflow adapter yet"},
     }},
@@ -88,7 +91,9 @@ TEST_STAGE = {"script": "text", "transcription": "transcription", "vision": "vis
 def tool_present(name: str) -> bool:
     s = get_settings()
     if name == "codex":
-        return bool(shutil.which(s.codex_bin))
+        # installed AND signed in with a ChatGPT plan (an API-key sign-in would bill the API: not counted)
+        from .providers import codex_login_state
+        return codex_login_state() == "chatgpt"
     if name == "piper":
         return bool(shutil.which(s.piper_bin))
     if name == "kokoro":

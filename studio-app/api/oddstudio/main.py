@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import head_angles
 from . import set_views
-from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, room_read, scene_sets, workspace, set_proposals, engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, room_read, scene_sets, storyboard_frames, workspace, set_proposals, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -82,6 +82,7 @@ app.include_router(set_proposals.router)
 app.include_router(set_views.router)
 app.include_router(head_angles.router)
 app.include_router(room_read.router)
+app.include_router(storyboard_frames.router)
 app.include_router(workspace.router)
 app.include_router(reference_plan.router)
 app.include_router(scene_sets.router)
@@ -226,6 +227,41 @@ def get_all_settings(db: Session = Depends(get_db)):
     tests = provider_tests(db)
     return {"sections": all_sections(db), "integrations": integrations_status(), "environments": engine.environments(),
             "credentials": presence(db), "tests": tests, "capabilities": status(db, tests)}
+
+
+@app.get("/api/settings/codex", dependencies=[Depends(current_user)])
+def codex_status():
+    """Codex CLI sign-in state on the server (never the login file itself)."""
+    from . import codex_login
+    return codex_login.status()
+
+
+@app.post("/api/settings/codex/login", dependencies=[Depends(current_user)])
+def codex_login_start():
+    """Start a ChatGPT device-code sign-in for the server's Codex; returns the link and one-time code to enter."""
+    from . import codex_login
+    from .providers import ProviderNotConfigured
+    try:
+        return codex_login.start()
+    except (ProviderNotConfigured, RuntimeError) as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/api/settings/codex/cancel", dependencies=[Depends(current_user)])
+def codex_login_cancel():
+    from . import codex_login
+    codex_login.cancel()
+    return codex_login.status()
+
+
+@app.post("/api/settings/codex/logout", dependencies=[Depends(current_user)])
+def codex_logout():
+    from . import codex_login
+    from .providers import ProviderNotConfigured
+    try:
+        return codex_login.logout()
+    except ProviderNotConfigured as e:
+        raise HTTPException(409, str(e)) from e
 
 
 def provider_tests(db: Session) -> dict:
