@@ -364,7 +364,6 @@ def make_cutout(png: Path) -> bool:
     four corners share one flat colour, that colour is flood-filled to transparent from each corner (characters have
     bold outlines, so the fill stops at the figure). Returns True if the file was changed. Anything else is left for
     analyse_pose to refuse."""
-    from PIL import ImageDraw
     img = Image.open(png).convert("RGBA")
     w, h = img.size
     corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
@@ -383,15 +382,58 @@ def make_cutout(png: Path) -> bool:
     if any(max(abs(a - b) for a, b in zip(img.getpixel(c)[:3], first[:3])) > 24 for c in corners):
         return False
     original = img.copy()
-    for c in corners:
-        if img.getpixel(c)[3] > 16:
-            ImageDraw.floodfill(img, c, (0, 0, 0, 0), thresh=40)
+    img = fill_from_corners(img, corners, thresh=40)
     if sum(first[:3]) / 3 < 235:
         img = clear_enclosed_background(img, original, first[:3])
     if sum(first[:3]) / 3 < 200:
         img = defringe(img, first[:3])
     img.save(png)
     return True
+
+
+def _reach(mask, seed):
+    """Pixels of `mask` connected (4-neighbour) to `seed`: the same region as a flood fill, computed with whole-row and
+    whole-column numpy passes (a pixel joins when its run along a row or column touches a reached pixel), repeated
+    until nothing changes. A few passes for poses, against seconds for a pixel-by-pixel fill."""
+    import numpy as np
+    reached = np.zeros_like(mask)
+    if not mask[seed]:
+        return reached
+    reached[seed] = True
+
+    def spread(m, r):
+        # runs of True along axis 1: each run is reached if any of its pixels is
+        h, w = m.shape
+        flat_m, flat_r = m.ravel(), r.ravel()
+        starts = m & ~np.concatenate([np.zeros((h, 1), bool), m[:, :-1]], axis=1)
+        run_id = np.cumsum(starts.ravel()) * flat_m
+        hit = np.zeros(run_id.max() + 1, bool)
+        hit[run_id[flat_r & flat_m]] = True
+        hit[0] = False
+        return hit[run_id].reshape(h, w)
+
+    while True:
+        before = int(reached.sum())
+        reached = spread(mask, reached)
+        reached = spread(mask.T, reached.T).T
+        if int(reached.sum()) == before:
+            return reached
+
+
+def fill_from_corners(img: Image.Image, corners, thresh: int = 40) -> Image.Image:
+    """Make the background reached from each corner transparent: a pixel is background when its RGBA differs from that
+    corner's colour by at most `thresh` in total (as PIL's ImageDraw.floodfill counts it), and it is connected to the
+    corner. Same result as the pixel-by-pixel flood fill, much faster."""
+    import numpy as np
+    a = np.array(img.convert("RGBA")).astype(np.int32)
+    clear = np.zeros(a.shape[:2], bool)
+    for (x, y) in corners:
+        if a[y, x, 3] <= 16 or clear[y, x]:
+            continue
+        near = np.abs(a - a[y, x]).sum(2) <= thresh
+        clear |= _reach(near, (y, x))
+    a[clear] = 0
+    return Image.fromarray(a.astype(np.uint8), "RGBA")
 
 
 def clear_enclosed_background(img: Image.Image, original: Image.Image, bg: tuple, min_frac: float = 0.0001,
@@ -406,36 +448,46 @@ def clear_enclosed_background(img: Image.Image, original: Image.Image, bg: tuple
     eyes would match."""
     import numpy as np
     from PIL import ImageDraw, ImageFilter
-    a = np.array(img.convert("RGBA")).astype(np.int32)
-    o = np.array(original.convert("RGB")).astype(np.int32)
+    full = np.array(img.convert("RGBA"))
+    # work only inside the figure's box (everything outside it is already cleared): much less to scan
+    box = Image.fromarray(full[:, :, 3]).getbbox()
+    if not box:
+        return img
+    x0, y0, x1, y1 = box
+    a = full[y0:y1, x0:x1].astype(np.int16)
+    o = np.array(original.convert("RGB"))[y0:y1, x0:x1].astype(np.int16)
     rgb = a[:, :, :3]
     cleared = a[:, :, 3] == 0
     plain = (rgb.max(2) - rgb.min(2) <= 10) & (np.abs(rgb.mean(2) - float(np.mean(bg[:3]))) <= 40) & ~cleared
-    if not plain.any():
+    seeds = np.array(Image.fromarray((plain * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(5))) > 0
+    if not seeds.any():
         return img
     mask = Image.fromarray((plain * 255).astype(np.uint8))
-    seeds = np.array(mask.filter(ImageFilter.MinFilter(5))) > 0
     min_px = int(img.width * img.height * min_frac)
     h, w = plain.shape
-    done = np.zeros_like(plain)
-    for y, x in zip(*np.nonzero(seeds)):
-        if done[y, x]:
-            continue
+    changed = False
+    while seeds.any():
+        y, x = np.argwhere(seeds)[0]
         m = mask.copy()
         ImageDraw.floodfill(m, (int(x), int(y)), 128)
         region = np.array(m) == 128
-        done |= region
-        if region.sum() < min_px:
+        seeds &= ~region
+        n = int(region.sum())
+        if n < min_px:
             continue
         ys, xs = np.nonzero(region)
-        y0, y1, x0, x1 = max(0, ys.min() - 80), min(h, ys.max() + 81), max(0, xs.min() - 80), min(w, xs.max() + 81)
-        near_bg = cleared[y0:y1, x0:x1]
+        ry0, ry1, rx0, rx1 = max(0, ys.min() - 80), min(h, ys.max() + 81), max(0, xs.min() - 80), min(w, xs.max() + 81)
+        near_bg = cleared[ry0:ry1, rx0:rx1]
         if near_bg.sum() < 50:
             continue
-        local = o[y0:y1, x0:x1][near_bg].mean(0)
+        local = o[ry0:ry1, rx0:rx1][near_bg].mean(0)
         if np.abs(rgb[region].mean(0) - local).max() <= local_tol:
             a[region, 3] = 0
-    return Image.fromarray(a.astype(np.uint8), "RGBA")
+            changed = True
+    if not changed:
+        return img
+    full[y0:y1, x0:x1, 3] = a[:, :, 3].astype(np.uint8)
+    return Image.fromarray(full, "RGBA")
 
 
 def defringe(img: Image.Image, bg: tuple, rounds: int = 3) -> Image.Image:
