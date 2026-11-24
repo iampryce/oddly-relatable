@@ -52,6 +52,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 ROW = "_shot_compare"
 FPS = 30
 W, H = 720, 1280
+LANDSCAPE = (1280, 720)   # an owner's own first frame wider than tall stays 16:9 (2026-11-24); every other first frame is 9:16
 
 MODELS = {
     "kling-2.6-pro-i2v": {
@@ -980,9 +981,16 @@ OWN_FRAME_COPY = ("episode_id", "scene_id", "line", "speaker", "text", "start", 
                   "audio_asset_id", "audio_seconds", "set_id", "rig_asset_id", "rig_check", "rig_error")
 
 
+def own_frame_target(w: int, h: int) -> tuple[int, int]:
+    """The size an owner's own first frame is made into: 16:9 (1280x720) when it is wider than tall, else 9:16 (720x1280),
+    the size of every other first frame."""
+    return LANDSCAPE if w > h else (W, H)
+
+
 def own_frame_image(src: Path, out: Path) -> str:
-    """The owner's image as a first frame: transparency flattened onto white, centre-cropped to 9:16 when its shape
-    differs, scaled to W x H (the size of every first frame). Returns what was done, in words (shown with the request)."""
+    """The owner's image as a first frame: transparency flattened onto white; a landscape image (wider than tall) stays
+    landscape, made 16:9 at 1280x720, and any other image is made 9:16 at 720x1280 as before; it is centre-cropped only
+    when its shape differs from that target. Returns what was done, in words (shown with the request)."""
     from PIL import Image, ImageOps
     try:
         with Image.open(src) as im:
@@ -1001,18 +1009,22 @@ def own_frame_image(src: Path, out: Path) -> str:
     flat = Image.new("RGB", rgba.size, (255, 255, 255))
     flat.paste(rgba, mask=rgba.getchannel("A"))
     notes = [f"your {w}x{h} image"]
-    want = W / H
-    if abs(w / h - want) > 0.01:                          # not 9:16: keep the centre
+    tw, th = own_frame_target(w, h)
+    shape = "16:9" if (tw, th) == LANDSCAPE else "9:16"
+    want = tw / th
+    if abs(w / h - want) / want > 0.01:                    # not the target shape: keep the centre
         if w / h > want:
             cw = round(h * want)
             flat = flat.crop(((w - cw) // 2, 0, (w - cw) // 2 + cw, h))
         else:
             ch = round(w / want)
             flat = flat.crop((0, (h - ch) // 2, w, (h - ch) // 2 + ch))
-        notes.append("centre-cropped to 9:16")
-    if flat.size != (W, H):
-        flat = flat.resize((W, H), Image.LANCZOS)
-        notes.append(f"scaled to {W}x{H}")
+        notes.append(f"centre-cropped to {shape}")
+    elif shape == "16:9":
+        notes.append("kept 16:9 (landscape)")
+    if flat.size != (tw, th):
+        flat = flat.resize((tw, th), Image.LANCZOS)
+        notes.append(f"scaled to {tw}x{th}")
     flat.save(out, "PNG")
     return ", ".join(notes)
 
@@ -1059,6 +1071,9 @@ async def own_frame(pid: str, request: Request, own_art: bool = False, db: Sessi
             note = own_frame_image(src, out)
         except ValueError as e:
             raise HTTPException(422, str(e))
+        from PIL import Image
+        with Image.open(out) as made:
+            frame_size = list(made.size)
         npid = uuid.uuid4().hex[:10]
         a = store_asset(db, ep_id=base["episode_id"], src=out, key=f"episodes/{base['episode_id']}/shot-compare/{npid}/first-frame-own.png",
                         kind="scene-reference", label="Shot comparison first frame: the owner's own image (confirmed made from our approved art)",
@@ -1067,7 +1082,8 @@ async def own_frame(pid: str, request: Request, own_art: bool = False, db: Sessi
     recs[npid] = {**{k: base.get(k) for k in OWN_FRAME_COPY}, "id": npid, "base_plan": pid,
                   "action_source": "copied from the original-art plan", "status": "ready", "created": time.time(), "results": {},
                   "frame_asset_id": a.id, "frame_assets": {f: a.id for f in FRAMINGS},
-                  "own_frame": {"asset_id": a.id, "by": user, "at": time.time(), "note": note, "own_art_confirmed": True}}
+                  "own_frame": {"asset_id": a.id, "by": user, "at": time.time(), "note": note, "own_art_confirmed": True,
+                                "size": frame_size}}
     save(db, recs)
     db.add(Event(episode_id=base["episode_id"], kind="episode",
                  message=f"Shot comparison: {user} added their own first frame for line {base['line'] + 1} ({note}); free"))
@@ -1181,6 +1197,13 @@ def stream_seconds(path: Path) -> dict:
         except (KeyError, TypeError, ValueError):
             pass
     return out
+
+
+def result_size(p: dict) -> tuple[int, int]:
+    """The size a model's clip is finished at: the owner's own first frame's size (so a 16:9 frame gives a 16:9 clip),
+    else the 9:16 first-frame size."""
+    s = (p.get("own_frame") or {}).get("size")
+    return (int(s[0]), int(s[1])) if s and len(s) == 2 else (W, H)
 
 
 def finish(video: Path, wav: Path, seconds: float, out: Path, size: tuple[int, int] = (W, H), pad_colour: str = "black") -> dict:
@@ -1441,7 +1464,7 @@ def shot_generate(ctx: Ctx) -> dict:
             fal.correct_spend(db, est["usd"], actual)
         wav = storage().get_to_file(db.get(Asset, p["audio_asset_id"]).storage_key, folder / "line.wav")
         out = folder / f"{model}.mp4"
-        check = finish(raw, wav, p["seconds"], out)
+        check = finish(raw, wav, p["seconds"], out, result_size(p))
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
                          kind="video", label=f"Shot comparison: {m['label']}", content_type="video/mp4", job_id=job.id)
         mark(status="done", asset_id=va.id, actual_usd=actual, framing=framing, per_second_usd=round(actual / max(0.001, p["seconds"]), 4),
@@ -1521,7 +1544,7 @@ def _generate_talking(ctx: Ctx, pid: str, model: str) -> dict:
         out = folder / f"{model}.mp4"
         own_size = framing in ("head", "cutout") and not p.get("own_frame")
         keyed = framing == "cutout" and not p.get("own_frame") and p.get("key_colour")
-        check = finish(raw, wav, p["seconds"], out, FRAME_SIZE[framing] if own_size else (W, H),
+        check = finish(raw, wav, p["seconds"], out, FRAME_SIZE[framing] if own_size else result_size(p),
                        pad_colour=p["key_colour"] if keyed else "black")
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
                          kind="video", label=f"Shot comparison: {m['short']} on WaveSpeed, talking clip", content_type="video/mp4", job_id=job.id)
@@ -1715,7 +1738,7 @@ def _generate_gpu(ctx: Ctx, pid: str, model: str) -> dict:
             raise ProviderErrorNT("the GPU worker returned no video")
         raw = gpu.worker_fetch(w["url"], w["token"], jid, out_meta, folder / f"{model}-raw{Path(out_meta['name']).suffix}")
         out = folder / f"{model}.mp4"
-        check = finish(raw, wav, p["seconds"], out)
+        check = finish(raw, wav, p["seconds"], out, result_size(p))
         va = store_asset(db, ep_id=p["episode_id"], src=out, key=f"episodes/{p['episode_id']}/shot-compare/{pid}/{model}.mp4",
                          kind="video", label=f"Shot comparison: {m['label']}", content_type="video/mp4", job_id=job.id)
         gsec = float(st.get("gpu_seconds") or 0)
