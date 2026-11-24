@@ -133,10 +133,11 @@ check '[[ ! -f "$SIM/restored.db" ]]' "a dump that fails its checksum is not res
 echo "4. temporary uploads (audio-first Stage 1b)"
 check 'grep -q -- "--exclude=./work/uploads" "$SIM/tar.args"' "the media backup excludes work/uploads"
 out=$(bash "$HERE/maintenance.sh" 2>&1)
-check 'grep -q "would remove  upload leftover video-7-ab12cd34.mp4" <<< "$out"' "maintenance dry run lists upload leftovers older than 24 h"
+check 'grep -q "  leftover  video-7-ab12cd34.mp4" <<< "$out"' "maintenance lists upload leftovers older than 24 h"
 check '[[ ! -f "$SIM/uploads-removed" ]]' "the dry run removes nothing"
-bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
-check '[[ "$(cat "$SIM/uploads-removed" 2>/dev/null | tr "\n" " ")" == "/data/work/uploads/hints-7-ef56ab78 /data/work/uploads/video-7-ab12cd34.mp4 " ]]' "--apply removes exactly the listed leftovers"
+out=$(bash "$HERE/maintenance.sh" --apply 2>&1)
+check '[[ ! -f "$SIM/uploads-removed" ]] && grep -q "  leftover  hints-7-ef56ab78" <<< "$out"' "--apply only lists them too: nothing in the media volume is removed"
+check '! grep -E "uploads" "$SIM/docker.calls" | grep -v ":/data:ro" | grep -q "oddstudio_work_data"' "the media volume is only ever mounted read-only by housekeeping"
 check 'grep -q "UPLOAD_HOURS:-24" "$HERE/maintenance.sh"' "the default age is 24 h"
 
 echo "5. the build cache cap and the deploy lock"
@@ -171,7 +172,7 @@ out=$(bash "$HERE/maintenance.sh" 2>&1)
 check 'grep -q "python -m oddstudio.bin purge --days 30 --dry-run" "$SIM/exec.log" && grep -q "^bin: items deleted" <<< "$out"' "dry run: the Bin is only listed"
 rm -f "$SIM/exec.log"
 bash "$HERE/maintenance.sh" --apply >/dev/null 2>&1
-check 'grep -q "exec oddstudio-api-1 python -m oddstudio.bin purge --days 30$" "$SIM/exec.log"' "--apply purges the Bin inside the API container"
+check 'grep -q "purge --days 30 --dry-run" "$SIM/exec.log" && ! grep -q "purge --days 30$" "$SIM/exec.log"' "--apply only lists the Bin too: nothing is purged"
 
 echo "7. free space first, a failed backup cleans up after itself, only complete backups count"
 export STICKMAN_ROOT="$SIM/space"; S="$STICKMAN_ROOT/backups"

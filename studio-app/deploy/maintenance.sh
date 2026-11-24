@@ -19,11 +19,11 @@
 #   journal   capped at $JOURNAL_MAX (default 200M) with journalctl --vacuum-size.
 #   backups   complete backups only: the newest $KEEP_DEPLOY deploy-time (default 3, never fewer than 3) and
 #             $KEEP_NIGHTLY nightly ones (none are made since 2026-11-23); the newest backup is never removed.
-#   also      database dumps older than $DUMP_DAYS days (never the newest), deploy logs older than $LOG_DAYS days,
-#             upload leftovers in work/uploads older than $UPLOAD_HOURS h, and Bin items older than $BIN_DAYS days
-#             (owner decisions 2026-11-20 and 2026-11-21).
-# Never touches: Docker volumes (apart from the two owner-approved sweeps above), running containers, $ROOT/incoming,
-#   $ROOT/shared, $ROOT/repo.
+#   also      database dumps older than $DUMP_DAYS days (never the newest) and deploy logs older than $LOG_DAYS days.
+#   listed only (never removed, not even with --apply; owner decision 2026-11-23): upload leftovers in the media
+#             volume's work/uploads older than $UPLOAD_HOURS h, and Bin items older than $BIN_DAYS days (the Bin page's
+#             Delete forever / Empty Bin removes those, by hand).
+# Never touches: Docker volumes, the database, media, running containers, $ROOT/incoming, $ROOT/shared, $ROOT/repo.
 # --apply holds the deploy lock ($ROOT/.ci-deploy.lock, the one ci-deploy.sh takes). If a deploy is running, the
 #   releases, images and build-cache steps are skipped; the rest still runs.
 # The disk report: every run (dry run or --apply) writes $REPORT_DIR/disk-report.json (default $ROOT/reports; the
@@ -215,11 +215,13 @@ else
 fi
 
 # ---------------------------------------------------------------- upload leftovers (work/uploads in the media volume)
-echo "uploads: leftovers older than $UPLOAD_HOURS h in work/uploads"
+# Listed only, never removed (owner decision 2026-11-23: housekeeping never touches the media volume). The volume is
+# mounted read-only to list them.
+echo "uploads: leftovers older than $UPLOAD_HOURS h in work/uploads (listed only; never removed by this script)"
 if docker volume inspect "$MEDIA_VOLUME" >/dev/null 2>&1; then
   while read -r f; do
     [[ -z "$f" ]] && continue
-    remove "upload leftover $f" docker run --rm -v "$MEDIA_VOLUME:/data" alpine:3.20 rm -rf -- "/data/work/uploads/$f"
+    echo "  leftover  $f"
   done < <(docker run --rm -v "$MEDIA_VOLUME:/data:ro" alpine:3.20 \
              find /data/work/uploads -mindepth 1 -maxdepth 1 -mmin +$(( UPLOAD_HOURS * 60 )) -exec basename {} \; 2>/dev/null | sort)
 else
@@ -227,14 +229,12 @@ else
 fi
 
 # ---------------------------------------------------------------- the Bin (items deleted in the studio > BIN_DAYS ago)
-# Runs inside the API container (it has the database): rows and files of items in the Bin for more than BIN_DAYS days
-# are removed for good with --apply and each one is logged; the dry run lists them. Files are only ever removed from
-# the studio's storage and work folders (the API refuses any other path).
-echo "bin: items deleted in the studio more than $BIN_DAYS days ago"
+# Listed only, never purged (owner decision 2026-11-23: housekeeping never touches the database or media). The list
+# comes from the API container (it has the database) with --dry-run, in both modes; the Bin page removes items by hand.
+echo "bin: items deleted in the studio more than $BIN_DAYS days ago (listed only; never purged by this script)"
 api=$(docker ps --format '{{.Names}}' | grep -E '(^|[-_])api([-_][0-9]+)?$' | head -n 1 || true)
 if [[ -n "$api" ]]; then
-  if [[ $APPLY == 1 ]]; then docker exec "$api" python -m oddstudio.bin purge --days "$BIN_DAYS" | sed 's/^/  /' || echo "  FAILED bin purge" >&2
-  else docker exec "$api" python -m oddstudio.bin purge --days "$BIN_DAYS" --dry-run | sed 's/^/  /' || true; fi
+  docker exec "$api" python -m oddstudio.bin purge --days "$BIN_DAYS" --dry-run | sed 's/^/  /' || true
 else
   echo "  the API container is not running; skipped"
 fi
