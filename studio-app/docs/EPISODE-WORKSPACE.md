@@ -25,23 +25,35 @@ Each section header shows:
 - a **blocking** flag, when the section stops the next step;
 - one line saying what is needed.
 
-| Status | Meaning | Starts |
-|---|---|---|
-| done | finished | collapsed |
-| needs you (warn badge, e.g. "accept", "review") | blocks the next step | expanded, flagged "blocking" |
-| failed | its last job failed; the message is shown | expanded |
-| running | a job is queued or running | expanded |
-| to do (no colour) | needed later, not blocking yet (e.g. the set before production) | expanded |
-| waiting | an earlier step comes first | collapsed |
-| not needed | nothing to do for this episode | collapsed |
+| Status | Meaning |
+|---|---|
+| done (✓) | finished |
+| needs you (warn badge, e.g. "accept", "review") | blocks the next step |
+| failed | its last job failed; the message is in the section's one line |
+| running | a job is queued or running |
+| to do (no colour) | needed later, not blocking yet (e.g. the set before production) |
+| waiting | an earlier step comes first |
+| not needed | nothing to do for this episode |
+
+- **Quiet by default (2026-11-23): only the current step is open.** That is the step that blocks the episode, or, when nothing blocks, the first step still to do in the episode's order (Talking shots comes after the storyboard). Every other section is one collapsed line: its title, its badge (✓ when done) and its note on one line. Its job lines show when you open it.
+- **Only the current step is flagged "blocking".** A failure in a later step keeps its red badge and note, without the flag.
+- The page order of the sections is unchanged (the 22 Nov order, Set first).
+- **The Now box** (top of the episode, 2026-11-23): the single next action, the current step's note, and its cost:
+  - "no cost: your decision" for approve, accept and confirm;
+  - the talking shots' own estimate ("about $0.135 for 3 line(s), shown again with the total before anything starts");
+  - otherwise "cost shown before it starts", never "free" by guess. A retry can be paid again, so it says this too.
+
+  Its button never starts anything paid by itself. "Run N line(s)" opens Talking shots and runs its own Run selected lines flow on the lines not yet keyed: free preparation first where needed, then the confirm with the total, each plan's cap and the budget. Nothing starts without your OK. Any other step's button opens that step, whose own button and confirm do the rest. While a step is running, the box only says so.
 
 - A failed job blocks only a step that is due now. An old failed set candidate shows red, but production is far off, so it does not block the episode.
-- Your own open and closed choices are remembered in this browser, per episode.
+- What you open or close lasts for this visit only: the next visit starts quiet again, with the current step open.
 - A section you opened once stays loaded while collapsed, so an unsaved edit in it survives closing it.
 
 ### The banner and the job lines
 
-- **The banner** at the top says what is blocking the episode and where, with a button that opens that section. When nothing blocks, it says what is running, or that nothing is blocking.
+- **The banner** at the top appears only when something blocks the next step. It says what and where, with a button that opens that section. When nothing blocks there is no banner; work in progress is one quiet line ("Working: …").
+- **The episode's last error** shows only while the episode is in a failed stage; after a retry that worked it is in History, not at the top.
+- **Overview:** the queue warnings (the job queue down or missing) stay, because jobs cannot run. The disk's yellow level (80%) is a line in the Disk card; only the red level (90%) is a banner.
 - **Job lines.** Each section lists its own jobs: every queued or running job, and the latest failure of each kind (per scene, per set) with its message and a Retry button. A later success of the same kind clears an older failure.
 - **Where the statuses come from:** `GET /api/episodes/{id}/workspace` (read only; `oddstudio/workspace.py`). The rules are a pure function and are tested directly.
 

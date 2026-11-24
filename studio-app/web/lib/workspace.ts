@@ -7,15 +7,27 @@ export type Section = {key: string; title: string; status: string; label: string
 export const TONE: Record<string, string> = {done: 'good', action: 'warn', failed: 'bad', running: 'busy', todo: '',
   waiting: '', not_needed: ''};
 
-// A section is open when the server says so (blocking, failed, to do, running), unless the owner opened or closed it.
+// A section is open when the server says so (only the current step: quiet by default, 2026-11-23), unless the owner
+// opened or closed it during this visit (not kept: the next visit starts quiet again).
 export function isOpen(s: Section, overrides: Record<string, boolean>): boolean {
   return overrides[s.key] ?? s.open;
 }
 
-export function bannerText(ws: any): {tone: string; text: string} {
+// The banner shows only what truly blocks the next step; work in progress is one quiet line, and "nothing is
+// blocking" needs no banner at all.
+export function bannerText(ws: any): {tone: string; text: string} | null {
   if (ws?.blocker) return {tone: 'warn', text: `Blocked at ${ws.blocker.title}: ${ws.blocker.message}`};
-  if (ws?.running?.length) return {tone: 'info', text: `Working: ${ws.running.join(', ')}. Nothing needs you right now.`};
-  return {tone: 'good', text: 'Nothing is blocking this episode.'};
+  return null;
+}
+
+export function workingText(ws: any): string {
+  return ws?.running?.length ? `Working: ${ws.running.join(', ')}.` : '';
+}
+
+// The episode's last error is shown only while the episode is in a failed stage (an old error after a retry that
+// worked is history, not news).
+export function showLastError(ep: any): boolean {
+  return !!ep?.last_error && String(ep?.stage || '').endsWith('_failed');
 }
 
 export function jobLine(j: any): string {

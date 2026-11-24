@@ -177,6 +177,62 @@ class WorkspaceRulesTest(unittest.TestCase):
         self.assertEqual([j["id"] for j in s["set"]["jobs"]], [12, 11])
         self.assertEqual(s["storyboard"]["jobs"], [], "a later success clears an older failure")
 
+    def test_only_the_current_step_is_open_and_only_the_blocker_is_flagged(self):
+        """Quiet by default (2026-11-23): one open section, the current step; done steps are one collapsed line."""
+        cases = [self.facts(plan_waiting=True), self.facts(), self.facts(stage="script_review", script=1),
+                 self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5),
+                 self.facts(notes_ranges=0, notes_requested=True,
+                            jobs={"notes": [{"id": 9, "kind": "audio_video_notes", "status": "failed", "error": "401"}],
+                                  "set": [{"id": 11, "kind": "set_candidate", "status": "failed", "error": "old", "set_id": "y"}]})]
+        for f in cases:
+            out = WS.sections(f)
+            opened = [x["key"] for x in out["sections"] if x["open"]]
+            flagged = [x["key"] for x in out["sections"] if x["blocking"]]
+            self.assertLessEqual(len(opened), 1, opened)
+            self.assertEqual(opened, [out["current"]] if out["current"] else [])
+            self.assertEqual(flagged, [out["blocker"]["section"]] if out["blocker"] else [])
+            if out["blocker"]:
+                self.assertEqual(out["current"], out["blocker"]["section"], "the blocker is the current step")
+            self.assertFalse(any(x["open"] for x in out["sections"] if x["status"] == "done"), "done steps are collapsed")
+        s = self.by(WS.sections(cases[-1]))
+        self.assertEqual((s["set"]["status"], s["set"]["open"], s["set"]["blocking"]), ("failed", False, False),
+                         "an old failure in a later step: red, one line, not open, not blocking")
+        # nothing blocks: the first step still to do in the episode's order is current (Talking shots, before the set)
+        f = self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5,
+                       set={"chosen": True, "label": "Office", "seats": 5, "people": 5, "candidates_waiting": 0},
+                       talking={"lines": 4, "keyed": 1})
+        f["stage"] = "producing"
+        out = WS.sections(f)
+        self.assertIsNone(out["blocker"])
+        self.assertEqual((out["current"], self.by(out)["production"]["open"]), ("talking", False),
+                         "while production renders, the next thing for you is the talking shots; nothing else is open")
+
+    def test_the_now_box_is_the_single_next_action_with_its_cost(self):
+        """The Now box (2026-11-23): a decision costs nothing; the talking shots show their own estimate; anything else
+        says "cost shown before it starts"; the button never starts a paid run by itself."""
+        nx = WS.sections(self.facts(plan_waiting=True))["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_text"], nx["button"]["action"]),
+                         ("plan", "decision", "no cost: your decision", "open"))
+        nx = WS.sections(self.facts(stage="script_review", script=1))["next"]
+        self.assertEqual((nx["section"], nx["kind"]), ("script", "decision"))
+        nx = WS.sections(self.facts())["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_text"], nx["cost_usd"]), ("script", "estimate", WS.NO_ESTIMATE, None),
+                         "generating a script is a paid text call with no estimate here: never shown as free")
+        f = self.facts(stage="storyboard_approved", script=1, script_approved=1, scenes=5,
+                       set={"chosen": True, "label": "Office", "seats": 5, "people": 5, "candidates_waiting": 0},
+                       talking={"lines": 4, "keyed": 1, "todo_lines": 3, "todo_usd": 0.135})
+        f["stage"] = "producing"
+        nx = WS.sections(f)["next"]
+        self.assertEqual((nx["section"], nx["kind"], nx["cost_usd"], nx["button"]),
+                         ("talking", "paid", 0.135, {"action": "run_talking", "label": "Run 3 line(s)"}))
+        self.assertIn("shown again with the total before anything starts", nx["cost_text"])
+        f["talking"] = {"lines": 4, "keyed": 1, "todo_lines": 0, "todo_usd": 0, "running": 3}
+        nx = WS.sections(f)["next"]
+        self.assertEqual((nx["kind"], nx["button"]), ("working", None), "running: nothing to press")
+        jobs = {"notes": [{"id": 9, "kind": "audio_video_notes", "status": "failed", "error": "401"}]}
+        nx = WS.sections(self.facts(notes_ranges=0, notes_requested=True, jobs=jobs))["next"]
+        self.assertEqual((nx["section"], nx["cost_text"]), ("notes", WS.NO_ESTIMATE), "a retry may be paid again: no guess")
+
     def test_script_first_episodes_have_no_audio_sections(self):
         s = self.by(WS.sections(self.facts(audio=False, stage="script_pending", notes_ranges=0, people_found=0, person_map=False)))
         for k in ("lines", "notes", "people", "plan"):

@@ -15,3 +15,25 @@ export function clampCrop(c: {x: number; y: number; w: number}, pw: number, ph: 
   const h = w * 16 / 9;
   return {w: Math.round(w), x: Math.round(Math.min(Math.max(0, c.x), pw - w)), y: Math.round(Math.min(Math.max(0, c.y), ph - h))};
 }
+
+// One Talking shots row's clip and keying, in words (the same as its shot comparison cell): keying, failed (with the
+// reason), keyed, or "key needs attention" (with the reasons); which links and previews exist; and whether Key again
+// (free) is offered. Pure; node --test.
+export type RowMedia = {state: string; tone: '' | 'warn' | 'bad' | 'muted'; reasons: string[]; keyAgain: boolean;
+  clip?: string; overSet?: string; overGrey?: string; check?: string; keyed?: string; checkFrames: number};
+
+export function rowMedia(r: any): RowMedia {
+  const k = r?.key;
+  const urls = k?.urls || {};
+  const base = {reasons: [] as string[], keyAgain: !!r?.can_key_again, clip: r?.clip_url || undefined,
+    overSet: urls.over_set || undefined, overGrey: urls.over_grey || undefined, check: urls.check || undefined,
+    keyed: urls.keyed || undefined, checkFrames: (k?.check_at || []).length};
+  if (r?.clip_binned) return {...base, state: 'clip in the Bin', tone: 'muted', keyAgain: false};
+  if (!r?.clip_url && !k) return {...base, state: '', tone: ''};
+  if (!k) return {...base, state: 'clip, not keyed yet', tone: 'muted'};
+  if (k.status === 'queued' || k.status === 'running') return {...base, state: `keying ${k.colour || ''} out… (free)`.replace('  ', ' '), tone: 'muted', keyAgain: false};
+  if (k.status === 'failed') return {...base, state: `keying failed: ${k.error || 'no reason recorded'}`, tone: 'bad'};
+  const q = k.quality;
+  if (q && q.ok === false) return {...base, state: 'key needs attention', tone: 'warn', reasons: q.reasons || []};
+  return {...base, state: 'keyed', tone: ''};
+}

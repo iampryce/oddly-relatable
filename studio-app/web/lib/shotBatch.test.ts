@@ -1,7 +1,7 @@
 // node --test: batch selection keys and the result grid cells (rig / model clip / failed with retry).
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {clipCell, lineKey, toggleAll} from './shotBatch.ts';
+import {clipCell, lineKey, splitRequests, toggleAll} from './shotBatch.ts';
 
 test('all lines / none', () => {
   const lines = [{scene_id: 1, line: 0}, {scene_id: 1, line: 1}, {scene_id: 2, line: 0}];
@@ -48,4 +48,12 @@ test('a keyed cutout clip carries its keying state to the cell', () => {
     check: {length_ok: true, video_seconds: 6.22, audio_seconds: 6.22}}}};
   assert.deepEqual(clipCell(plan, 't').key, key);
   assert.equal(clipCell({...plan, results: {t: {...plan.results.t, key: undefined}}}, 't').key, undefined, 'no key: nothing to show');
+});
+
+test('models that cannot run for a line are one quiet line, not rows', () => {
+  const reqs = [{model: 'it', blocked: ''}, {model: 'kling', blocked: 'Kling terms not confirmed'}, {model: 'gpu', blocked: 'the GPU worker is off'},
+    {model: 'head', blocked: 'make the head first frame'}, {model: 'done', blocked: 'cap reached', result: {status: 'done'}}];
+  const {shown, unavailable} = splitRequests(reqs);
+  assert.deepEqual(shown.map(r => r.model), ['it', 'head', 'done'], 'runnable, the one with a button, and any with a result');
+  assert.deepEqual(unavailable.map(r => r.model), ['kling', 'gpu']);
 });

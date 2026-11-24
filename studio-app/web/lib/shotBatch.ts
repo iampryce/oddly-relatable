@@ -32,3 +32,12 @@ function lengthText(c: any): string {
   if (!c) return '';
   return `${c.length_ok ? 'length OK' : 'length off'} (${c.video_seconds} s video, ${c.audio_seconds} s audio)${c.held_last_frame ? ', last frame held' : ''}`;
 }
+
+// Quiet by default (2026-11-23): a model that cannot run for this line right now (no key, the GPU off, a cap reached)
+// and has no result is not a row of its own; they are counted in one "not available · why" line. A request whose only
+// blocker is a first frame to make stays (it has the button that makes it).
+export function splitRequests<T extends {blocked?: string; result?: any}>(reqs: T[]): {shown: T[]; unavailable: T[]} {
+  const out = {shown: [] as T[], unavailable: [] as T[]};
+  for (const r of reqs) (r.blocked && !r.result && !r.blocked.startsWith('make the') ? out.unavailable : out.shown).push(r);
+  return out;
+}

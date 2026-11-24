@@ -591,6 +591,35 @@ def view(db: Session, p: dict) -> dict:
     return out
 
 
+def talking_row_media(db: Session, p: dict, model: str) -> dict:
+    """What an episode's Talking shots row shows for one plan's clip, the same as its shot comparison cell: the talking
+    clip (unless it is in the Bin), the keying step as it really is (key_state) with the keyed copy, the previews over the
+    set and over grey and the check frames, and whether Key again (free) can be offered now."""
+    from .bin import hidden_ids
+    from .models import Asset
+    from .storage import storage
+    url = lambda aid: storage().url(db.get(Asset, aid).storage_key) if aid and db.get(Asset, aid) else None  # noqa: E731
+    r = (p.get("results") or {}).get(model) or {}
+    out: dict = {"clip_url": None, "clip_binned": False, "key": None, "can_key_again": False}
+    if r.get("status") != "done":
+        return out
+    if r.get("asset_id") in hidden_ids(db, "clip"):
+        out["clip_binned"] = True
+    else:
+        out["clip_url"] = url(r.get("asset_id"))
+    k = key_state(db, p["id"], model, r.get("key")) if r.get("key") else None
+    if k:
+        k = {x: k.get(x) for x in ("status", "colour", "error", "stale", "quality", "check_at", "frames")}
+        if k["status"] == "done":
+            kk = r["key"]
+            k["urls"] = {x: url(kk.get(f"{x}_asset_id")) for x in ("keyed", "over_set", "over_grey", "check")}
+        out["key"] = k
+    # the same rule as POST /motion/shot/{pid}/key: a finished cutout clip on a key colour, not keying right now
+    out["can_key_again"] = bool(model in TALKING and r.get("framing") == "cutout" and p.get("key_colour")
+                                and not out["clip_binned"] and (k or {}).get("status") not in ("queued", "running"))
+    return out
+
+
 @router.get("/motion/shot")
 def list_plans(db: Session = Depends(get_db)):
     return {"plans": [view(db, p) for p in sorted(records(db).values(), key=lambda p: -p.get("created", 0))[:10]]}

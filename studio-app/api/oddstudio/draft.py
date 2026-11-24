@@ -554,21 +554,22 @@ def talking_lines(db, ep) -> list[dict]:
             if p and p.get("status") == "ready":
                 row.update({"cap_usd": SC.plan_cap(db, p), "cap_used_usd": SC.plan_spent(p),
                             "blocked": SC.talking_blocked(db, p, IT)})
-                k = r.get("key") or {}
-                if k.get("status") == "done":
-                    from .models import Asset
-                    from .storage import storage
-                    a = db.get(Asset, k.get("over_set_asset_id")) if k.get("over_set_asset_id") else None
-                    row["preview_url"] = storage().url(a.storage_key) if a else None
+                # the clip, the keyed previews and the check frames, and Key again (free), as in the shot comparison
+                row.update(SC.talking_row_media(db, p, IT))
+                row["preview_url"] = ((row.get("key") or {}).get("urls") or {}).get("over_set")
             out.append(row)
     return out
 
 
 def talking_counts(db, ep) -> dict:
     rows = talking_lines(db, ep)
+    todo = [r for r in rows if r["status"] not in ("keyed", "queued", "running", "preparing")]
     return {"lines": len(rows), "keyed": sum(r["status"] == "keyed" for r in rows),
             "running": sum(r["status"] in ("queued", "running", "preparing") for r in rows),
-            "failed": sum(r["status"] == "failed" for r in rows)}
+            "failed": sum(r["status"] == "failed" for r in rows),
+            # the lines "Run selected lines" would take for the Now box, and their estimate (the confirm shows the total
+            # again, with each plan's cap and the budget, before anything starts)
+            "todo_lines": len(todo), "todo_usd": round(sum(r.get("estimate_usd") or 0 for r in todo), 4)}
 
 
 def _episode(db, eid: int):

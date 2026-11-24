@@ -4,17 +4,17 @@
 // and the experimental budget first and starts only after the owner accepts; and the free first draft of the whole
 // episode ("Draft: not for publishing"). Paid calls are never retried by themselves: a failed line stays failed until
 // it is ticked and run again.
-import {useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {api} from '@/lib/api';
 import {useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
-import {talkingTotal} from '@/lib/talkingShots';
+import {rowMedia, talkingTotal} from '@/lib/talkingShots';
 import DraftCameras from '@/components/DraftCameras';
 
 const IT = 'wavespeed-infinitetalk-fast';
 const usd = (x: number | null | undefined, d = 3) => (x === null || x === undefined ? '—' : `$${x.toFixed(d)}`);
 
-export default function TalkingShots({ep}: {ep: any}) {
+export default function TalkingShots({ep, autoRun = 0}: {ep: any; autoRun?: number}) {
   const t = useApi<any>(`/episodes/${ep.id}/talking-shots`, 4000);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [err, setErr] = useState('');
@@ -24,7 +24,7 @@ export default function TalkingShots({ep}: {ep: any}) {
   const chosen = rows.filter(r => picked.has(key(r)));
   const total = talkingTotal(chosen);
 
-  const run = async () => {
+  const run = async (chosen: any[]) => {
     setErr('');
     const missing = chosen.filter(r => !r.plan_ready || r.blocked?.startsWith('make the'));
     setBusy(true);
@@ -48,6 +48,21 @@ export default function TalkingShots({ep}: {ep: any}) {
       await t.reload();
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
+  // Key again (free): keys the stored clip again; the clip and the provider's file are only read, nothing is sent anywhere
+  const keyAgain = async (r: any) => {
+    setErr('');
+    try { await api(`/motion/shot/${r.plan_id}/key`, {body: {model: IT}}); await t.reload(); } catch (e: any) { setErr(e.message); }
+  };
+  // The Now box's "Run N line(s)": the lines not keyed and not running, through this same flow (free preparation
+  // first where needed; then the TOTAL, each plan's cap and the budget in the confirm, and nothing starts without OK)
+  const handled = useRef(0);
+  useEffect(() => {
+    if (!autoRun || autoRun === handled.current || !t.data) return;
+    handled.current = autoRun;
+    const todo = rows.filter(r => !['keyed', 'queued', 'running', 'preparing'].includes(r.status));
+    setPicked(new Set(todo.map(key)));
+    if (todo.length) run(todo);
+  }, [autoRun, t.data]);   // eslint-disable-line react-hooks/exhaustive-deps
   const makeDraft = async () => {
     setErr('');
     try { await api(`/episodes/${ep.id}/draft`, {body: {}}); await t.reload(); } catch (e: any) { setErr(e.message); }
@@ -61,11 +76,11 @@ export default function TalkingShots({ep}: {ep: any}) {
       <div className="row" style={{gap: 6}}>
         <button className="btn sm" onClick={() => setPicked(new Set(rows.filter(r => r.status !== 'keyed').map(key)))}>All not keyed</button>
         <button className="btn sm" onClick={() => setPicked(new Set())}>None</button>
-        <button className="btn primary sm" disabled={busy || !chosen.length} onClick={run}>Run selected lines{chosen.length ? ` (${chosen.length}, about ${usd(total)})` : ''}</button>
+        <button className="btn primary sm" disabled={busy || !chosen.length} onClick={() => run(chosen)}>Run selected lines{chosen.length ? ` (${chosen.length}, about ${usd(total)})` : ''}</button>
         <span className="muted small">Experimental budget: {usd(t.data?.spent_usd, 2)} spent + {usd(t.data?.pending_usd, 2)} approved, of {usd(t.data?.budget_usd, 2)}</span>
       </div>
       <div className="table-wrap"><table>
-        <thead><tr><th></th><th>Scene · line</th><th>Line</th><th>Audio</th><th>Status</th><th>Cost</th><th>Plan cap</th><th>Keyed</th></tr></thead>
+        <thead><tr><th></th><th>Scene · line</th><th>Line</th><th>Audio</th><th>Status</th><th>Cost</th><th>Plan cap</th><th>Clip and key</th></tr></thead>
         <tbody>{rows.map(r => (
           <tr key={key(r)}>
             <td><input type="checkbox" aria-label={`scene ${r.scene} line ${r.line + 1}`} checked={picked.has(key(r))}
@@ -77,7 +92,7 @@ export default function TalkingShots({ep}: {ep: any}) {
             <td className={`small ${r.status === 'failed' ? 'bad' : String(r.message || '').startsWith('key needs attention') ? 'warn' : ''}`}>{r.status}{r.message ? ` · ${r.message}` : ''}{r.blocked && !r.blocked.startsWith('make the') ? ` · ${r.blocked}` : ''}</td>
             <td className="small">{r.actual_usd != null ? `${usd(r.actual_usd)} (charged)` : `${usd(r.estimate_usd)} (estimate)`}</td>
             <td className="small">{r.cap_usd != null ? `${usd(r.cap_used_usd)} of ${usd(r.cap_usd, 2)}` : '—'}</td>
-            <td className="small">{r.preview_url ? <a href={r.preview_url} target="_blank" rel="noreferrer">over the set</a> : ''}</td>
+            <td className="small"><RowClip r={r} onKeyAgain={() => keyAgain(r)} /></td>
           </tr>))}</tbody></table></div>
       <div className="card stack">
         <strong>First draft (free)</strong>
@@ -94,5 +109,26 @@ export default function TalkingShots({ep}: {ep: any}) {
           <div className="row" style={{gap: 8}}>{(d.pieces || []).map((p: any) => <a key={p.scene} href={p.url} target="_blank" rel="noreferrer">Scene {p.scene}</a>)}</div>
         </div>}
       </div>
+    </div>);
+}
+
+// A row's talking clip and its keyed copy: the state (keyed / key needs attention and why / keying / failed), the
+// previews over grey and over the set, the clip itself, the check frames and the transparent copy, and Key again (free).
+function RowClip({r, onKeyAgain}: {r: any; onKeyAgain: () => void}) {
+  const m = rowMedia(r);
+  if (!m.state) return null;
+  return (
+    <div className="stack" style={{gap: 4}}>
+      <div className={m.tone}>{m.state}{m.reasons.length ? `: ${m.reasons.join('; ')}` : ''}</div>
+      {(m.overGrey || m.overSet) && <div className="row" style={{gap: 4}}>
+        {m.overGrey && <video controls preload="none" src={m.overGrey} style={{width: 90}} aria-label={`scene ${r.scene} line ${r.line + 1}, keyed over grey`} />}
+        {m.overSet && <video controls preload="none" src={m.overSet} style={{width: 90}} aria-label={`scene ${r.scene} line ${r.line + 1}, keyed over the set`} />}
+      </div>}
+      <div className="row" style={{gap: 8, flexWrap: 'wrap'}}>
+        {m.clip && <a href={m.clip} target="_blank" rel="noreferrer">clip</a>}
+        {m.check && <a href={m.check} target="_blank" rel="noreferrer">check frames{m.checkFrames ? ` (${m.checkFrames})` : ''}</a>}
+        {m.keyed && <a href={m.keyed} download>transparent copy</a>}
+      </div>
+      {m.keyAgain && <div><button className="btn sm" onClick={onKeyAgain}>Key again (free)</button></div>}
     </div>);
 }

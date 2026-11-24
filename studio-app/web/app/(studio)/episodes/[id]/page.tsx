@@ -19,17 +19,12 @@ import AudioPanel, {type AudioParts} from '@/components/AudioPanel';
 import EpisodeSetPicker from '@/components/EpisodeSetPicker';
 import TalkingShots from '@/components/TalkingShots';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
-import {bannerText, isOpen, jobLine, TONE, type Section} from '@/lib/workspace';
+import {bannerText, isOpen, jobLine, showLastError, TONE, workingText, type Section} from '@/lib/workspace';
+import {nowBox} from '@/lib/nowBox';
 
 const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 const AUDIO_ONLY = ['people', 'plan', 'lines', 'notes', 'talking'];
 
-function loadOpen(id: string): Record<string, boolean> {
-  try { return JSON.parse(window.localStorage.getItem(`episode-open-${id}`) || '{}') || {}; } catch { return {}; }
-}
-function saveOpen(id: string, v: Record<string, boolean>) {
-  try { window.localStorage.setItem(`episode-open-${id}`, JSON.stringify(v)); } catch { /* private window: not remembered */ }
-}
 
 export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   const {id} = use(params);
@@ -40,9 +35,10 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   const {data: settings} = useApi<any>('/settings');
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [seen, setSeen] = useState<Set<string>>(new Set());
+  const [talkingRun, setTalkingRun] = useState(0);   // the Now box's Run: handed to the Talking shots section
   const reloadAll = async () => { await reload(); await reloadWs(); };
   const act = useAction(reloadAll);
-  useEffect(() => { setOverrides(loadOpen(id)); }, [id]);
+  useEffect(() => { setOverrides({}); }, [id]);   // what you open or close lasts for this visit only
   useEffect(() => {
     if (!ep) return;
     const active = BUSY.includes(ep.stage) || ep.jobs.some((j: any) => j.status === 'queued' || j.status === 'running');
@@ -62,7 +58,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   const can = (a: string) => ep.allowed_actions.includes(a);
   const ctx = {ep, can, act, characters, environments: settings?.environments || [], reload: reloadAll};
   // functional update: several quick toggles in a row each keep the others' state
-  const toggle = (key: string, open: boolean) => setOverrides(prev => { const v = {...prev, [key]: open}; saveOpen(id, v); return v; });
+  const toggle = (key: string, open: boolean) => setOverrides(prev => ({...prev, [key]: open}));
   const goTo = (key: string) => { toggle(key, true); setTimeout(() => document.getElementById(`ws-${key}`)?.scrollIntoView({behavior: 'smooth', block: 'start'}), 50); };
   const banner = bannerText(ws);
   const sections: Section[] = (ws?.sections || []).filter((s: Section) => ep.source === 'audio' || !AUDIO_ONLY.includes(s.key));
@@ -79,7 +75,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         : <p className="muted small">{ep.source === 'audio' ? 'The poses each character needs are listed once the scenes are built.' : 'The cast comes from the script.'}</p>}</>;
       case 'script': return <>{ep.format === 'long' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}{p.scenes}<ScriptTab {...ctx} /></>;
       case 'storyboard': return <StoryboardTab {...ctx} />;
-      case 'talking': return <TalkingShots ep={ep} />;
+      case 'talking': return <TalkingShots ep={ep} autoRun={talkingRun} />;
       case 'production': return <ProductionTab {...ctx} />;
       case 'review': return <ReviewTab {...ctx} />;
       case 'publishing': return <PublishTab {...ctx} />;
@@ -103,11 +99,13 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <DialogueDisplay ep={ep} act={act} /><HookBanner ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
-      {ws && <div className={`alert ${banner.tone} ws-banner`} role="status">
-        <strong>{ws.blocker ? 'What is blocking this episode' : ws.running?.length ? 'In progress' : 'Status'}:</strong> {banner.text}
-        {ws.blocker && <> <button className="btn sm" onClick={() => goTo(ws.blocker.section)}>Go to {ws.blocker.title}</button></>}</div>}
+      {banner && <div className={`alert ${banner.tone} ws-banner`} role="status">
+        <strong>What is blocking this episode:</strong> {banner.text}
+        {' '}<button className="btn sm" onClick={() => goTo(ws.blocker.section)}>Go to {ws.blocker.title}</button></div>}
+      {!banner && workingText(ws) && <p className="muted small" role="status">{workingText(ws)}</p>}
+      <NowBox next={ws?.next} onGo={(b) => { goTo(b.section); if (b.action === 'run_talking') setTalkingRun(n => n + 1); }} />
       <ErrorBox error={act.error} />
-      {ep.last_error && <div className="alert bad">{ep.last_error}</div>}
+      {showLastError(ep) && <div className="alert bad">{ep.last_error}</div>}
       {!ws ? <p className="muted">Loading the sections…</p>
         : ep.source === 'audio' ? <AudioPanel episodeId={ep.id} onChange={reloadAll} render={parts => render(parts)} /> : render(null)}
     </>
@@ -117,15 +115,15 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
 // One collapsible section: its title, status badge, "blocking" flag and note in the header; its jobs at the top.
 function WsSection({s, open, onToggle, act, children}: {s: Section; open: boolean; onToggle: () => void; act: ReturnType<typeof useAction>; children: React.ReactNode}) {
   return (
-    <section id={`ws-${s.key}`} className={`card ws-section${s.blocking ? ' ws-blocking' : ''}`} aria-label={s.title}>
+    <section id={`ws-${s.key}`} className={`card ws-section${s.blocking ? ' ws-blocking' : ''}${open ? '' : ' ws-collapsed'}`} aria-label={s.title}>
       <button type="button" className="ws-head" aria-expanded={open} onClick={onToggle}>
         <span className="ws-caret" aria-hidden>{open ? '▾' : '▸'}</span>
         <h2>{s.title}</h2>
-        <span className={`badge ${TONE[s.status] || ''}`}>{s.label}</span>
+        <span className={`badge ${TONE[s.status] || ''}`}>{s.status === 'done' ? `✓ ${s.label}` : s.label}</span>
         {s.blocking && <span className="badge bad">blocking</span>}
         <span className="muted small ws-note">{s.note}</span>
       </button>
-      {s.jobs?.length > 0 && <div className="stack" style={{marginTop: 8}}>{s.jobs.map((j: any) => (
+      {open && s.jobs?.length > 0 && <div className="stack" style={{marginTop: 8}}>{s.jobs.map((j: any) => (
         <div key={j.id} className={`alert small ${j.status === 'failed' ? 'bad' : 'info'} row`} style={{justifyContent: 'space-between'}}>
           <span>{jobLine(j)}</span>
           {j.status === 'failed' && <button className="btn sm" disabled={!!act.busy} onClick={() => act.run('retry', () => api(`/jobs/${j.id}/retry`, {method: 'POST'}))}>Retry</button>}
@@ -574,4 +572,16 @@ function HistoryTab({ep}: Ctx) {
       </div>
     </div>
   );
+}
+
+// The Now box: the single next action and its cost. The button only opens the step, or hands the lines to the Talking
+// shots section's own Run flow (its confirm shows the total first); it never starts anything paid by itself.
+function NowBox({next, onGo}: {next: any; onGo: (b: {action: string; section: string}) => void}) {
+  const n = nowBox(next);
+  if (!n) return null;
+  return (
+    <div className="card row" style={{justifyContent: 'space-between', gap: 12, marginBottom: 12}} role="region" aria-label="Now">
+      <div className={n.tone}><strong>Now: {n.title}.</strong> {n.text}{n.cost ? <span className="muted"> · {n.cost}</span> : null}</div>
+      {n.button && <button className="btn primary sm" onClick={() => onGo(n.button!)}>{n.button.label}</button>}
+    </div>);
 }

@@ -4,6 +4,10 @@ in words; and a banner that says what is blocking the episode and where.
 
 `facts(db, ep)` gathers plain data; `sections(f)` is a pure function of it (tested directly). Statuses:
 
+Quiet by default (owner decision 2026-11-23): only the CURRENT step is open: the one that blocks the episode, or else
+the first step still to do in the episode's order (CURRENT_ORDER). Every other section is one collapsed line (a failed or
+waiting one keeps its red or plain badge and its one-line note). Only the current step is flagged "blocking".
+
     done        finished; the section starts collapsed
     action      needs the owner now: blocks the next step (expanded and flagged)
     failed      its last job failed (expanded and flagged; the message is shown)
@@ -46,7 +50,38 @@ SECTION_JOBS = {
     "set": ("set_candidate", "set_seat_suggest", "set_notes_read_video", "set_proposal"),
 }
 FLAGGED = ("action", "failed")
-OPEN = ("action", "failed", "todo", "running")
+# the step that is "current" when nothing blocks: the first of these still to do (Talking shots after the storyboard;
+# it never blocks, but it is the next thing to do for an audio episode)
+CURRENT_ORDER = ("lines", "notes", "people", "plan", "cast", "script", "storyboard", "talking", "set", "production",
+                 "review", "publishing")
+NOT_CURRENT = ("done", "not_needed", "waiting")
+# The Now box (2026-11-23): the single next action and its cost. A decision (approve, accept, confirm) costs nothing; the
+# talking shots' figure is their own estimate; anything else says "cost shown before it starts" (never "free" by guess).
+DECISIONS = ("review", "approve", "accept", "confirm", "speakers")
+NO_ESTIMATE = "cost shown before it starts"
+
+
+def next_step(out: dict, current: str | None, f: dict) -> dict | None:
+    """{section, title, text, kind, cost_usd, cost_text, button} for the current step, or None when nothing is left.
+    The button never starts anything paid by itself: "run_talking" opens the Talking shots section's own Run flow (its
+    confirm shows the total first); "open" opens the step, whose own button and confirm do the rest."""
+    if not current:
+        return None
+    s = out[current]
+    base = {"section": current, "title": s["title"], "text": s["note"], "cost_usd": None}
+    if s["status"] == "running":
+        return {**base, "kind": "working", "cost_text": "", "button": None}
+    if current == "talking":
+        t = f.get("talking") or {}
+        n, usd = t.get("todo_lines", 0), t.get("todo_usd", 0)
+        if n and usd:
+            return {**base, "kind": "paid", "cost_usd": usd,
+                    "cost_text": f"about ${usd:.3f} for {n} line(s), shown again with the total before anything starts",
+                    "button": {"action": "run_talking", "label": f"Run {n} line(s)"}}
+        return {**base, "kind": "estimate", "cost_text": NO_ESTIMATE, "button": {"action": "open", "label": f"Open {s['title']}"}}
+    if s["status"] != "failed" and s.get("label") in DECISIONS:
+        return {**base, "kind": "decision", "cost_text": "no cost: your decision", "button": {"action": "open", "label": f"Open {s['title']}"}}
+    return {**base, "kind": "estimate", "cost_text": NO_ESTIMATE, "button": {"action": "open", "label": f"Open {s['title']}"}}
 
 
 def idx(stage: str) -> int:
@@ -273,11 +308,14 @@ def sections(f: dict) -> dict:
         # a failed job blocks only a step that is due (needs you now, or was in progress); an old failure in a step
         # that comes later (a set candidate long before production) shows red without blocking the episode
         s["blocking"] = base in FLAGGED or (bool(failed) and base == "running")
-        s["open"] = s["status"] in OPEN
         out[key] = s
     blocker = next((out[k] for k in FLOW if out[k]["blocking"]), None)
+    current = blocker["key"] if blocker else next((k for k in CURRENT_ORDER if out[k]["status"] not in NOT_CURRENT), None)
+    for k, s in out.items():
+        s["open"] = k == current                      # only the current step is open
+        s["blocking"] = blocker is not None and k == blocker["key"]   # and only the blocker is flagged
     running = [out[k]["title"] for k in FLOW if out[k]["status"] == "running"]
-    return {"sections": [out[k] for k in ORDER],
+    return {"sections": [out[k] for k in ORDER], "current": current, "next": next_step(out, current, f),
             "blocker": {"section": blocker["key"], "title": blocker["title"], "message": blocker["note"]} if blocker else None,
             "running": running}
 
