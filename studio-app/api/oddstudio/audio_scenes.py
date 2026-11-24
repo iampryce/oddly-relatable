@@ -405,10 +405,19 @@ KEEPS = ("every script version (the current one stays in the history)", "the sti
          "the Reference plan and its acceptance", "the recording, transcript, speakers and cast")
 
 
+def sheet_counts(scenes) -> tuple[int, int]:
+    """(reaction beats, shot lists) on the storyboard (reaction_sheet.py): a rebuild discards them with the scenes, so
+    the owner confirms that separately (owner request 2026-11-24)."""
+    beats = sum(len(r.get("beats") or []) for s in scenes for ln in (s.lines or []) if isinstance(ln, dict)
+                for r in (ln.get("reactions") or []) if isinstance(r, dict))
+    return beats, sum(1 for s in scenes if s.shots)
+
+
 def rebuild_preview(db: Session, ep: Episode) -> dict:
     scenes = sorted(ep.scenes, key=lambda s: s.position)
+    beats, shots = sheet_counts(scenes)
     return {"stage": ep.stage,
-            "discards": {"storyboard_scenes": len(scenes),
+            "discards": {"storyboard_scenes": len(scenes), "reaction_beats": beats, "shot_lists": shots,
                          "stills_unlinked": sum(1 for s in scenes if s.reference_asset_id),
                          "script_approval": (f"the approval of script v{ep.approved_script_version}"
                                              if ep.approved_script_version else "the script approval"),
@@ -421,6 +430,7 @@ def rebuild_preview(db: Session, ep: Episode) -> dict:
 class RebuildIn(BaseModel):
     mode: str = "writer"      # writer | simple
     confirm: bool = False
+    discard_reactions: bool = False   # required as well when the storyboard has reaction beats or shot lists
 
 
 @router.get("/episodes/{eid}/audio/rebuild-scenes")
@@ -445,6 +455,10 @@ def rebuild_scenes(eid: int, body: RebuildIn, db: Session = Depends(get_db), use
     preview = rebuild_preview(db, ep)
     if not body.confirm:
         return preview
+    d = preview["discards"]
+    if (d["reaction_beats"] or d["shot_lists"]) and not body.discard_reactions:
+        raise HTTPException(409, f"this would also discard {d['reaction_beats']} reaction beat(s) and {d['shot_lists']} shot "
+                                 "list(s) on the storyboard: confirm discarding them too (nothing was changed)")
     n = len(ep.scenes)
     for sc in list(ep.scenes):
         db.delete(sc)

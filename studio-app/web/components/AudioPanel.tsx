@@ -10,7 +10,7 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
-import {rebuildConfirmText, rebuildCost} from '@/lib/rebuildView';
+import {rebuildConfirmText, rebuildCost, sheetLoss} from '@/lib/rebuildView';
 
 // Audio-first episode, stage 1: the uploaded audio (the voice track), its timed lines, a speaker per line, and the cast.
 // The server validates every change (timing inside the audio, in order, no overlaps); this page only prepares it.
@@ -299,7 +299,9 @@ function RebuildCard({episodeId, act}: {episodeId: number; act: ReturnType<typeo
   const preview = useApi<any>(`/episodes/${episodeId}/audio/rebuild-scenes`).data;
   const run = (mode: 'writer' | 'simple') => {
     if (!preview || !window.confirm(rebuildConfirmText(preview, mode))) return;
-    act.run('rebuild', () => api(`/episodes/${episodeId}/audio/rebuild-scenes`, {body: {mode, confirm: true}}));
+    const loss = sheetLoss(preview);
+    if (loss && !window.confirm(loss)) return;
+    act.run('rebuild', () => api(`/episodes/${episodeId}/audio/rebuild-scenes`, {body: {mode, confirm: true, discard_reactions: !!loss}}));
   };
   return (
     <div className="card stack">
