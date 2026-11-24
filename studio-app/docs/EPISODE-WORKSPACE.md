@@ -163,3 +163,34 @@ The **Talking shots** section sits between Storyboard and Production. It never b
   - **Too narrow a set:** if the set is too narrow for everyone (Episode 14's four seats span about 93% of a 2:3 plate), the crop is the closest one inside the plate. It never makes bars, and the draft's notes name who is outside the safe margin.
   - **Upscaling:** a crop narrower than 1080 plate pixels is scaled up, and the notes say by how much.
   - **Adjusting it:** the section shows each scene's plate with the crop rectangle, everyone's place and the safe-margin lines. Move or resize the crop (always 9:16, always inside the plate) and **Use this crop**; **Back to computed** undoes it.
+
+## Frame layout, the reaction sheet and the shot list (2026-11-24)
+
+**Frame layout.** Beside **Dialogue on screen**, **Frame layout** chooses how the next render (and the stills) uses the
+9:16 frame:
+- **Full frame (9:16):** as before. The default; the render spec is exactly as it was.
+- **16:9 band, captions below:** the picture sits in a 1080×608 band in the middle of the 1080×1920 frame, black above
+  and below. The camera frames 16:9; when bodies do not fit, the heads stay in frame and the legs go. Captions
+  (**Dialogue on screen: Captions**) sit under the band; speech bubbles stay inside it; the hook banner, if on, is drawn
+  level above it. `PUT /api/episodes/{id}/layout {value: "full" | "band"}`; not while a render runs. A set made for the
+  portrait frame is cropped to 16:9 in the band.
+
+**The reaction sheet** (Storyboard › a scene › **Reactions per line**, audio episodes): per line, each listener's
+**beats**. A beat is the word they react to (from the recording's word timings; its time is that word's start unless set
+by hand, marked "estimated" when the transcript timed the word badly), an approved expression, a head move (none, lift,
+flinch, dip, tilt, turn to, lean in, chin up, glance) with its strength (light, medium, strong), and the reason, from what
+is said. **Add a listener** adds a character who does not yet react to that line (at most three per line).
+`PUT /api/episodes/{id}/scenes/{scene}/lines/{n}/reactions {character, beats}`.
+
+**The shot list** (Storyboard › a scene › **Shots**): start and end on the recording, the shot (wide, medium, medium
+close-up, close-up, over the shoulder), the camera in words, who is on screen and, for an over-the-shoulder shot, whose
+shoulder. Inside the scene's span (from the previous scene's last line to the next scene's first line), in order, not
+overlapping. `PUT /api/episodes/{id}/scenes/{scene}/shots {shots}`.
+
+Both are plain data on the storyboard (`oddstudio/reaction_sheet.py`; beats inside the line's reaction entry, shots in
+`storyboard_scenes.shots`, migration 0015), checked the same way for every renderer, and carried in the render spec
+(`lines[].reactions[].beats`, `shots`). Today's renderers do not act on them, so a render looks the same with or without
+them; the 3D camera reads them. Editing never touches the script, its approval or the storyboard's approval; it is open
+from storyboard review through video review, not during a render. A whole-scene edit keeps the beats; rebuilding the
+scenes from the recording starts them again. An example (Episode 14, scene 2, the Phase 0 draft):
+`docs/examples/ep14-scene2-reactions.json` (not in the database).

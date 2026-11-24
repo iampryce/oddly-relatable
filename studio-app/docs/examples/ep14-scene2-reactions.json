@@ -1,0 +1,47 @@
+{
+ "about": "Episode 14, scene 2 (\"To my nephew, Ralph,\" / the toad line / \"I leave my yacht,\"): the reaction sheet and shot list drafted in Phase 0 B (2026-11-24), in the storage format of oddstudio/reaction_sheet.py. An example only: it is not in the database. Times are the recording's. Sidney's row (neutral, then smug at \"toad\") is two beats, because a beat holds one expression. Ralph's sad beat uses the approved worried pose until a sad pose is drawn and approved.",
+ "scene_span": [6.22, 19.62],
+ "cast": ["uncle-mortimer", "ralph", "sidney", "winifred"],
+ "approved": {"ralph": ["neutral", "worried", "shocked", "smug"], "sidney": ["neutral", "smug"], "winifred": ["neutral", "smug"]},
+ "lines": {
+  "l2": {"start": 7.32, "end": 8.76, "text": "To my nephew, Ralph,",
+         "words": [{"word": "To", "start": 7.32, "end": 7.32}, {"word": "my", "start": 7.32, "end": 7.56},
+                   {"word": "nephew", "start": 7.56, "end": 7.96}, {"word": "Ralph", "start": 8.24, "end": 8.76}]},
+  "l3": {"start": 9.8, "end": 15.72, "text": "the most bone-idle lentitudinous toad I've ever had the painful displeasure to know,",
+         "words": [{"word": "the", "start": 9.8, "end": 10.0}, {"word": "most", "start": 10.0, "end": 10.4},
+                   {"word": "bone", "start": 10.4, "end": 10.9}, {"word": "idle", "start": 10.9, "end": 11.16},
+                   {"word": "lentitudinous", "start": 11.16, "end": 12.16}, {"word": "toad", "start": 12.16, "end": 12.58},
+                   {"word": "I've", "start": 12.58, "end": 13.68}, {"word": "ever", "start": 13.68, "end": 13.9},
+                   {"word": "had", "start": 13.9, "end": 14.08}, {"word": "the", "start": 14.08, "end": 14.32},
+                   {"word": "painful", "start": 14.32, "end": 14.64}, {"word": "displeasure", "start": 14.64, "end": 15.12},
+                   {"word": "to", "start": 15.12, "end": 15.48}, {"word": "know", "start": 15.48, "end": 15.72}]},
+  "l4": {"start": 16.36, "end": 17.98, "text": "I leave my yacht,",
+         "words": [{"word": "I", "start": 16.36, "end": 17.04}, {"word": "leave", "start": 17.04, "end": 17.22},
+                   {"word": "my", "start": 17.22, "end": 17.98}, {"word": "yacht", "start": 17.98, "end": 17.98}]}
+ },
+ "reactions": [
+  {"line": "l2", "character": "ralph", "beats": [
+    {"word": 3, "expression": "neutral", "move": "lift", "strength": "medium", "reason": "Named first: his share is coming."}]},
+  {"line": "l3", "character": "ralph", "beats": [
+    {"word": 2, "expression": "worried", "move": "flinch", "strength": "medium", "reason": "The insult begins in front of the family."},
+    {"word": 5, "expression": "worried", "move": "flinch", "strength": "strong", "reason": "The insult lands."}]},
+  {"line": "l3", "character": "sidney", "beats": [
+    {"word": 4, "expression": "neutral", "move": "glance", "strength": "light", "reason": "Glances at Ralph: someone else is the target."},
+    {"word": 5, "expression": "smug", "move": "none", "strength": "light", "reason": "Amused that it's someone else."}]},
+  {"line": "l3", "character": "winifred", "beats": [
+    {"word": 5, "t": 12.46, "expression": "smug", "move": "chin_up", "strength": "light", "reason": "Enjoys Ralph being put down; 0.3 s after \"toad\", not in unison with Sidney."}]},
+  {"line": "l4", "character": "ralph", "beats": [
+    {"word": 1, "expression": "neutral", "move": "lean_in", "strength": "medium", "reason": "Hopes for something good."},
+    {"word": 3, "t": 17.65, "estimated": true, "expression": "worried", "move": "dip", "strength": "medium", "reason": "Sad at \"yacht\" (worried until a sad pose is approved). The transcript gives \"yacht\" no length: 17.65 s is estimated, check by ear."}]}
+ ],
+ "shots": [
+  {"start": 6.22, "end": 7.94, "type": "ots", "camera": "behind Ralph's shoulder, seated eye level, toward the desk", "on_screen": ["uncle-mortimer"], "over_shoulder_of": "ralph"},
+  {"start": 7.94, "end": 8.94, "type": "mcu", "camera": "from Mortimer's side", "on_screen": ["ralph"]},
+  {"start": 8.94, "end": 9.8, "type": "mcu", "camera": "from the family's side", "on_screen": ["uncle-mortimer"]},
+  {"start": 9.8, "end": 12.8, "type": "medium", "camera": "from Mortimer's side, wider", "on_screen": ["ralph", "sidney", "winifred"]},
+  {"start": 12.8, "end": 15.72, "type": "mcu", "camera": "from the family's side", "on_screen": ["uncle-mortimer"]},
+  {"start": 15.72, "end": 16.88, "type": "ots", "camera": "behind Mortimer's shoulder", "on_screen": ["ralph"], "over_shoulder_of": "uncle-mortimer"},
+  {"start": 16.88, "end": 17.98, "type": "cu", "camera": "from Mortimer's side", "on_screen": ["ralph"]},
+  {"start": 17.98, "end": 19.62, "type": "cu", "camera": "from Mortimer's side", "on_screen": ["ralph"]}
+ ]
+}

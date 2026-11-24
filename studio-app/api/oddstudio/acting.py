@@ -54,8 +54,12 @@ def presentation(ep, hook: str) -> dict:
     """How the dialogue and the hook appear (owner decision 2026-11-20): the episode's dialogue display (bubbles | none
     | captions) and the POV banner (heavy condensed font, colour emoji kept)."""
     mode = getattr(ep, "dialogue_display", None) or "bubbles"
+    # the frame layout (2026-11-24): "band" draws the picture in a 16:9 band in the middle of the 9:16 frame, the captions
+    # under it and the banner flat above it; the full frame (the default) adds nothing, so its spec is exactly as before
+    band = (getattr(ep, "layout", None) or "full") == "band"
     return {"bubbles": mode == "bubbles", "captions": mode == "captions", "hook": engine.hook_text(hook),
-            "banner_font": str(FONTS / "Anton-Regular.ttf"), "emoji_font": str(FONTS / "NotoColorEmoji-Regular.ttf")}
+            "banner_font": str(FONTS / "Anton-Regular.ttf"), "emoji_font": str(FONTS / "NotoColorEmoji-Regular.ttf"),
+            **({"layout": "band"} if band else {})}
 
 
 def episode_hook(db, ep) -> str:
@@ -471,6 +475,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
                     actions.append(dict(a))
         actions.sort(key=lambda a: a["t"])
 
+    from .reaction_sheet import spec_shots
+    shots = spec_shots(sorted(scenes.values(), key=lambda x: x.position)) if absolute else []
     s = get_settings()
     from .tasks import current_script
     hook = episode_hook(db, ep)
@@ -480,6 +486,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
             **({"scenes": scene_specs} if scene_specs else {}),
             **({"actions": actions} if actions else {}),
+            # the scenes' shot lists (reaction_sheet.py), on the recording's timeline; no shot list, no key
+            **({"shots": shots} if shots else {}),
             **({"flip": True} if first is not None and scene_sets.is_reverse(db, scene_sets.scene_set(ep, first)) else {}),
             "end_card": {"text": end_card, "seconds": END_CARD} if end_card else None,
             "timeline": "absolute" if absolute else "sequential"}

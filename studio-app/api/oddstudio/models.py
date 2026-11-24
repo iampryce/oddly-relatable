@@ -64,6 +64,9 @@ class Episode(Timestamps, Base):
     # audio); hook_text: the owner's own banner text (None: the script's hook)
     hook_banner: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     hook_text: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
+    # the frame layout (migration 0015): None/"full" = the whole 9:16 frame; "band" = a 16:9 picture band in the middle
+    # of the 9:16 frame, black above and below, captions under it
+    layout: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)
     # The episode's own set (background), chosen explicitly by the owner (migration 0008; no silent default)
     set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
     # extra approved sets the scenes may change to (feat/scene-sets, migration 0011)
@@ -178,6 +181,8 @@ class StoryboardScene(Base):
     lines: Mapped[list] = mapped_column(JSON, default=list)
     # how the scene starts (feat/seating): {character key: "seated" | "standing"}, in seat order; None = everyone stands
     staging: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    # the scene's shot list (migration 0015, reaction_sheet.py): [{start, end, type, camera, on_screen, over_shoulder_of?}]
+    shots: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     # the scene's own set (one of the episode's sets); None = the episode's set
     set_id: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
     # timed actions from the video's beats (feat/action-beats): [{t, character, type, target?, gesture?}]

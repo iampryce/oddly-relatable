@@ -267,6 +267,24 @@ def set_dialogue_display(eid: int, body: DialogueDisplayIn, db: Session = Depend
     return S.episode_summary(ep)
 
 
+class LayoutIn(BaseModel):
+    value: Literal["full", "band"]
+
+
+@router.put("/episodes/{eid}/layout")
+def set_layout(eid: int, body: LayoutIn, db: Session = Depends(get_db)):
+    """The frame layout of this episode's next render: the whole 9:16 frame (full, as before) or a 16:9 picture band in
+    the middle of the 9:16 frame, black above and below, with the captions under it (band). Not while a render runs."""
+    ep = get_episode(db, eid)
+    if ep.stage in ("producing", "publishing"):
+        raise HTTPException(409, f"not while the episode is {ep.stage}: change it before or after the render")
+    if (ep.layout or "full") != body.value:
+        log_event(db, ep.id, "episode", f"Frame layout: {ep.layout or 'full'} -> {body.value} (applies to the stills and the next render)")
+        ep.layout = None if body.value == "full" else body.value
+        db.commit()
+    return S.episode_summary(ep)
+
+
 class HookIn(BaseModel):
     enabled: bool
     text: str | None = Field(default=None, max_length=120)
@@ -491,6 +509,103 @@ def set_line_expression(eid: int, sid: int, li: int, body: LineExpressionIn, db:
     sc.lines = lines
     log_event(db, ep.id, "storyboard", f"Scene {sc.position}, line {li + 1}: {c.name}'s expression set to {e} "
                                         "(the script and its approval are unchanged; applies to the stills and the next render)")
+    db.commit()
+    return S.scene(sc, None)
+
+
+class ReactionsIn(BaseModel):
+    character: str = Field(min_length=1, max_length=41)
+    beats: list[dict] = Field(default_factory=list, max_length=12)
+
+
+def _sheet_stage(ep: Episode) -> None:
+    if ep.stage not in EXPRESSION_STAGES:
+        raise HTTPException(409, f"not while the episode is {ep.stage}: reactions and shots can be changed once the storyboard "
+                                 "exists and not during a render")
+    if ep.source != "audio":
+        raise HTTPException(409, "reactions and shots are timed on the recording: this episode has no recording")
+
+
+def _words_of(ep: Episode, ln: dict) -> list[dict]:
+    lid = ln.get("line_id")
+    for x in (ep.audio_transcript or {}).get("lines", []):
+        if x.get("id") == lid:
+            return [w for w in x.get("words") or [] if str(w.get("word", "")).strip()]
+    return []
+
+
+@router.put("/episodes/{eid}/scenes/{sid}/lines/{li}/reactions")
+def set_line_reactions(eid: int, sid: int, li: int, body: ReactionsIn, db: Session = Depends(get_db)):
+    """One listener's reaction beats on one line (the reaction sheet, reaction_sheet.py): the word each reacts to, the
+    expression (approved ones only), the head move, its strength and the reason. A character not yet reacting to the
+    line is added as a listener. Only the storyboard line changes: the script, its approval and the storyboard's
+    approval stay as they are. An empty list removes the beats (the listener stays)."""
+    from .reaction_sheet import SheetError, check_beats
+    ep = get_episode(db, eid)
+    _sheet_stage(ep)
+    sc = get_scene(db, ep, sid)
+    lines = [dict(x) for x in (sc.lines or [])]
+    if not 0 <= li < len(lines):
+        raise HTTPException(404, "no such line in this scene")
+    ln = lines[li]
+    c = by_key(db).get(body.character)
+    if c is None:
+        raise HTTPException(404, "no such character")
+    if body.character == ln.get("speaker"):
+        raise HTTPException(422, f"{c.name} speaks this line: reactions are for the listeners")
+    if ln.get("start") is None or ln.get("end") is None:
+        raise HTTPException(409, "this line has no time on the recording")
+    try:
+        beats = check_beats(body.beats, name=c.name, usable=set(c.expressions or {}) | {"neutral"},
+                            words=_words_of(ep, ln), start=float(ln["start"]), end=float(ln["end"]))
+    except SheetError as e:
+        raise HTTPException(422, str(e))
+    reactions = [dict(r) for r in ln.get("reactions") or []]
+    r = next((r for r in reactions if r.get("character") == body.character), None)
+    if r is None:
+        if len(reactions) >= 3:
+            raise HTTPException(422, "a line has at most 3 reacting characters")
+        r = {"character": body.character}
+        reactions.append(r)
+    if beats:
+        r["beats"] = beats
+    else:
+        r.pop("beats", None)
+    ln["reactions"] = reactions
+    lines[li] = ln
+    sc.lines = lines
+    log_event(db, ep.id, "storyboard", f"Scene {sc.position}, line {li + 1}: {c.name}'s reaction beats set ({len(beats)}) "
+                                        "(the script and its approval are unchanged)")
+    db.commit()
+    return S.scene(sc, None)
+
+
+class ShotsIn(BaseModel):
+    shots: list[dict] = Field(default_factory=list, max_length=40)
+
+
+@router.put("/episodes/{eid}/scenes/{sid}/shots")
+def set_scene_shots(eid: int, sid: int, body: ShotsIn, db: Session = Depends(get_db)):
+    """The scene's shot list (reaction_sheet.py): start and end on the recording, the shot type, the camera in words,
+    who is on screen and, for an over-the-shoulder shot, whose shoulder. Inside the scene's span, in order, not
+    overlapping. Only the storyboard scene changes; an empty list removes it."""
+    from .reaction_sheet import SheetError, check_shots, scene_span
+    ep = get_episode(db, eid)
+    _sheet_stage(ep)
+    sc = get_scene(db, ep, sid)
+    scenes = db.query(StoryboardScene).filter_by(episode_id=ep.id).order_by(StoryboardScene.position).all()
+    i = next(n for n, s in enumerate(scenes) if s.id == sc.id)
+    tr = ep.audio_transcript or {}
+    lo, hi = scene_span(scenes, i, tr.get("duration"))
+    from .acting import referenced
+    cast = {k for s in scenes for k in (s.characters or [])} | {k for s in scenes for ln in s.lines or [] for k in referenced(ln)}
+    try:
+        shots = check_shots(body.shots, lo=lo, hi=hi, cast=cast & set(by_key(db)))
+    except SheetError as e:
+        raise HTTPException(422, str(e))
+    sc.shots = shots or None
+    log_event(db, ep.id, "storyboard", f"Scene {sc.position}: shot list set ({len(shots)} shot(s)) (the script and its "
+                                        "approval are unchanged)")
     db.commit()
     return S.scene(sc, None)
 

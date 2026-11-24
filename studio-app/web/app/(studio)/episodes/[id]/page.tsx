@@ -12,6 +12,7 @@ import SceneSetSelect from '@/components/SceneSetSelect';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import CastPanel from '@/components/CastPanel';
 import LineExpressions from '@/components/LineExpressions';
+import ReactionSheet from '@/components/ReactionSheet';
 import {hookNote} from '@/lib/hookView';
 import OutlineTab from '@/components/OutlineTab';
 import SegmentsPanel from '@/components/SegmentsPanel';
@@ -96,7 +97,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
     <>
       <div className="spread">
         <div><h1>{ep.title} <DeleteButton kind="episode" id={ep.id} label={`episode ${ep.id} "${ep.title}"`} onDone={() => { window.location.href = '/bin'; }} /></h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
-        <DialogueDisplay ep={ep} act={act} /><HookBanner ep={ep} act={act} />
+        <DialogueDisplay ep={ep} act={act} /><FrameLayout ep={ep} act={act} /><HookBanner ep={ep} act={act} />
       </div>
       <Pipeline stage={ep.stage} source={ep.source} />
       {banner && <div className={`alert ${banner.tone} ws-banner`} role="status">
@@ -143,6 +144,23 @@ function DialogueDisplay({ep, act}: {ep: any; act: ReturnType<typeof useAction>}
         <option value="none">None (audio only)</option><option value="captions">Captions</option><option value="bubbles">Speech bubbles</option>
       </select>
       <div className="muted small">{locked ? 'Locked while rendering' : 'Applies to the next render'}</div>
+    </div>
+  );
+}
+
+// The frame layout of the next render (2026-11-24): the whole 9:16 frame, or a 16:9 picture band in the middle with
+// black above and below and the captions under it.
+function FrameLayout({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
+  const locked = ['producing', 'publishing'].includes(ep.stage);
+  return (
+    <div style={{minWidth: 220}}>
+      <label htmlFor="frame-layout">Frame layout</label>
+      <select id="frame-layout" value={ep.layout || 'full'} disabled={locked || !!act.busy}
+              onChange={e => act.run('layout', () => api(`/episodes/${ep.id}/layout`, {method: 'PUT', body: {value: e.target.value}}))}>
+        <option value="full">Full frame (9:16)</option><option value="band">16:9 band, captions below</option>
+      </select>
+      <div className="muted small">{locked ? 'Locked while rendering' : ep.layout === 'band' && ep.dialogue_display !== 'captions'
+        ? 'Tip: choose Captions above; they sit under the band' : 'Applies to the stills and the next render'}</div>
     </div>
   );
 }
@@ -373,7 +391,7 @@ function StoryboardTab({ep, can, act, characters, environments, reload}: Ctx) {
                     <button className="btn primary" disabled={!!act.busy} onClick={() => act.run('save', async () => { await api(`/episodes/${ep.id}/scenes/${sc.id}`, {method: 'PUT', body: draft}); setEditing(null); await api(`/episodes/${ep.id}/scenes/${sc.id}/reference`, {method: 'POST'}); })}>Save scene</button>
                     <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
                   </div>
-                </div>) : <><SceneView scene={sc} characters={characters} /><LineExpressions ep={ep} scene={sc} characters={characters} act={act} /></>}</div>
+                </div>) : <><SceneView scene={sc} characters={characters} /><LineExpressions ep={ep} scene={sc} characters={characters} act={act} /><ReactionSheet ep={ep} scene={sc} characters={characters} act={act} /></>}</div>
               <div>{sc.reference ? <a href={sc.reference.url} target="_blank" rel="noreferrer"><img className="scene-img" src={sc.reference.url} alt={`Scene ${sc.position} stills`} /></a>
                 : <div className="card empty small">No stills yet{ref?.status === 'failed' ? ' (see the error above)' : ''}</div>}</div>
             </div>

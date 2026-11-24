@@ -202,7 +202,8 @@ export async function create3D({width, height, keys, C, drawHead, createCanvas, 
       const row = b.w * 4;
       for (let y = 0; y < b.h; y++) img.data.set(pixels.subarray((b.h - 1 - y) * row, (b.h - y) * row), y * stride);
       ox.clearRect(0, 0, width, height); ox.putImageData(img, 0, 0, 0, 0, b.w, b.h);   // a FULL clear: the canvas library keeps every put until the canvas is wholly cleared
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(out, 0, 0, b.w, b.h, b.sx0, b.sy0, b.w, b.h); ctx.restore();
+      // view.oy: the picture's top on the frame (the band layout); 0 for the whole frame
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(out, 0, 0, b.w, b.h, b.sx0, b.sy0 + (view.oy || 0), b.w, b.h); ctx.restore();
     },
   };
 }
