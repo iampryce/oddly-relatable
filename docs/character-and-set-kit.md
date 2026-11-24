@@ -84,7 +84,8 @@ did not turn heads reliably (section 5), and the style reads well with a frontal
 |---|---|---|---|
 | C1 | Standing neutral, front (the identity master) | Identity reference for every other asset | Yes |
 | C2 | Seated master: body turned toward the other person (left or right as the scene needs), head near-frontal, eyes toward them, thighs on the seat, both shoes visible | Seated dialogue shots | Yes, per facing the stories use |
-| C3 | Seated expression set: the same seat and turn, the expressions the episode needs (for example neutral, worried, sad, smug) | Reaction cuts | Per episode, only the ones used |
+| C3 | Seated expression set: the same seat and turn, the expressions the episode needs (for example neutral, worried, sad, smug), with pupils toward the other person | Reaction cuts | Per episode, only the ones used |
+| C3m | Figure-only mask for each seated master (hand-drawn polygons; no part of its own chair) | Compositing on the set's chairs | Yes, for every seated master |
 | C4 | Back of head and shoulders (seated) | Over-the-shoulder shots | When over-the-shoulder shots are used |
 | C5 | Standing expressions (front) | Standing scenes | As today |
 
@@ -141,9 +142,13 @@ hashes, original path, size, SHA-256, review status), and reviewed against the r
 | **Shading** on a shirt or a chair | Ralph 01 (and a faint tone change on Ralph 02) | "Flat colour with NO shading … the grey t-shirt is one flat grey, the chair flat with outline only". Check by eye and by the shading check (section 6). |
 | **No thighs** (legs dropping from the seat edge) | Mortimer 01, Ralph 01 | "Draw the THIGHS resting on the seat, knees bent, lower legs down to the floor, both shoes visible". |
 | **Codex did not copy its own output** (it said it could not find the file, or that the image came back only as in-memory data) | 7 of 9 calls | Not a failed generation: the image is in `~/.codex/generated_images/<session id>/`. Match the folder to the call's session id (the first event of `--json`), copy it unchanged, note it in the manifest. Never re-run the call. |
+| **Codex made more than one image in one call** (asked for exactly one) | Mortimer back view 02 | Count the images in the call's session folder after every call; use the first as the candidate, keep the extra, report it (it uses the allowance). |
 | **Unrequested motifs** (scales of justice, a statuette) | Study wide | Accepted by the owner; to avoid, list them under Avoid. |
 | **Reverse view geometry drift** (two windows behind the chairs where the wide view shows one) | Study reverse | Accepted as minor; when it matters, describe the wall precisely and attach the wide view. |
 | **Composites look pasted on** (flat, evenly lit figures in a warm, textured room) | Look-stills | Render-time grade on the figure layer only: a warm cast, a soft rim on the side the light comes from, the shadow cast away from the light. No art file changes. |
+| **Leftovers of a figure's own drawn chair** (slivers by the thighs, rail stubs on the shins, a "second seat") after automatic removal | Shot 4 v3 | Do not rely on automatic removal for seated figures: a **hand-drawn figure-only mask** per seated master (head, hair, ears, neck, torso, arms, hands, thigh-and-shin strokes, shoes as hand-placed shapes), with wood colour removed only inside hand-placed chair zones, each shin clipped to its median width and only the thick thigh stroke kept. Store the mask as an asset with its polygon spec. |
+| **Mismatched sizes in a row** (one figure towering) | Shot 4 | Codex drew the seated masters at different head-to-body ratios (Winifred's head 24% smaller than Ralph's), so "equal head width" enlarges her body. Use one scale for all images of a scene (the nearest figure up to +8%) and check the row by eye. |
+| **The wrong part of a face swapped in** (double head, the old mouth showing) | Animatic, sad face | Align faces on the face circle (the longest unbroken run of skin on a row, which never includes the ears) and cut the swapped head at the chin by counting skin across the face's width (a mouth line does not stop it). |
 
 ## 6. Pass/fail checks for each asset
 
@@ -248,9 +253,14 @@ Each PR is one commit with tests and docs, default behaviour unchanged, no paid 
 ## 9. Where the Episode 14 files are
 
 On the owner's Mac, not committed (`studio-work/episode-14/scene-02/art-generation/`):
-- `stage-01/`, `stage-01b/`, `stage-02a/`: references, prompts, generated originals, review sheets, manifests with the
-  owner's decisions (study wide, study reverse, Ralph 02 and Winifred 01 approved as masters; Mortimer 02 accepted for
-  chest-up desk shots; Sidney 01 rejected; Sidney 02 awaiting review).
-- `look-stills/` and `look-stills/v2/`: the composites and the script that made them.
+- `stage-01/`, `stage-01b/`, `stage-02a/`, `stage-02b/`: references, prompts, generated originals, review sheets,
+  manifests with the owner's decisions (24 Nov): the study wide and reverse, Ralph 02, Winifred 01 and Sidney 02
+  approved as masters; Mortimer 02 accepted for chest-up desk shots; Sidney 01 rejected; Ralph's expression sheet 01:
+  alert, worried and sad accepted, flinch rejected; sheet 02 (pupils left, a hurt-wince flinch) awaiting review;
+  Mortimer back view 01 accepted, 02 (hair strokes) and one unrequested extra awaiting review.
+- `look-stills/` (v1 to v4) and `animatic-v1/`: the composites, the hand-drawn figure masks and the free animatic of
+  scene 2, with the scripts that made them.
 
-Nothing from these stages has been imported into the studio yet.
+Nothing from these stages has been imported into the studio yet. The direction decided on 24 Nov: these scripts are the
+reference implementation; the studio imports the approved art with provenance, binds each shot to its assets, and
+renders the scene itself (the storyboard-driven scene engine).
