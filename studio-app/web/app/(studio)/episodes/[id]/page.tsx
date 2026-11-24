@@ -19,6 +19,7 @@ import SegmentsPanel from '@/components/SegmentsPanel';
 import AudioPanel, {type AudioParts} from '@/components/AudioPanel';
 import EpisodeSetPicker from '@/components/EpisodeSetPicker';
 import TalkingShots from '@/components/TalkingShots';
+import StoryboardFrames from '@/components/StoryboardFrames';
 import {joinWithPrevious, splitScene} from '@/lib/audioScenes';
 import {bannerText, isOpen, jobLine, showLastError, TONE, workingText, type Section} from '@/lib/workspace';
 import {nowBox} from '@/lib/nowBox';
@@ -445,6 +446,7 @@ function ProductionTab({ep, can, act}: Ctx) {
         {!ep.set_id && <div className="alert warn small">Choose this episode's set first (the Set section): there is no default set.</div>}</>)}
       {ep.stage === 'production_failed' && <div className="alert bad">A production job failed. Fix the cause (see the error and log), then retry only that job.</div>}
       {ep.format === 'long' && <SegmentsPanel ep={ep} act={act} />}
+      <StoryboardFrames episodeId={ep.id} />
       {ep.scenes.length > 0 && (
         <div className="card">
           <h2>Scenes</h2>

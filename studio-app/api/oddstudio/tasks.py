@@ -833,6 +833,13 @@ from . import voice_compare  # noqa: E402,F401
 from . import sets  # noqa: E402,F401
 from . import audio_first  # noqa: E402,F401
 from . import audio_scenes  # noqa: E402,F401
+
+
+@task
+def storyboard_frames(ctx: Ctx) -> dict:
+    """Storyboard frames for an episode, one at a time (storyboard_frames.py)."""
+    from .storyboard_frames import run
+    return run(ctx)
 from . import audio_production  # noqa: E402,F401
 from . import rig_check  # noqa: E402,F401
 from . import character_looks  # noqa: E402,F401

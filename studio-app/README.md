@@ -79,8 +79,8 @@ Nothing below is faked. Without the dependency, the step fails with a clear "Not
 
 | Capability | Needs | Cost |
 |---|---|---|
-| AI script writing | `codex-cli` (the Codex CLI logged in on the **worker machine**; not inside the containers), or `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` | Codex: ChatGPT subscription. APIs: a few cents per script |
-| Character pose images | `codex-cli` on the worker machine, or `OPENAI_API_KEY` (Images API, transparent PNG) | Per image |
+| AI script writing | `codex-cli` (the Codex CLI in the API/worker image, signed in with ChatGPT: see below), or `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY` | Codex: ChatGPT subscription. APIs: a few cents per script |
+| Character pose images, sets, storyboard frames | `codex-cli` (ChatGPT plan, see below), or `OPENAI_API_KEY` (Images API) | Codex: $0 per image (plan allowance). OpenAI: per image |
 | Voices | `OPENAI_API_KEY` (gpt-4o-mini-tts), `ELEVENLABS_API_KEY`, or Piper installed on the worker (free); otherwise videos carry the engine's SFX only | About $0.01 per Short with OpenAI (see docs/VOICE-AND-CASTING.md) |
 | S3 media | `STORAGE_BACKEND=s3`, `S3_BUCKET`, an instance role or `AWS_*` keys | Storage and egress |
 | YouTube publishing | `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` (scope `youtube.upload`) | API quota only |
@@ -90,6 +90,24 @@ Nothing below is faked. Without the dependency, the step fails with a clear "Not
 - The current server, Postgres, Redis and local storage add $0.
 - The optional AI APIs are pay-per-use, with cents per episode at Shorts length.
 - Codex adds no spending.
+
+### Codex on the ChatGPT plan
+
+The API and worker images include the Codex CLI. Signed in with the owner's ChatGPT account, Settings > AI providers
+offers **Codex (ChatGPT plan)** for images (and text) at **$0 per call**: it uses the plan allowance, not API credits.
+
+- **Sign in once** (device code; first enable "device code login" in ChatGPT > Settings > Security):
+  `docker exec -it -u studio oddstudio-worker-1 codex login --device-auth`, then open the link it shows and enter the
+  code. The login is saved in `CODEX_HOME=/data/codex` on the shared data volume, so the API and worker both use it
+  and it survives redeploys. Check with `docker exec -u studio oddstudio-worker-1 codex login status`
+  ("Logged in using ChatGPT").
+- **The login file is a password.** `/data/codex/auth.json` holds access tokens: never copy it into the repository,
+  logs, chat or backups that leave the server. Sign out with `codex logout` in the same container.
+- **Safeguards in the code:** OpenAI API keys are removed from Codex's environment, so it can never bill the API; an
+  API-key sign-in is refused; a Codex failure never falls back to a paid provider and is never retried automatically;
+  when the plan limit is reached the job stops with Codex's message and can be retried later by the owner.
+- Each image takes about 1-2 minutes. Images Codex makes but fails to copy out are collected from its own images folder
+  (only ones made by that call).
 
 **New characters** need pose art. Until their poses are generated and approved under Characters, production refuses scripts that put them on screen. Character 01 uses the approved repository artwork and is locked.
 

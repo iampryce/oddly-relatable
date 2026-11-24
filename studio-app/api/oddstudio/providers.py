@@ -4,8 +4,9 @@ Each provider either does the real call or raises ProviderNotConfigured with wha
 returns placeholder content as if it had succeeded. The only stand-in, `FakeText`, exists for automated tests and is
 refused unless ODD_ENV=test.
 
-- codex-cli: the local `codex` CLI on the owner's ChatGPT subscription (no API spending). Only works where Codex is
-  installed and logged in (the owner's workstation), not inside the server containers.
+- codex-cli: the `codex` CLI on the owner's ChatGPT subscription (no API spending). The API image installs it; it works
+  once signed in with ChatGPT (login kept in CODEX_HOME on the data volume). OpenAI API keys are removed from its
+  environment, and a Codex failure never falls back to a paid provider.
 - openai / anthropic: HTTPS APIs with keys from the environment (paid per use; see README for cost notes).
 """
 from __future__ import annotations
@@ -90,6 +91,47 @@ def codex_workdir(kind: str):
         shutil.rmtree(d, ignore_errors=True)
 
 
+def codex_env() -> dict:
+    """Environment for a Codex subprocess: everything except OpenAI API credentials, so Codex can only use the ChatGPT
+    sign-in (plan allowance) and never silently bill the API account."""
+    return {k: v for k, v in os.environ.items() if not k.upper().startswith("OPENAI_")}
+
+
+_login_cache: dict = {}
+
+
+def codex_login_state() -> str:
+    """'chatgpt' (signed in with a ChatGPT plan), 'api-key' (signed in with an API key: refused here, it would bill
+    the API), 'none' (installed, not signed in) or 'missing' (not installed). Cached for 60 s: Settings asks often."""
+    s = get_settings()
+    hit = _login_cache.get(s.codex_bin)
+    if hit and time.time() - hit[1] < 60:
+        return hit[0]
+    exe = shutil.which(s.codex_bin)
+    state = "missing"
+    if exe:
+        try:
+            r = subprocess.run([exe, "login", "status"], capture_output=True, text=True, encoding="utf-8",
+                               timeout=20, env=codex_env())
+            out = f"{r.stdout}\n{r.stderr}".lower()
+            state = "chatgpt" if "chatgpt" in out and "not logged in" not in out else (
+                "api-key" if "api key" in out and "not logged in" not in out else "none")
+        except (subprocess.TimeoutExpired, OSError):
+            state = "none"
+    _login_cache[s.codex_bin] = (state, time.time())
+    return state
+
+
+def codex_images_dir() -> Path:
+    """Where Codex's image tool keeps every image it makes (one sub-folder per session)."""
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "generated_images"
+
+
+def _codex_pngs() -> set[Path]:
+    d = codex_images_dir()
+    return set(d.glob("*/*.png")) if d.is_dir() else set()
+
+
 # ---------------------------------------------------------------- text
 class TextProvider:
     name = "none"
@@ -117,7 +159,7 @@ class CodexText(TextProvider):
             full = f"{system}\n\n{prompt}\n\nReturn ONLY the JSON object, with no commentary."
             try:
                 r = subprocess.run(cmd + ["-"], input=full, capture_output=True, text=True, encoding="utf-8",
-                                   timeout=s.job_timeout_seconds)
+                                   timeout=s.job_timeout_seconds, env=codex_env())
             except subprocess.TimeoutExpired as e:
                 raise ProviderError("codex-cli timed out", transient=True) from e
             if r.returncode != 0:
@@ -271,6 +313,10 @@ def image_generate(cfg: dict, prompt: str, out_file: Path, reference: Path | lis
     except (ProviderError, ProviderNotConfigured) as e:
         if not fb or fb == "none" or fb == cfg.get("provider"):
             raise
+        if cfg.get("provider") == "codex-cli":
+            # Codex runs on the ChatGPT plan ($0 per image). Switching to a paid API on failure would spend money the
+            # owner never saw a price for, so a Codex failure stops the job instead.
+            raise
         fallback_log(f"image: {cfg.get('provider')} failed ({str(e)[:200]}); using fallback {fb}")
         return _image_generate_one({**cfg, "provider": fb, "model": ""}, prompt, out_file, reference)
 
@@ -319,6 +365,12 @@ def _image_generate_one(cfg: dict, prompt: str, out_file: Path, reference: Path 
         exe = shutil.which(s.codex_bin)
         if not exe:
             raise ProviderNotConfigured("codex-cli images: the `codex` command is not installed on the worker machine")
+        state = codex_login_state()
+        if state != "chatgpt":
+            raise ProviderNotConfigured(
+                "codex-cli images: Codex is not signed in with a ChatGPT plan on the worker "
+                + ("(it is signed in with an API key, which would bill the API; sign out and sign in with ChatGPT)"
+                   if state == "api-key" else "(sign in once: see README, 'Codex on the ChatGPT plan')"))
         with codex_workdir("image") as tmp:
             cmd = [exe, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", tmp]
             refs = [] if reference is None else ([reference] if isinstance(reference, Path) else list(reference))
@@ -326,14 +378,33 @@ def _image_generate_one(cfg: dict, prompt: str, out_file: Path, reference: Path 
                 ref = Path(tmp) / (f"reference-{k + 1}" + Path(r).suffix)
                 shutil.copyfile(r, ref)
                 cmd += ["-i", str(ref)]
+            # Background: poses default to transparent (the cut-out step expects it); cfg "background": None for images
+            # with their own scenery (sets, storyboard frames), or a flat colour name, as for the OpenAI provider.
+            bg = cfg.get("background", "transparent")
+            if bg is None:
+                bg_line = "The image has its own full scenery (no transparent or plain background)."
+            elif bg == "transparent":
+                bg_line = "Transparent background PNG."
+            else:
+                bg_line = f"Background: one plain, solid, flat {bg} colour. No checkerboard or transparency pattern."
+            size = cfg.get("size") or ""
+            size_line = f" Image size {size} pixels (or the nearest size your tool makes, same orientation)." if size else ""
             instruction = (f"Generate exactly one image with your image generation tool and save it as out.png in the current "
-                           f"directory. Transparent background PNG. Image description:\n{prompt}")
+                           f"directory. Do not retry and do not make variants. {bg_line}{size_line} Image description:\n{prompt}")
+            before = _codex_pngs()
             try:
                 r = subprocess.run(cmd + ["-"], input=instruction, capture_output=True, text=True, encoding="utf-8",
-                                   timeout=s.job_timeout_seconds)
+                                   timeout=s.job_timeout_seconds, env=codex_env())
             except subprocess.TimeoutExpired as e:
-                raise ProviderError("codex-cli image generation timed out", transient=True) from e
+                # not transient: an automatic retry would spend plan allowance the owner did not ask for
+                raise ProviderError("codex-cli image generation timed out", transient=False) from e
             made = Path(tmp) / "out.png"
+            if not made.exists():
+                # Codex sometimes makes the image but fails to copy it out of its sandbox: take the image its tool
+                # saved in this call (the newest new file in its own images folder), never an older one.
+                new = sorted(_codex_pngs() - before, key=lambda f: f.stat().st_mtime)
+                if new:
+                    made = new[-1]
             if r.returncode != 0 or not made.exists():
                 raise ProviderError(f"codex-cli image generation produced no image (exit {r.returncode}): {(r.stderr or r.stdout)[-600:]}")
             # On Windows a Codex helper process can keep the new image open for a moment after Codex exits:
