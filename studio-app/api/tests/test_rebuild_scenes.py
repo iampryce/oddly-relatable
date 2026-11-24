@@ -91,6 +91,29 @@ class RebuildScenesTest(unittest.TestCase):
         self.assertEqual(e["script_version"], v1 + 1, "a new script version; the old one stays in the history")
         self.assertEqual(self.snapshot(), before, "poses, sets, the episode's set, the plan acceptance, lines and cast untouched")
 
+    def test_reaction_beats_and_shot_lists_need_their_own_confirmation(self):
+        from oddstudio.db import new_session
+        from oddstudio.models import StoryboardScene
+        self.to_storyboard()
+        with new_session() as s:                       # beats and a shot list, as the Storyboard's rows store them
+            sc = s.query(StoryboardScene).filter_by(episode_id=self.eid).order_by(StoryboardScene.position).first()
+            lines = [dict(x) for x in sc.lines]
+            lines[0]["reactions"] = [{"character": "ralph", "beats": [{"word": 0, "t": 1.0, "move": "lift", "strength": "light"},
+                                                                       {"word": 0, "t": 1.2, "move": "dip", "strength": "light"}]}]
+            sc.lines, sc.shots = lines, [{"start": 0.0, "end": 1.0, "type": "mcu", "camera": "", "on_screen": ["ralph"]}]
+            s.commit()
+        n = len(self.ep()["scenes"])
+        p = self.c.get(f"/api/episodes/{self.eid}/audio/rebuild-scenes").json()["discards"]
+        self.assertEqual((p["reaction_beats"], p["shot_lists"]), (2, 1))
+        r = self.c.post(f"/api/episodes/{self.eid}/audio/rebuild-scenes", json={"mode": "simple", "confirm": True})
+        self.assertEqual(r.status_code, 409, "confirm alone is not enough while beats or shot lists exist")
+        self.assertIn("2 reaction beat(s) and 1 shot list(s)", r.json()["detail"])
+        self.assertEqual((self.ep()["stage"], len(self.ep()["scenes"])), ("storyboard_review", n), "nothing changed")
+        r = self.c.post(f"/api/episodes/{self.eid}/audio/rebuild-scenes",
+                        json={"mode": "simple", "confirm": True, "discard_reactions": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.ep()["scenes"], [], "discarded with the storyboard once confirmed")
+
     def test_allowed_only_after_the_script_was_approved_and_before_production(self):
         self.assertEqual(self.ep()["stage"], "script_review")
         self.assertEqual(self.c.get(f"/api/episodes/{self.eid}/audio/rebuild-scenes").status_code, 409,

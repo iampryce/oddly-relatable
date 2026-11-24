@@ -56,5 +56,45 @@ class MigrationsTest(unittest.TestCase):
             config.reset_settings()
 
 
+    def test_0015_is_additive_and_the_previous_release_keeps_working(self):
+        """0015 only adds two nullable columns: rows the previous release wrote are untouched and read back the same, the
+        previous release's inserts (which do not name the new columns) still work, and it downgrades cleanly."""
+        from alembic import command
+        from sqlalchemy import create_engine, inspect
+        from oddstudio import config
+        tmp = Path(tempfile.mkdtemp(prefix="oddstudio-mig15-"))
+        old = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = f"sqlite:///{(tmp / 'm.db').as_posix()}"
+        config.reset_settings()
+        try:
+            cfg = alembic_config()
+            command.upgrade(cfg, "0014")
+            eng = create_engine(os.environ["DATABASE_URL"])
+            ep_cols = {c["name"] for c in inspect(eng).get_columns("episodes")}
+            sc_cols = {c["name"] for c in inspect(eng).get_columns("storyboard_scenes")}
+            with eng.connect() as conn:
+                before_ep = conn.exec_driver_sql("select count(*) from episodes").scalar()
+            command.upgrade(cfg, "0015")
+            i = inspect(eng)
+            new_ep = {c["name"]: c for c in i.get_columns("episodes")}
+            new_sc = {c["name"]: c for c in i.get_columns("storyboard_scenes")}
+            self.assertEqual(set(new_ep) - ep_cols, {"layout"}, "only the layout column is added to episodes")
+            self.assertEqual(set(new_sc) - sc_cols, {"shots"}, "only the shots column is added to storyboard_scenes")
+            self.assertTrue(ep_cols <= set(new_ep) and sc_cols <= set(new_sc), "no column removed or renamed")
+            self.assertTrue(new_ep["layout"]["nullable"] and new_sc["shots"]["nullable"],
+                            "nullable: the previous release's inserts, which do not name them, still work")
+            with eng.connect() as conn:
+                self.assertEqual(conn.exec_driver_sql("select count(*) from episodes").scalar(), before_ep)
+            command.downgrade(cfg, "0014")
+            self.assertNotIn("layout", {c["name"] for c in inspect(eng).get_columns("episodes")})
+            self.assertNotIn("shots", {c["name"] for c in inspect(eng).get_columns("storyboard_scenes")})
+            eng.dispose()
+        finally:
+            if old is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = old
+            config.reset_settings()
+
 if __name__ == "__main__":
     unittest.main()

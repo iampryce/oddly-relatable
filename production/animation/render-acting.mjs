@@ -15,6 +15,11 @@
 //     seated characters (a table top), drawn again after them so they sit behind it.)
 //    lines: [{speaker, text, start, end, expression, gesture?, move?: {type, to?}, look_at?, reactions?: [...],
 //             cues: [{start, end, value}]}]}
+//    layout?: "band"   (2026-11-24: the picture in a 16:9 band in the middle of the 9:16 frame, black above and below;
+//      the camera frames 16:9, bubbles stay inside the band, captions sit under it and the banner is drawn flat above
+//      it; without the key, the whole frame as before)
+//    shots?: [{scene, start, end, type, camera, on_screen, over_shoulder_of?}]; lines[].reactions[].beats?: the shot list
+//      and the reaction sheet (oddstudio/reaction_sheet.py), carried in the spec for the 3D camera; not used here
 //    engine?: "3d"   (the Studio 3D rig animator, rig3d.mjs: the same choreography, shots, bubbles and captions, the
 //      characters drawn as 3D stickmen; cast[key].head_angles?: {three-quarter|side|back: png} the approved head drawings)
 // Video only (the studio muxes the voice mix). Deterministic: the same input renders the same frames.
@@ -28,6 +33,10 @@ const spec = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const OUT = process.argv[3];
 const {width: W, height: H, fps: FPS, duration: DUR} = spec;
 let SET = spec.set;
+// the frame layout: the picture fills the whole frame (VH = H, OY = 0: exactly as before), or a 16:9 band of height VH
+// whose top is OY, centred in the 9:16 frame
+const BAND = spec.layout === 'band';
+const VH = BAND ? Math.round(W * 9 / 16) : H, OY = BAND ? Math.round((H - VH) / 2) : 0;
 const KEYS = Object.keys(spec.cast);
 // each seat keeps its number in the set's staging (n), so "toward seat N" and the speaker's seat survive a reversed side
 const seatsOf = (s, flip) => { const l = (s.seats?.length ? s.seats : s.seat ? [s.seat] : []).map((x, n) => ({...x, n})); return flip ? l.slice().reverse() : l; };
@@ -384,11 +393,13 @@ function shotBox(kind, keys, poses) {
     bottom = Math.max(bottom, kind === 'close' ? p.hip.y + 10 : p.hip.y + c.legLen * c.S * 0.55);
   }
   const pad = kind === 'close' ? 30 : 50;
-  let w = Math.max(x1 - x0 + 2 * pad, (bottom - top + 2 * pad) * W / H, kind === 'close' ? (x1 - x0) * 2.1 : 380), h = w * H / W;
-  w = Math.min(w, SET.width); h = w * H / W;
+  let w = Math.max(x1 - x0 + 2 * pad, (bottom - top + 2 * pad) * W / VH, kind === 'close' ? (x1 - x0) * 2.1 : 380), h = w * VH / W;
+  w = Math.min(w, SET.width); h = w * VH / W;
   // a close-up keeps the speaker off-centre (towards the side of the set they stand on) so the bubble has room
   const cx = (x0 + x1) / 2 + (kind === 'close' ? ((x0 + x1) / 2 < SET.width / 2 ? 0.2 : -0.2) * w : 0);
-  return {x0: clamp(cx - w / 2, 0, SET.width - w), y0: clamp(top - pad - (h - (bottom - top + 2 * pad)) * 0.35, 0, SET.height - h), w};
+  // the band (16:9) is short: when the bodies do not fit, keep the heads and lose the legs, never the other way round
+  const y0 = BAND && bottom - top + 2 * pad > h ? top - pad : top - pad - (h - (bottom - top + 2 * pad)) * 0.35;
+  return {x0: clamp(cx - w / 2, 0, SET.width - w), y0: clamp(y0, 0, SET.height - h), w};
 }
 function camera(poses, t) {
   // the line being spoken (or the one just finished) decides the shot; a new shot is a hard cut
@@ -413,9 +424,10 @@ function camera(poses, t) {
   for (const k of on) { const p = poses[k], c = C[k]; x0 = Math.min(x0, p.hip.x - halfW(k)); x1 = Math.max(x1, p.hip.x + halfW(k)); top = Math.min(top, p.hip.y - (c.footDrop * 1.75) * c.S); }
   if (!on.length) { x0 = SET.stand_min_x; x1 = SET.stand_max_x; top = FLOOR() - 700; }
   const bottom = FLOOR() + 70;
-  let w = Math.max(x1 - x0 + 60, (bottom - top + 40) * W / H, 420), h = w * H / W;
-  w = Math.min(w, SET.width); h = w * H / W;
-  const target = {x0: clamp((x0 + x1) / 2 - w / 2, 0, SET.width - w), y0: clamp(bottom - h, 0, SET.height - h), w};
+  let w = Math.max(x1 - x0 + 60, (bottom - top + 40) * W / VH, 420), h = w * VH / W;
+  w = Math.min(w, SET.width); h = w * VH / W;
+  const y0 = BAND && bottom - top + 40 > h ? top - 30 : bottom - h;   // band: heads before feet when not all fits
+  const target = {x0: clamp((x0 + x1) / 2 - w / 2, 0, SET.width - w), y0: clamp(y0, 0, SET.height - h), w};
   // smooth, critically damped follow (no jitter, no sudden zooms)
   if (!cam) cam = {...target};
   for (const k of ['x0', 'y0', 'w']) cam[k] += (target[k] - cam[k]) * 0.06;
@@ -439,7 +451,7 @@ const BANNER_LAYOUT = BANNER_FONTS && BANNER_FONTS.banner ? layoutBanner(createC
 const HOOK_BOTTOM = BANNER_LAYOUT ? BANNER_LAYOUT.bottom : 220;
 
 function drawHook(ctx) {
-  if (BANNER_LAYOUT) { drawBanner(ctx, BANNER_LAYOUT); return; }
+  if (BANNER_LAYOUT) { drawBanner(ctx, BANNER_LAYOUT, BAND ? {flat: true} : undefined); return; }
   // permanent top banner (the episode's hook): black bold capitals on a yellow box with a black border
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.font = '800 50px Sub'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
@@ -457,7 +469,7 @@ function drawBubble(ctx, t, poses, v, s) {
   const line = spec.lines.find(l => t >= l.start && t < l.end + 0.1);
   if (!line || !poses[line.speaker] || !poses[line.speaker].onStage) return;
   const k = line.speaker, p = poses[k], c = C[k];
-  const hx = (p.hip.x - v.x0) * s, top = (headTop(k, p) - v.y0) * s;
+  const hx = (p.hip.x - v.x0) * s, top = (headTop(k, p) - v.y0) * s + OY;
   const headH = (p.hip.y + c.neck.y * c.S - headTop(k, p)) * s, faceY = top + headH * 0.6, headHalf = halfW(k) * s * 0.75;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -468,15 +480,17 @@ function drawBubble(ctx, t, poses, v, s) {
     if (rows.length <= 4) break;
   }
   const lh = size * 1.18, bw = Math.max(...rows.map(r => ctx.measureText(r).width)) + 64, bh = rows.length * lh + 40;
-  const minY = (spec.hook ? HOOK_BOTTOM : 40) + 10;
+  // in the band, the bubble stays inside the picture (the banner is above the band)
+  const minY = BAND ? OY + 10 : (spec.hook ? HOOK_BOTTOM : 40) + 10;
+  const lowest = BAND ? OY + VH - 10 - bh : H - bh - 40;
   // every visible head (screen rectangles): a bubble must not cover any of them
   const heads = KEYS.filter(o => poses[o].onStage).map(o => {
-    const q = poses[o], cq = C[o], tp = (headTop(o, q) - v.y0) * s, hh = (q.hip.y + cq.neck.y * cq.S - headTop(o, q)) * s;
+    const q = poses[o], cq = C[o], tp = (headTop(o, q) - v.y0) * s + OY, hh = (q.hip.y + cq.neck.y * cq.S - headTop(o, q)) * s;
     const cx = (q.hip.x - v.x0) * s, half = halfW(o) * s * 0.8;
     return [cx - half, tp - 10, cx + half, tp + hh + 10];
   });
   const overlap = (x, y) => heads.reduce((a, [l, tp, r, b]) => a + Math.max(0, Math.min(x + bw, r) - Math.max(x, l)) * Math.max(0, Math.min(y + bh, b) - Math.max(y, tp)), 0);
-  const fit = (x, y) => [clamp(x, 24, W - bw - 24), clamp(y, minY, H - bh - 40)];
+  const fit = (x, y) => [clamp(x, 24, W - bw - 24), clamp(y, minY, lowest)];
   const cands = [
     ['above', ...fit(hx + (hx < W / 2 ? 50 : -50) - bw / 2, top - bh - 50)],
     ['right', ...fit(hx + headHalf + 30, faceY - bh / 2 - 40)],
@@ -527,7 +541,8 @@ function drawScene(ctx, t) {
   const v = camera(poses, t), s = W / v.w;
   if (![v.x0, v.y0, v.w].every(Number.isFinite)) throw new Error(`invalid camera at t=${t.toFixed(2)}`);
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  ctx.setTransform(s, 0, 0, s, -v.x0 * s, -v.y0 * s);
+  if (BAND) { ctx.save(); ctx.beginPath(); ctx.rect(0, OY, W, VH); ctx.clip(); }   // the picture only inside the band
+  ctx.setTransform(s, 0, 0, s, -v.x0 * s, BAND ? OY - v.y0 * s : -v.y0 * s);
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(plate, 0, 0);
   const order = [...KEYS].sort((a, b) => (poses[a].seated ? -1 : 0) - (poses[b].seated ? -1 : 0));
@@ -537,7 +552,7 @@ function drawScene(ctx, t) {
   // characters seated behind the table, then the table front (that part of the plate again, so they sit behind it),
   // then everyone in front of it: standing, or seated in a row in front of the table (hips below the table front's
   // bottom edge: the speaker behind the desk, the audience row in front of it)
-  const draw = ks => { if (R3) R3.draw(ctx, ks, poses, v); else for (const k of ks) drawCharacter(ctx, C[k], poses[k]); };
+  const draw = ks => { if (R3) R3.draw(ctx, ks, poses, BAND ? {...v, oy: OY} : v); else for (const k of ks) drawCharacter(ctx, C[k], poses[k]); };
   const tf = SET.table_front;
   const hasTf = tf && tf.x1 > tf.x0 && tf.y1 > tf.y0;
   const behind = p => p.seated && (!hasTf || p.hip.y < tf.y1);
@@ -545,6 +560,7 @@ function drawScene(ctx, t) {
   if (hasTf) ctx.drawImage(plate, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0, tf.x0, tf.y0, tf.x1 - tf.x0, tf.y1 - tf.y0);
   draw(order.filter(k => poses[k].onStage && !behind(poses[k])));
   if (spec.bubbles) drawBubble(ctx, t, poses, v, s);
+  if (BAND) ctx.restore();
   if (spec.hook) drawHook(ctx);
   if (spec.captions) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -555,7 +571,8 @@ function drawScene(ctx, t) {
       for (const w of line.text.split(' ')) { const nx = cur ? cur + ' ' + w : w; if (ctx.measureText(nx).width > W * 0.84 && cur) { rows.push(cur); cur = w; } else cur = nx; }
       rows.push(cur);
       // captions sit in the lower third, clear of the POV banner at the top and of the platform's buttons at the bottom
-      rows.forEach((r, i) => { const y = H * 0.70 + i * 64; ctx.lineWidth = 10; ctx.strokeStyle = '#111'; ctx.strokeText(r, W / 2, y); ctx.fillStyle = '#fff'; ctx.fillText(r, W / 2, y); });
+      // in the band layout: under the band, clear of the platform's buttons further down
+      rows.forEach((r, i) => { const y = (BAND ? OY + VH + 80 : H * 0.70) + i * 64; ctx.lineWidth = 10; ctx.strokeStyle = '#111'; ctx.strokeText(r, W / 2, y); ctx.fillStyle = '#fff'; ctx.fillText(r, W / 2, y); });
     }
   }
 }

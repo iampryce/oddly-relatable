@@ -20,11 +20,12 @@ export function registerBannerFonts(bannerFont, emojiFont) {
   return ok;
 }
 
-export function drawBanner(ctx, L) {
+// opts.flat (the band layout, 2026-11-24): drawn level, like a headline above the picture
+export function drawBanner(ctx, L, opts) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const cx = L.box.x + L.box.w / 2, cy = L.box.y + L.box.h / 2;
-  ctx.translate(cx, cy); ctx.rotate(BANNER.angle);
+  ctx.translate(cx, cy); if (!opts?.flat) ctx.rotate(BANNER.angle);
   ctx.shadowColor = 'rgba(0,0,0,0.28)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 5;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(-L.box.w / 2, -L.box.h / 2, L.box.w, L.box.h);

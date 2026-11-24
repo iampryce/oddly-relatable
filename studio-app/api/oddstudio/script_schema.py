@@ -87,6 +87,11 @@ def acting(ln: dict, keys: list[str], where: str) -> dict:
                 rr["gesture"] = rg
             if r.get("expression"):
                 rr["expression"] = str(r["expression"])[:40].lower()
+            if r.get("beats"):    # the reaction sheet's beats survive a whole-scene edit (reaction_sheet.py checks them)
+                from .reaction_sheet import sanitize_beats
+                bs = sanitize_beats(r["beats"])
+                if bs:
+                    rr["beats"] = bs
             if len(rr) > 1:
                 reacts.append(rr)
     if reacts:
