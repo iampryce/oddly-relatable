@@ -104,17 +104,24 @@ def row_neighbours(seats: list[dict], row_tol: float) -> list[tuple[int, int, in
     return out
 
 
-def cast_height(seats: list[dict], head_ratio: float, default: int = HEIGHT) -> int:
+def scaled_height(set_height: int | None) -> tuple[int, int]:
+    """(default, minimum) character height for a set picture of this height: the defaults were set on the 1536-tall
+    portrait plates; a shorter picture (a 1024-tall landscape set) scales both, so the cast keeps its size in the room."""
+    k = min(1.0, (set_height or 1536) / 1536)
+    return round(HEIGHT * k), round(MIN_HEIGHT * k)
+
+
+def cast_height(seats: list[dict], head_ratio: float, default: int = HEIGHT, minimum: int = MIN_HEIGHT) -> int:
     """The characters' height for a set: the default, unless the set's seats are too close together for heads this
     big (head width = head_ratio x height); then the largest height at which neighbouring seated heads do not overlap
-    at all (HEAD_OVERLAP), never below MIN_HEIGHT (then the Set panel warns about the seats)."""
+    at all (HEAD_OVERLAP), never below the minimum (then the Set panel warns about the seats)."""
     if head_ratio <= 0:
         return default
     gaps = [g for _, _, g in row_neighbours(seats, head_ratio * default) if g > 0]
     if not gaps:
         return default
     fit = min(gaps) / ((1 - HEAD_OVERLAP) * head_ratio)
-    return int(min(default, max(MIN_HEIGHT, fit)))
+    return int(min(default, max(minimum, fit)))
 
 
 def min_head_px(head_ratio: float = TYPICAL_HEAD) -> int:
@@ -353,8 +360,9 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             cast[k]["head_angles"] = head_angle_files(db, c, folder)
     # one height for everyone, fitted to the episode's set: close seats draw the cast smaller so seated heads do not
     # pile up (the chairs in a generated set are often spaced for normal proportions, not for big-headed characters)
-    h = cast_height(studio_sets.seats_of(st), max(ratios or [0.0]))
-    if h != HEIGHT:
+    base_h, min_h = scaled_height(st.get("height"))
+    h = cast_height(studio_sets.seats_of(st), max(ratios or [0.0]), base_h, min_h)
+    if h != base_h:
         ctx.log(f"the set's seats are close together: characters drawn {h} px tall instead of {HEIGHT}")
     for v in cast.values():
         v["height"] = h
@@ -480,7 +488,10 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
         lo, hi = lines[0]["start"] - 2.0, lines[-1]["end"] + 2.0
         seen_scenes = list(dict.fromkeys(sid for rs in refs for sid, _ in rs))
         for sid in seen_scenes:
+            off = {k for k, v in (getattr(scenes[sid], "staging", None) or {}).items() if v == "off"}
             for a in getattr(scenes[sid], "actions", None) or []:
+                if a["character"] in off:
+                    continue          # staged off in this scene: never walks in (heard, not seen)
                 if lo <= a["t"] <= hi and a["character"] in cast and (a.get("type") != "turn_to" or a.get("target") in cast):
                     actions.append(dict(a))
         actions.sort(key=lambda a: a["t"])
