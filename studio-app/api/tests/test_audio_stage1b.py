@@ -1,6 +1,6 @@
 """Audio-first Stage 1b: media upload (owner decision 2026-11-20). Any audio or video file; a video is only a carrier
 for its audio (extracted, the original deleted, the picture never reused); optional casting and setting hints from a
-few frames (people count, setting, mood only; the frames deleted after); a Short's 60 s window on a longer recording;
+few frames (people count, setting, mood only; the frames deleted after); a Short's window (up to 3 min) on a longer recording;
 the 250 MB video cap and the free-space check. The FFmpeg tests find FFmpeg themselves (`which`), so they run wherever
 it is installed (CI installs it); the rest needs nothing."""
 import os
@@ -182,9 +182,11 @@ class VideoTest(Base):
         self.assertIn("could not be read", st["last_error"])
         self.assertEqual(self.uploads(), [])
 
-    def test_a_long_recording_waits_for_the_shorts_60_s_window(self):
+    def test_a_long_recording_waits_for_the_shorts_window(self):
+        from oddstudio import audio_first
+        M = audio_first.MAX_SECONDS["short"]          # a Short runs at most 3 minutes
         eid = self.create()
-        r = self.upload(eid, make_media(self.media, "long.wav", 70, video=False, rate=8000), "audio/wav")
+        r = self.upload(eid, make_media(self.media, "long.wav", M + 10, video=False, rate=8000), "audio/wav")
         self.assertEqual(r.status_code, 200, r.text)
         st = r.json()
         self.assertEqual((st["stage"], st["needs_trim"], st["audio"]), ("audio_upload", True, None))
@@ -192,21 +194,21 @@ class VideoTest(Base):
         self.assertEqual(self.env.run_jobs(["audio_transcribe"]), [], "nothing is transcribed before the window")
         self.assertEqual(self.c.post(f"/api/episodes/{eid}/audio/transcribe").status_code, 409)
         trim = lambda a, b: self.c.post(f"/api/episodes/{eid}/audio/trim", json={"start": a, "end": b})
-        self.assertEqual(trim(0, 61).status_code, 422)
-        self.assertEqual(trim(20, 75).status_code, 422)          # ends after the recording
+        self.assertEqual(trim(0, M + 1).status_code, 422)
+        self.assertEqual(trim(20, M + 15).status_code, 422)          # ends after the recording
         self.assertEqual(trim(30, 20).status_code, 422)
-        r = trim(5, 65)
+        r = trim(5, 5 + M)
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertEqual((r.json()["stage"], r.json()["trim"]), ("audio_transcribing", {"start": 5.0, "end": 65.0}))
+        self.assertEqual((r.json()["stage"], r.json()["trim"]), ("audio_transcribing", {"start": 5.0, "end": 5.0 + M}))
         kinds = self.assets(eid)
         self.assertEqual([k for k, _, _ in kinds], ["source-audio-full", "source-audio"])
         from oddstudio.storage import storage
         local = storage().get_to_file(kinds[1][2], self.media / "window.wav")
-        self.assertAlmostEqual(seconds_of(local), 60.0, delta=0.1)
+        self.assertAlmostEqual(seconds_of(local), float(M), delta=0.1)
         self.env.run_jobs(["audio_transcribe"])
         st = self.state(eid)
         self.assertEqual((st["stage"], st["trim"]["start"]), ("audio_labelling", 5.0))
-        self.assertEqual(trim(0, 60).status_code, 200, "the window can be moved later (transcribed again)")
+        self.assertEqual(trim(0, M).status_code, 200, "the window can be moved later (transcribed again)")
         self.assertEqual(self.uploads(), [], "trim scratch files are removed")
 
     def test_short_audio_needs_no_window_and_long_episodes_are_capped(self):

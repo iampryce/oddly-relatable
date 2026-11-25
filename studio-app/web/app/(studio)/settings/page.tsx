@@ -365,7 +365,7 @@ export default function Settings() {
         <Section name="production" title="Production" value={s.production}>{(v, set) => (
           <div className="grid cols-2">
             <div><label htmlFor="prod-set">Default set</label><select id="prod-set" value={v.environment} onChange={e => set('environment', e.target.value)}>{data.environments.map((x: string) => <option key={x}>{x}</option>)}</select></div>
-            <div><label htmlFor="prod-max">Maximum length (seconds)</label><input id="prod-max" type="number" min={10} max={60} value={v.max_seconds} onChange={e => set('max_seconds', Number(e.target.value))} /></div>
+            <div><label htmlFor="prod-max">Maximum length (seconds)</label><input id="prod-max" type="number" min={10} max={180} value={v.max_seconds} onChange={e => set('max_seconds', Number(e.target.value))} /></div>
             <div><label htmlFor="prod-end">End card text</label><input id="prod-end" value={v.end_card} onChange={e => set('end_card', e.target.value)} /></div>
             <div><label htmlFor="prod-dialogue">Dialogue on screen (new episodes)</label>
               <select id="prod-dialogue" value={v.dialogue_display || 'none'} onChange={e => set('dialogue_display', e.target.value)}>

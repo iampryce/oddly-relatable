@@ -183,9 +183,9 @@ export default function AudioPanel({episodeId, onChange, render}: {episodeId: nu
   );
 }
 
-// A Short uses at most 60 s of the recording: the owner picks the window on the whole recording (kept for this).
+// A Short uses at most 3 min of the recording: the owner picks the window on the whole recording (kept for this).
 function TrimCard({st, episodeId, act, hasLines, onApplied}: {st: any; episodeId: number; act: ReturnType<typeof useAction>; hasLines: boolean; onApplied: () => void}) {
-  const max = st.window_seconds || 60, duration: number | null = st.source_media?.duration ?? null;
+  const max = st.window_seconds || 180, duration: number | null = st.source_media?.duration ?? null;
   const [start, setStart] = useState<number>(st.trim?.start ?? 0);
   const [end, setEnd] = useState<number>(st.trim?.end ?? windowFrom(0, duration, max).end);
   const player = useRef<HTMLAudioElement>(null);
