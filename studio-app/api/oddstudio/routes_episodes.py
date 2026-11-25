@@ -66,8 +66,8 @@ class IdeaIn(BaseModel):
 
 
 def check_idea(db: Session, body: "IdeaIn") -> None:
-    if body.format == "short" and body.target_seconds > 60:
-        raise HTTPException(422, "a Short runs at most 60 s; choose a long episode for more")
+    if body.format == "short" and body.target_seconds > 180:
+        raise HTTPException(422, "a Short runs at most 3 minutes; choose a long episode for more")
     if body.continues_episode_id is not None:
         if body.format != "long":
             raise HTTPException(422, "only a long episode can continue a Short")

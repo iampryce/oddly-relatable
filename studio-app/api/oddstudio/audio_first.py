@@ -11,7 +11,7 @@ The uploaded audio is the voice track: no voice provider is used for these lines
                                                      never reused); with ?hints=1 a few frames of the part the episode
                                                      uses become TEXT-ONLY staging notes (job `audio_video_notes`,
                                                      video_notes.py) and are deleted right after.
-     trim     POST /api/episodes/{id}/audio/trim    Shorts only: the 60 s window of a longer recording
+     trim     POST /api/episodes/{id}/audio/trim    Shorts only: the window (up to 3 min) of a longer recording
   3. transcribe (worker job `audio_transcribe`)    the selected transcription provider (word timestamps), split into
                                                      timed lines (pauses, sentence ends, maximum length)
   4. label    PUT  /api/episodes/{id}/audio/lines   a speaker per line; edit, split or merge lines (validated here)
@@ -52,8 +52,8 @@ RIGHTS_SOURCES = ("own_recording", "licensed", "voice_actor", "other")
 RIGHTS_LABEL = {"own_recording": "own recording", "licensed": "licensed", "voice_actor": "voice actor", "other": "other"}
 MAX_BYTES = 60 * 1024 * 1024                        # an audio file
 MAX_VIDEO_BYTES = 250 * 1024 * 1024                 # a video file (owner decision 2026-11-20)
-MAX_SECONDS = {"short": 60, "long": 450}            # the formats' caps (a Short runs at most 60 s; long at most 7½ min)
-MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be longer (the owner picks a 60 s window)
+MAX_SECONDS = {"short": 180, "long": 450}           # the formats' caps (a Short runs at most 3 min, as YouTube Shorts and Reels allow; long at most 7½ min)
+MAX_SOURCE_SECONDS = 1800                           # a Short's recording may be longer (the owner picks a window of up to 3 min)
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm", "video/x-matroska": ".mkv",
                "video/x-m4v": ".m4v"}
 # Upload facts that survive a (re)transcription: where the audio came from, the video hints, the chosen Short window.
@@ -154,7 +154,7 @@ def state(db: Session, ep: Episode) -> dict:
                        "label": RIGHTS_LABEL.get(ep.audio_rights_source, "")},
             "transcript": ({k: v for k, v in tr.items() if k not in ("lines", "cast_suggestion", *KEEP_KEYS)}
                            if tr.get("lines") is not None else None),
-            # Stage 1b: the uploaded media (an extracted video's audio), the Short's 60 s window, the video hints
+            # Stage 1b: the uploaded media (an extracted video's audio), the Short's window (up to 3 min), the video hints
             "source_media": tr.get("source_media"), "trim": tr.get("trim"), "media_hints": tr.get("media_hints"),
             # "reference, not copy": text-only staging notes from the video, aligned to the recorded lines
             "video_notes": _notes_view(tr),
@@ -196,7 +196,7 @@ def _notes_view(tr: dict) -> dict | None:
 
 
 def _full_audio(db: Session, ep: Episode) -> dict | None:
-    """The whole recording (a Short's source before its 60 s window is chosen), for the trim player."""
+    """The whole recording (a Short's source before its window is chosen), for the trim player."""
     fid = ((ep.audio_transcript or {}).get("source_media") or {}).get("full_asset_id")
     a = db.get(Asset, fid) if fid else None
     return S.asset(a) if a else None
@@ -261,7 +261,7 @@ def _in_uploads(name: str) -> Path:
 
 def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, seconds: float | None, source: dict) -> str:
     """Store a usable audio file for the episode (an upload, or the track extracted from a video) and move on:
-    transcription, or (a Short longer than 60 s) waiting for the owner's 60 s window. Returns the event text.
+    transcription, or (a Short longer than 3 min) waiting for the owner's window. Returns the event text.
     Raises HTTPException(422) when the recording is too long for the format."""
     from .storage import sha256_file
     from .tasks import store_asset
@@ -269,12 +269,12 @@ def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, sec
     limit = MAX_SOURCE_SECONDS if ep.format == "short" else window
     if seconds is not None and seconds > limit + 0.5:
         raise HTTPException(422, f"the recording runs {seconds:.0f} s; a {ep.format} episode allows at most {limit} s"
-                                 + (" (you then choose its 60 s window)" if ep.format == "short" else ""))
+                                 + (" (you then choose its window, up to 3 min)" if ep.format == "short" else ""))
     needs_trim = ep.format == "short" and seconds is not None and seconds > window + 0.5
     key = f"episodes/{ep.id}/source-{'full-' if needs_trim else ''}audio-{sha256_file(path)[:12]}{ext}"
     a = store_asset(db, ep_id=ep.id, src=path, key=key, kind="source-audio-full" if needs_trim else "source-audio",
                     content_type=ctype, revision=ep.revision,
-                    label=("Uploaded recording, before its 60 s window" if needs_trim else "Uploaded audio")
+                    label=("Uploaded recording, before its window" if needs_trim else "Uploaded audio")
                           + (" (extracted from a video)" if source.get("type") == "video" else "")
                           + f" ({RIGHTS_LABEL.get(ep.audio_rights_source, '')})")
     sm = {**source, "full_asset_id": a.id, "duration": round(seconds, 3) if seconds else None, "needs_trim": needs_trim}
@@ -284,7 +284,7 @@ def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, sec
     if needs_trim:
         ep.audio_asset_id = None
         set_stage(ep, "audio_upload")
-        return f"Recording received: {what}, {seconds:.1f} s; choose its 60 s window for the Short"
+        return f"Recording received: {what}, {seconds:.1f} s; choose its window (up to 3 min) for the Short"
     ep.audio_asset_id = a.id
     set_stage(ep, "audio_transcribing")
     return f"Recording received: {what}" + (f", {seconds:.1f} s" if seconds else "")
@@ -297,7 +297,7 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, start: f
     cap after a free-space check. Audio is stored right away. A video is checked here (it must have an audio track) and
     handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the video.
     `hints` (video only): text-only staging notes from frames of the part the episode uses (video_notes.py); a Short
-    longer than 60 s then needs its window (`start`, `end`) with the upload, so only that part is analysed. The frames
+    longer than 3 min then needs its window (`start`, `end`) with the upload, so only that part is analysed. The frames
     are deleted as soon as the notes are made."""
     ep = audio_episode(db, eid)
     gate(ep, "upload_audio")
@@ -357,7 +357,7 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, start: f
                 check_window(start, end, seconds)
                 window = {"start": round(start, 3), "end": round(end, 3)}
             elif hints and ep.format == "short" and seconds is not None and seconds > MAX_SECONDS["short"] + 0.5:
-                raise HTTPException(422, f"the video runs {seconds:.0f} s: choose the Short's 60 s window with the upload, "
+                raise HTTPException(422, f"the video runs {seconds:.0f} s: choose the Short's window (up to 3 min) with the upload, "
                                          "so only that part of the video is analysed for the notes")
             if hints:
                 # the notes' estimated cost must fit under the cap (Settings > Video and visual analysis)
@@ -395,7 +395,7 @@ class TrimIn(BaseModel):
 
 
 def check_window(start: float, end: float, duration: float | None) -> None:
-    """A Short's window: at most 60 s, inside the recording (HTTPException 422 otherwise)."""
+    """A Short's window: at most MAX_SECONDS["short"] s, inside the recording (HTTPException 422 otherwise)."""
     window = MAX_SECONDS["short"]
     if end <= start:
         raise HTTPException(422, "the window must end after it starts")
@@ -461,7 +461,7 @@ def apply_window(db: Session, ep: Episode, start: float, end: float) -> None:
 
 @router.post("/episodes/{eid}/audio/trim")
 def trim_audio(eid: int, body: TrimIn, db: Session = Depends(get_db)):
-    """Shorts only: the episode uses the window [start, end) of the uploaded recording (at most 60 s). The whole
+    """Shorts only: the episode uses the window [start, end) of the uploaded recording (at most 3 min). The whole
     recording is kept, so the window can be moved later; a new window is transcribed again (labels start over)."""
     ep = audio_episode(db, eid)
     gate(ep, "trim_audio")
@@ -547,7 +547,7 @@ def transcribe_again(eid: int, db: Session = Depends(get_db)):
     gate(ep, "transcribe_audio")
     if not ep.audio_asset_id:
         needs = ((ep.audio_transcript or {}).get("source_media") or {}).get("needs_trim")
-        raise HTTPException(409, "choose the Short's 60 s window first" if needs else "upload the audio first")
+        raise HTTPException(409, "choose the Short's window first" if needs else "upload the audio first")
     set_stage(ep, "audio_transcribing")
     ep.last_error = ""
     db.commit()

@@ -12,7 +12,8 @@ import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 import {listStatus, money} from '@/lib/dashboard';
 
 const LIMIT = {short: 60, long: 450};          // seconds the episode uses (audio_first.py MAX_SECONDS)
-const SOURCE_LIMIT = {short: 1800, long: 450}; // a Short's recording may be longer: the owner picks its 60 s window
+const SHORT_MAX = 180; // a Short runs at most 3 minutes (YouTube Shorts and Reels)
+const SOURCE_LIMIT = {short: 1800, long: 450}; // a Short's recording may be longer: the owner picks its window
 
 export default function Episodes() {
   const {data: eps, error, reload} = useApi<any[]>('/episodes', 15000);
@@ -66,7 +67,7 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
     if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, 120));
     if (video) videoSeconds(file).then(d => { setDuration(d); setWin(windowFrom(0, d, 60)); });
   }, [file]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const needsWindow = notes && video && format === 'short' && duration != null && duration > 60.5;
+  const needsWindow = notes && video && format === 'short' && duration != null && duration > SHORT_MAX + 0.5;
   const winErr = needsWindow ? windowError(win.start, win.end, duration, 60) : null;
   const tooLong = duration != null && duration > SOURCE_LIMIT[format] + 0.5;
   const seconds = needsWindow ? Math.max(0, win.end - win.start) : Math.min(duration ?? LIMIT[format], LIMIT[format]);
@@ -115,7 +116,7 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
         </div>
       </div>
       {needsWindow && <div className="row small" style={{marginTop: 8}}>
-        The video runs {round1(duration!)} s: the Short's 60 s window (only this part is analysed)
+        The video runs {round1(duration!)} s: the Short's window of up to {SHORT_MAX / 60} minutes (only this part is analysed)
         <label className="row small" style={{margin: 0}}>from <input type="number" min={0} step={0.1} style={{width: 90}} value={win.start} onChange={e => setWin({...win, start: Number(e.target.value)})} /></label>
         <label className="row small" style={{margin: 0}}>to <input type="number" min={0} step={0.1} style={{width: 90}} value={win.end} onChange={e => setWin({...win, end: Number(e.target.value)})} /></label></div>}
       {winErr && <p className="small bad">{winErr}</p>}

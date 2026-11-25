@@ -25,7 +25,7 @@ from . import video_notes as VN
 
 VERSION = 2
 EVERY = {"short": 1.0, "long": 2.0}          # s between sampled frames
-CAP = {"short": 60, "long": 150}             # frames at most
+CAP = {"short": 150, "long": 150}             # frames at most
 BATCH = 50                                   # frames per vision call (later batches repeat one frame of overlap)
 MAX_PEOPLE = 6
 DEFAULT_CAP_USD = 0.50

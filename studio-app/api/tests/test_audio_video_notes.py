@@ -171,10 +171,11 @@ class VideoNotesFlowTest(Base):
     def test_short_notes_come_only_from_the_window_and_nothing_visual_remains(self):
         self.vision()
         eid = self.create()
-        clip = make_media(self.media, "clip.mp4", 70)
+        from oddstudio import audio_first
+        clip = make_media(self.media, "clip.mp4", audio_first.MAX_SECONDS["short"] + 10)   # longer than a Short (3 min)
         r = self.notes_upload(eid, clip)
         self.assertEqual(r.status_code, 422, "a long Short needs its window with the upload")
-        self.assertIn("choose the Short's 60 s window", r.text)
+        self.assertIn("choose the Short's window", r.text)
         self.assertEqual(self.notes_upload(eid, clip, start=10, end=40).status_code, 200)
         ran = self.env.run_jobs(["audio_media_prepare", "audio_video_notes", "audio_transcribe"])
         self.assertTrue(all(x[1] == "succeeded" for x in ran), ran)

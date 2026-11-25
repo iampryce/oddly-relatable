@@ -28,7 +28,7 @@ function IdeaForm({initial, characters, shorts, onDone}: {initial: any; characte
       <div className="grid cols-2">
         <div className="field"><label htmlFor="fmt">Format</label>
           <select id="fmt" value={f.format} onChange={e => { set('format', e.target.value); set('target_seconds', e.target.value === 'long' ? 360 : 45); }}>
-            <option value="short">Short (up to 60 s)</option><option value="long">Long episode (3 acts, 5–7 minutes)</option>
+            <option value="short">Short (up to 3 min)</option><option value="long">Long episode (3 acts, 5–7 minutes)</option>
           </select></div>
         {f.format === 'long' && <div className="field"><label htmlFor="cont">Continues a Short (optional)</label>
           <select id="cont" value={f.continues_episode_id ?? ''} onChange={e => set('continues_episode_id', e.target.value ? Number(e.target.value) : null)}>
@@ -83,7 +83,7 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
       <div className="grid cols-2">
         <div className="field"><label htmlFor="at">Title</label><input id="at" value={title} onChange={e => setTitle(e.target.value)} /></div>
         <div className="field"><label htmlFor="af">Format</label><select id="af" value={format} onChange={e => setFormat(e.target.value)}>
-          <option value="short">Short (60 s; a longer recording: you choose the 60 s window)</option><option value="long">Long episode (audio up to 7½ minutes)</option></select></div>
+          <option value="short">Short (up to 3 min; a longer recording: you choose the window)</option><option value="long">Long episode (audio up to 7½ minutes)</option></select></div>
       </div>
       <div className="field"><label htmlFor="afile">Audio or video file (audio: MP3, WAV, M4A, AAC, OGG, FLAC up to 60 MB; video: MP4, MOV, WEBM, MKV up to 250 MB)</label>
         <input id="afile" type="file" accept="audio/*,video/*" onChange={e => setFile(e.target.files?.[0] || null)} /></div>

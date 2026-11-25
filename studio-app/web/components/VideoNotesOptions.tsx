@@ -2,7 +2,7 @@
 // "Reference, not copy" (owner decision 2026-11-21): the video notes option for a video upload. The video is only used
 // for its sound; with notes ticked, a few frames of the part the episode uses are read ONCE by the studio's vision
 // provider and turned into text-only staging notes (shot, anonymous roles, blocking, emotions, setting, camera); the
-// frames and the video are deleted right after. A Short longer than 60 s needs its window now, so only that part is
+// frames and the video are deleted right after. A Short longer than 3 min needs its window now, so only that part is
 // analysed. The cost estimate shows before anything is sent.
 import {useEffect, useState} from 'react';
 import {api, isVideoFile} from '@/lib/api';
@@ -33,7 +33,7 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
     setDuration(null);
     if (file && video) videoSeconds(file).then(d => { setDuration(d); const w = windowFrom(0, d, 60); setStart(w.start); setEnd(w.end); });
   }, [file, video]);
-  const needsWindow = notes && format === 'short' && duration != null && duration > 60.5;
+  const needsWindow = notes && format === 'short' && duration != null && duration > 180.5;
   const err = needsWindow ? windowError(start, end, duration, 60) : null;
   const seconds = needsWindow ? Math.max(0, end - start) : Math.min(duration ?? 60, format === 'short' ? 60 : 450);
   useEffect(() => {
@@ -53,7 +53,7 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
         Use the video as a reference for staging notes (text only: shots, who reacts, where people stand, emotions, the kind of place, camera moves; nobody is named or described). The scene writer may use them as suggestions; your characters, sets and dialogue stay your own. The frames are read once and deleted with the video.
       </label>
       {needsWindow && <div className="row" style={{flexWrap: 'wrap'}}>
-        <span className="small">The video runs {round1(duration!)} s. Choose the Short's 60 s window now, so only that part is analysed:</span>
+        <span className="small">The video runs {round1(duration!)} s. Choose the Short's window (up to 3 minutes) now, so only that part is analysed:</span>
         <label className="row small">Start (s) <input type="number" min={0} step={0.1} style={{width: 90}} value={start} onChange={e => setStart(Number(e.target.value))} /></label>
         <label className="row small">End (s) <input type="number" min={0} step={0.1} style={{width: 90}} value={end} onChange={e => setEnd(Number(e.target.value))} /></label>
         <span className="muted small">{round1(end - start)} s</span>
