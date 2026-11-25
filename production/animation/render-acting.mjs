@@ -339,7 +339,9 @@ function pose(k, t) {
     let tgt = G.rest(c, side), kind = 'mitten';
     tgt = {x: tgt.x + Math.sin(t * 1.7 + side) * 5, y: tgt.y};
     if (L.walking) tgt = {x: tgt.x * 0.6 - L.dir * Math.sin(t * 7.5 + (side > 0 ? Math.PI : 0)) * c.armLen * 0.18, y: tgt.y};
-    if (L.seated && !L.walking) tgt = {x: side * c.armLen * 0.25, y: c.armLen * 0.96};   // hands resting on the thighs
+    // seated: hands resting on the knees at the sides of the lap, at hip height (the elbows bend a little, out)
+    if (L.seated && !L.walking) tgt = {x: (side < 0 ? c.hipL.x : c.hipR.x) + side * c.lw * 4.5 - (side < 0 ? c.shoulderL.x : c.shoulderR.x),
+                                       y: -(side < 0 ? c.shoulderL.y : c.shoulderR.y) + c.lw * 2};   // on the knees
     for (const [arm, g, t0, t1, hk, dir] of arms[k]) {
       if (!(arm === 'both' || arm === key)) continue;
       const e = envelope(t, t0, t1, 0.26, 0.3, true);
@@ -351,6 +353,7 @@ function pose(k, t) {
     }
     p[`hand${key}`] = tgt; p[`handKind${key}`] = kind;
   }
+  p.armsResting = !!(L.seated && !L.walking && !p.gesturing);   // seated and not gesturing: straight arms, hands in the lap
   if (!feet) feet = {L: {x: x + c.hipL.x * c.S * 0.75, y: FLOOR()}, R: {x: x + c.hipR.x * c.S * 0.75, y: FLOOR()}};
   const ankleUp = (c.footDrop - c.ankleL.y) * c.S;
   p.footL = {x: feet.L.x, y: feet.L.y - ankleUp}; p.footR = {x: feet.R.x, y: feet.R.y - ankleUp};
