@@ -71,6 +71,9 @@ def _waiter(p: subprocess.Popen) -> None:
         rc = p.wait()
     text = _log_text()
     st = _read_state()
+    if st.get("finished") and not st.get("code"):
+        _login_cache.clear()
+        return
     st.update({"finished": time.time(), "exit": rc,
                "result": "signed in" if rc == 0 and "success" in text.lower() else "not signed in"})
     st.pop("code", None)            # the one-time code is no longer useful: not kept
@@ -126,7 +129,21 @@ def cancel() -> None:
             _proc.kill()
 
 
+def _record_if_finished() -> None:
+    """The sign-in CLI has exited but its waiter thread has not written the result yet: write it now (same result), so
+    a status read right after the sign-in never shows neither pending nor finished."""
+    st = _read_state()
+    if _proc is not None and _proc.poll() is not None and st.get("code") and not st.get("finished"):
+        text = _log_text()
+        st.update({"finished": time.time(), "exit": _proc.returncode,
+                   "result": "signed in" if _proc.returncode == 0 and "success" in text.lower() else "not signed in"})
+        st.pop("code", None)
+        _write_state(st)
+
+
 def status() -> dict:
+    with _lock:
+        _record_if_finished()
     _login_cache.clear()
     state = codex_login_state()
     st = _read_state()

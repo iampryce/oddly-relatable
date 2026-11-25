@@ -162,9 +162,9 @@ class CodexPlanImagesTest(unittest.TestCase):
         self.assertEqual(c.post("/api/settings/codex/login").json()["code"], "AB12-CDEFG")   # one at a time
         self.assertEqual(c.get("/api/settings/codex").json()["pending"]["code"], "AB12-CDEFG")
         (self.ctl / "approve").write_text("1")                                  # the owner enters the code
-        for _ in range(100):
+        for _ in range(200):     # up to 10 s: CI machines can be slow to start the fake CLI
             st = c.get("/api/settings/codex").json()
-            if st["login"] == "chatgpt" and st["pending"] is None:
+            if st["login"] == "chatgpt" and st["pending"] is None and st["last"]:
                 break
             time.sleep(0.05)
         self.assertEqual(st["login"], "chatgpt")
