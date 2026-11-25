@@ -64,7 +64,8 @@ class Episode(Timestamps, Base):
     # audio); hook_text: the owner's own banner text (None: the script's hook)
     hook_banner: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     hook_text: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
-    # the frame layout (migration 0015): None/"full" = the whole 9:16 frame; "band" = a 16:9 picture band in the middle
+    # the frame layout (migration 0015): None/"full" = the whole 9:16 frame; "band" = a 16:9 picture band in the middle;
+    # "landscape" = a 16:9 frame (1920x1080) for YouTube long episodes
     # of the 9:16 frame, black above and below, captions under it
     layout: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)
     # The episode's own set (background), chosen explicitly by the owner (migration 0008; no silent default)

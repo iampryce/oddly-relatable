@@ -13,6 +13,8 @@ from datetime import timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -383,6 +385,10 @@ def motion_comparison(db: Session = Depends(get_db)):
 class SetIn(BaseModel):
     label: str = Field(min_length=2, max_length=60)
     description: str = Field(min_length=10, max_length=1200)
+    orientation: Literal["portrait", "landscape"] = "portrait"   # landscape: for 16:9 (YouTube long) episodes
+    style: Literal["flat", "painted"] = "flat"                   # painted: a hand-painted animation background
+    seats: int | None = Field(default=None, ge=1, le=12)          # the people who sit (a set is drawn for everyone in it)
+    standing: int = Field(default=0, ge=0, le=12)                 # the people who stand
 
 
 class SetDecisionIn(BaseModel):
@@ -414,7 +420,9 @@ def generate_set(body: SetIn, db: Session = Depends(get_db)):
     rec = sets.records(db).get(sid)
     if rec and rec.get("status") == "approved":
         raise HTTPException(409, f"an approved set named {sid!r} already exists")
-    return S.job(enqueue(db, "set_candidate", payload={"set_id": sid, "label": body.label, "description": body.description}))
+    return S.job(enqueue(db, "set_candidate", payload={"set_id": sid, "label": body.label, "description": body.description,
+                                                       "orientation": body.orientation, "style": body.style,
+                                                       **({"seats": body.seats} if body.seats else {}), "standing": body.standing}))
 
 
 @app.post("/api/sets/{sid}/decide", dependencies=[Depends(current_user)])

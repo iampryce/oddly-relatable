@@ -234,9 +234,29 @@ PALETTES = (("slate blue walls", "pale grey concrete floor", "cool white dayligh
             ("mint walls", "white vinyl floor", "even fluorescent light"))
 
 
-def rules_text(seats: int | None) -> str:
+def rules_text(seats: int | None, standing: int = 0) -> str:
+    """The studio rules with the cast's staging (owner rule 2026-11-25: every set is drawn for everyone who will be in
+    it): seats for the people who sit, all at about the same distance from the camera so the cast is drawn at one size,
+    and open floor for the people who stand."""
     s = f"seating for at least {seats} {'person' if seats == 1 else 'people'} (chairs, stools or sofa places); " if seats else ""
+    if seats and seats > 1:
+        s += ("the seats side by side at about the same distance from the camera (none far behind another), each fully "
+              "visible; ")
+    if standing:
+        s += (f"clear open floor across the front of the room where {standing} "
+              f"{'person stands' if standing == 1 else 'people stand'} side by side, nothing in front of them; ")
     return RULES.format(seats=s)
+
+
+# The plate's shape and drawing style: portrait 2:3 (Shorts) or landscape 3:2 (16:9 long episodes); flat colour (the
+# house default) or painted (a hand-painted animation background, as the owner's approved Episode 15 study plates).
+def set_style(orientation: str = "portrait", style: str = "flat") -> str:
+    shape = "horizontal 3:2" if orientation == "landscape" else "vertical 2:3"
+    if style == "painted":
+        return (f"Drawing style: richly hand-painted 2D animation background plate, {shape}; warm natural light, painterly "
+                "detail in wood, fabric and books, soft shadows; not a photo or 3D render; camera at a standing adult's "
+                "eye height, looking straight at the room.")
+    return SET_STYLE_SHORT.replace("vertical 2:3", shape)
 
 
 # The studio's set style, kept SHORT and placed AFTER the description (feat/episode-workspace, owner rule 2026-11-22:
@@ -251,14 +271,14 @@ REFERENCE_LINE = ("Your reference image (attached by the owner, their own pictur
 
 
 def prompt_parts(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "",
-                 reference: bool = False) -> list[dict]:
+                 reference: bool = False, standing: int = 0, orientation: str = "portrait", style: str = "flat") -> list[dict]:
     """The exact prompt a set candidate is generated from, as labelled parts (what the page shows and what is sent):
     the description FIRST (yours, or the set notes verbatim: the layout leads), then the short studio style, the
     studio rules, the variety guard, the view line for a two-sided room, and the line for the owner's own reference
     image when one is attached."""
     parts = [{"part": "your description", "text": LAYOUT_LEAD + description},
-             {"part": "studio style", "text": SET_STYLE_SHORT},
-             {"part": "studio rules", "text": rules_text(seats)}]
+             {"part": "studio style", "text": set_style(orientation, style)},
+             {"part": "studio rules", "text": rules_text(seats, standing)}]
     if variety.strip():
         parts.append({"part": "variety guard", "text": variety.strip()})
     if view_line:
@@ -269,22 +289,32 @@ def prompt_parts(db, description: str, seats: int | None = None, variety: str = 
 
 
 def prompt_for(db, description: str, seats: int | None = None, variety: str = "", view_line: str = "",
-               reference: bool = False) -> str:
-    return "\n".join(p["text"] for p in prompt_parts(db, description, seats, variety, view_line, reference))
+               reference: bool = False, standing: int = 0, orientation: str = "portrait", style: str = "flat") -> str:
+    return "\n".join(p["text"] for p in prompt_parts(db, description, seats, variety, view_line, reference, standing,
+                                                      orientation, style))
 
 
 IMAGE_MODEL_DEFAULT = "gpt-image-2"
 SET_SIZE = "1024x1536"
+SET_SIZES = {"portrait": "1024x1536", "landscape": "1536x1024"}   # landscape: for 16:9 (YouTube long) episodes
 
 
-def request_view(db, prompt: str, reference_label: str | None = None) -> dict:
+def set_provider(db) -> str:
+    """Sets are drawn with OpenAI's Images API, or with Codex when Settings selects it (the ChatGPT plan, $0)."""
+    from .settings_store import get_section
+    return "codex-cli" if get_section(db, "image").get("provider") == "codex-cli" else "openai"
+
+
+def request_view(db, prompt: str, reference_label: str | None = None, size: str | None = None) -> dict:
     """The exact request a set candidate sends to the image API, as the page shows it in one box: the endpoint, the
     model, the size, the reference image (none unless the owner attached their own) and the full prompt."""
     from .settings_store import get_section
     img = get_section(db, "image")
     model = (img.get("model") if img.get("provider") == "openai" else "") or IMAGE_MODEL_DEFAULT
-    return {"endpoint": "OpenAI images/edits" if reference_label else "OpenAI images/generations", "model": model,
-            "size": SET_SIZE, "reference_image": reference_label or "none (text only)", "prompt": prompt}
+    endpoint = ("Codex (ChatGPT plan)" if set_provider(db) == "codex-cli" else
+                "OpenAI images/edits" if reference_label else "OpenAI images/generations")
+    return {"endpoint": endpoint, "model": model if set_provider(db) == "openai" else "Codex image tool",
+            "size": size or SET_SIZE, "reference_image": reference_label or "none (text only)", "prompt": prompt}
 
 
 def request_text(req: dict) -> str:
@@ -396,7 +426,8 @@ def set_candidate(ctx: Ctx) -> dict:
     from .settings_store import get_section
     db, job = ctx.db, ctx.job
     p = job.payload
-    cfg = {**get_section(db, "image"), "provider": "openai", "fallback": "none", "size": SET_SIZE, "use_reference": True}
+    size = SET_SIZES.get(p.get("orientation") or "portrait", SET_SIZE)
+    cfg = {**get_section(db, "image"), "provider": set_provider(db), "fallback": "none", "size": size, "use_reference": True}
     if get_section(db, "image").get("provider") != "openai":
         cfg["model"] = ""
     folder = ctx.folder("sets", p["set_id"])
@@ -409,8 +440,10 @@ def set_candidate(ctx: Ctx) -> dict:
     # the prompt is exactly the one the page showed when the owner clicked (stored in the job), else built the same way
     ref = own_reference(db, p, folder)
     cfg["use_reference"] = ref is not None
-    prompt = p.get("prompt") or prompt_for(db, p["description"], variety=variety_text(db, p.get("episode_id"), p["description"]))
-    req = request_view(db, prompt, p.get("reference_label") if ref is not None else None)
+    prompt = p.get("prompt") or prompt_for(db, p["description"], variety=variety_text(db, p.get("episode_id"), p["description"]),
+                                           seats=p.get("seats"), standing=int(p.get("standing") or 0),
+                                           orientation=p.get("orientation") or "portrait", style=p.get("style") or "flat")
+    req = request_view(db, prompt, p.get("reference_label") if ref is not None else None, size)
     ctx.log("request: " + request_text(req).replace("\n", " | ")[:600])
     providers.image_generate(cfg, prompt, out, reference=ref)
     im = Image.open(out)
@@ -432,7 +465,7 @@ def set_candidate(ctx: Ctx) -> dict:
                          "kept": p.get("episode_id") is None,
                          # the seats the proposal asked for: the approval screen asks for at least this many to be marked
                          **({"seats_wanted": int(p["seats"])} if p.get("seats") else {}),
-                         **{k: p[k] for k in ("view", "room", "reference_asset_id", "again_of") if p.get(k)},
+                         **{k: p[k] for k in ("view", "room", "reference_asset_id", "again_of", "orientation", "style", "standing") if p.get(k)},
                          "room_index": int(p.get("room_index") or 0)}
     save(db, recs)
     ctx.log(f"set candidate {p['set_id']}: {w}x{h}, awaiting owner approval")

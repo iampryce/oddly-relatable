@@ -16,6 +16,8 @@ import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -93,6 +95,36 @@ def reference_of(ep: Episode) -> dict | None:
     return (ep.set_proposal or {}).get("reference") or None
 
 
+def cast_staging(ep: Episode) -> dict:
+    """Who the set must hold (owner rule 2026-11-25: a set is drawn for EVERYONE in it): the whole cast (everyone who
+    speaks plus the silent characters), split into the people who sit and the people who stand. The video notes'
+    poses give the most people seen seated at once; everyone else stands. Without notes, everyone sits.
+    {"total", "seated", "standing"}; total 0 when the episode has no cast yet."""
+    tr = ep.audio_transcript or {}
+    cast = {ln.get("speaker") for ln in tr.get("lines", []) if ln.get("speaker")}
+    cast |= {m.get("character_key") for m in tr.get("silent_cast", []) if m.get("character_key")}
+    total = len(cast)
+    ranges = ((tr.get("video_notes") or {}).get("ranges")) or []
+    if ranges:
+        from .reference_plan import effective
+        ranges = effective(tr)
+    seated_seen = max((sum(1 for ro in r.get("roles", []) if any(w in str(ro.get("pose", "")).lower() for w in ("sit", "seat")))
+                       for r in ranges), default=0)
+    total = max(total, cast_size_notes(ep) or 0)
+    seated = min(total, seated_seen) if seated_seen else total
+    return {"total": total, "seated": seated, "standing": total - seated}
+
+
+def cast_size_notes(ep: Episode) -> int | None:
+    tr = ep.audio_transcript or {}
+    ranges = ((tr.get("video_notes") or {}).get("ranges")) or []
+    if not ranges:
+        return None
+    from .reference_plan import effective
+    rs = effective(tr)
+    return max((len(r.get("roles", [])) for r in rs), default=0) or None
+
+
 def cast_size(ep: Episode) -> int | None:
     """How many people the set must seat at least: the most people the video notes show at once, else the number of
     speakers in the recording or the script."""
@@ -109,7 +141,20 @@ def cast_size(ep: Episode) -> int | None:
     n = max((len(on_screen(r)) for r in ranges), default=0)
     if not n:
         n = len({ln.get("speaker") for ln in tr.get("lines", []) if ln.get("speaker")})
+    # the whole cast counts too (speakers and silent characters), not only who the notes saw at once
+    n = max(n, cast_staging_total(tr))
     return n or None
+
+
+def cast_staging_total(tr: dict) -> int:
+    cast = {ln.get("speaker") for ln in tr.get("lines", []) if ln.get("speaker")}
+    cast |= {m.get("character_key") for m in tr.get("silent_cast", []) if m.get("character_key")}
+    return len(cast)
+
+
+def set_shape(ep: Episode) -> str:
+    """A landscape episode (16:9, YouTube long) gets landscape sets; otherwise portrait, as before."""
+    return "landscape" if (getattr(ep, "layout", None) or "full") == "landscape" else "portrait"
 
 
 def rooms_of(ep: Episode) -> list[dict]:
@@ -129,17 +174,29 @@ def variety_of(db: Session, ep: Episode, description: str) -> tuple[str, str]:
     return sets.variety_text(db, ep.id, description), "recent sets"
 
 
+def staging_for(ep: Episode, r: dict) -> tuple[int | None, int]:
+    """(seats, standing) a room is drawn for: the room's own seat count when the set notes gave one, else the cast."""
+    st = cast_staging(ep)
+    if r.get("seats"):
+        return r["seats"], max(0, st["total"] - r["seats"])
+    if st["total"]:
+        return st["seated"], st["standing"]
+    return cast_size(ep), 0
+
+
 def room_view(db: Session, ep: Episode, r: dict, two: bool) -> dict:
     from . import sets
-    seats = r.get("seats") or cast_size(ep)
+    seats, standing = staging_for(ep, r)
+    shape, style = set_shape(ep), (ep.set_proposal or {}).get("style") or "flat"
     variety, vsrc = variety_of(db, ep, r["text"])
     ref = reference_of(ep)
-    parts = sets.prompt_parts(db, r["text"], seats, variety, reference=bool(ref))
-    prompt = sets.prompt_for(db, r["text"], seats, variety, reference=bool(ref))
+    kw = {"standing": standing, "orientation": shape, "style": style}
+    parts = sets.prompt_parts(db, r["text"], seats, variety, reference=bool(ref), **kw)
+    prompt = sets.prompt_for(db, r["text"], seats, variety, reference=bool(ref), **kw)
     req = sets.request_view(db, prompt, ref["label"] if ref else None)
-    return {**r, "seats": seats, "variety_source": vsrc, "parts": parts, "prompt": prompt, "request": req,
-            "request_text": sets.request_text(req),
-            "view_prompts": {v: sets.prompt_for(db, r["text"], seats, variety, line, bool(ref)) for v, line in VIEW_LINES.items()} if two else {}}
+    return {**r, "seats": seats, "standing": standing, "orientation": shape, "style": style, "variety_source": vsrc,
+            "parts": parts, "prompt": prompt, "request": req, "request_text": sets.request_text(req),
+            "view_prompts": {v: sets.prompt_for(db, r["text"], seats, variety, line, bool(ref), **kw) for v, line in VIEW_LINES.items()} if two else {}}
 
 
 def view(db: Session, ep: Episode) -> dict:
@@ -310,6 +367,7 @@ class GenerateIn(BaseModel):
     views: bool = False      # both sides of the room (only when the notes show two views of one room)
     room: int = Field(default=0, ge=0, le=7)
     again_of: str | None = Field(default=None, max_length=80)   # "Generate another": the same request as this candidate
+    style: Literal["flat", "painted"] | None = None   # painted: a hand-painted animation background (else the proposal's, else flat)
 
 
 @router.post("/episodes/{eid}/set-proposal/generate")
@@ -330,7 +388,9 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
         _save(db, ep, text, "edited", body.room)
         rooms = rooms_of(ep)
     r = rooms[body.room]
-    seats = r.get("seats") or cast_size(ep)
+    seats, standing = staging_for(ep, r)
+    shape = set_shape(ep)
+    style = body.style or (ep.set_proposal or {}).get("style") or "flat"
     variety, _ = variety_of(db, ep, text)
     # the job's own id makes the set id unique, even for two requests at the same moment
     # (the job is created, given its set id and committed in one transaction, so a worker never sees it without one)
@@ -344,10 +404,11 @@ def generate(eid: int, body: GenerateIn, db: Session = Depends(get_db)):
     sig = r.get("signature") if r.get("source") == "set notes" else ""
     ref = reference_of(ep)
     for view_name, line in want:
-        prompt = sets.prompt_for(db, text, seats, variety, line or "", bool(ref))
+        prompt = sets.prompt_for(db, text, seats, variety, line or "", bool(ref), standing=standing, orientation=shape, style=style)
         job = Job(kind="set_candidate", episode_id=None, revision=1, status="queued",
                   payload={"label": label + (f", {view_name}" if view_name else ""), "description": text, "episode_id": ep.id,
-                           "prompt": prompt, "seats": seats, "room_index": body.room, **({"signature": sig} if sig else {}),
+                           "prompt": prompt, "seats": seats, "standing": standing, "orientation": shape, "style": style,
+                           "room_index": body.room, **({"signature": sig} if sig else {}),
                            **({"reference_asset_id": ref["asset_id"], "reference_label": ref["label"]} if ref else {})})
         db.add(job)
         db.flush()
