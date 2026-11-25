@@ -899,3 +899,5 @@ def face_expressions(ctx: Ctx) -> dict:
         event(db, c.episode_id, "character", f"{c.name}: {len(made)} face expression(s) drawn on the approved neutral, awaiting review")
         db.commit()
     return {"made": made, "neutral": neutral.id, "approved_by_setting": auto}
+
+from . import shot_frames  # noqa: E402,F401  (registers the shot_frames job)

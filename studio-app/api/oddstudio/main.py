@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from . import head_angles
 from . import set_views
-from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, room_read, scene_sets, storyboard_frames, workspace, set_proposals, engine, routes_characters, routes_episodes, serialize as S
+from . import audio_first, audio_scenes, beats, bin as studio_bin, gpu, shot_compare, character_admin, character_looks, reference_plan, room_read, scene_sets, shot_frames, storyboard_frames, workspace, set_proposals, engine, routes_characters, routes_episodes, serialize as S
 from .auth import COOKIE, check_rate, current_user, make_token, record_failure, verify_password
 from .config import REPO_ROOT, get_settings
 from .db import get_db, new_session
@@ -85,6 +85,7 @@ app.include_router(set_views.router)
 app.include_router(head_angles.router)
 app.include_router(room_read.router)
 app.include_router(storyboard_frames.router)
+app.include_router(shot_frames.router)
 app.include_router(workspace.router)
 app.include_router(reference_plan.router)
 app.include_router(scene_sets.router)
