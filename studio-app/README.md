@@ -25,6 +25,14 @@ The engine (`production/`) and the renderer (`skills/directing-stickman-videos/`
 
 **No fixed cast.** Each script may introduce the characters its story needs. Their pose and expression sheets are generated on the owner's request and shown for approval. Approved characters can join the recurring cast for later stories.
 
+## The dashboard
+
+The menu has four places: **Episodes**, **Characters**, **Chat** (a placeholder for now) and **Settings**. Every other page (Overview, Ideas, Scripts, Storyboards, Production, Lab, Video Library, Publishing, Bin) keeps its address and is listed under **Settings › Advanced**.
+
+- **Episodes** (`/`): a new episode from a dropped video (title, format: YouTube long 16:9 or Short 9:16, the recording's rights), then one line per episode with what it waits for.
+- **An episode** (`/episodes/{id}`): six one-line steps (Video, Characters, Sets, Storyboard, Video, Final). Finished steps stay folded; a step that needs the owner opens. Notes, jobs and logs sit behind a closed "details". The full workspace is the **Advanced view** (`/episodes/{id}/advanced`); `?open=<section>` opens one of its sections.
+- **Generate** (`web/lib/dashboard.ts`, `generatePlan`) runs only free steps by itself: building an audio episode's scenes when the writer's estimate (`GET /api/episodes/{id}/audio/scenes/estimate`) is exactly $0, and generating the storyboard from an approved script. It stops at every owner decision and at every paid step; paid steps show their cost and have their own button. It never approves anything.
+
 ## Workflow and approval gates
 
 ```mermaid

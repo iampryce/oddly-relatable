@@ -27,7 +27,7 @@ from .db import get_db
 from .models import Character, Episode, Event
 from .queue import enqueue
 from .script_schema import GESTURES, SHOTS, ScriptError, validate_script
-from .workflow import set_stage
+from .workflow import allowed_actions, set_stage
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
@@ -353,6 +353,21 @@ def build_scenes(eid: int, body: ScenesIn, db: Session = Depends(get_db)):
     ep.last_error = ""
     db.commit()
     return S.job(enqueue(db, "audio_scenes", episode_id=ep.id, revision=ep.revision, payload={"mode": body.mode}))
+
+
+@router.get("/episodes/{eid}/audio/scenes/estimate")
+def build_scenes_estimate(eid: int, db: Session = Depends(get_db)):
+    """Before the first scene build: what each way of building costs (the AI writer's estimate at list prices, the
+    simple split is free), so the dashboard can show the cost before the owner starts a paid build. Read-only: nothing
+    changes and nothing is sent to any provider."""
+    from .audio_first import audio_episode
+    ep = audio_episode(db, eid)
+    try:
+        writer = writer_estimate(db, ep)
+    except Exception as e:   # noqa: BLE001 (an estimate that cannot be made is reported, never guessed as free)
+        writer = {"provider": "unknown", "usd": None, "note": f"no estimate: {str(e)[:200]}"}
+    return {"stage": ep.stage, "allowed": "build_audio_scenes" in allowed_actions(ep),
+            "writer": writer, "simple": {"usd": 0.0, "note": "free"}}
 
 
 def check_buildable(db: Session, ep: Episode, mode: str) -> None:

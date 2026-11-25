@@ -1,5 +1,7 @@
 'use client';
 import {useEffect, useState} from 'react';
+import Link from 'next/link';
+import {ADVANCED} from '@/components/Shell';
 import SetStaging from '@/components/SetStaging';
 import {SpacingWarning} from '@/components/SetPanel';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
@@ -325,6 +327,17 @@ function CodexCard({reload}: {reload: () => unknown}) {
     </div>);
 }
 
+// Settings › Advanced: every page that left the main menu, still at its own address (nothing was removed).
+function AdvancedCard() {
+  return (
+    <details className="card advanced" id="advanced">
+      <summary><strong>Advanced</strong> <span className="muted small">Overview, Ideas, Scripts, Storyboards, Production, Lab, Video Library, Publishing, Bin</span></summary>
+      <div className="advanced-links">
+        {ADVANCED.map(([href, label, note]) => <Link key={href} href={href} className="advanced-link"><strong>{label}</strong><span className="muted small">{note}</span></Link>)}
+      </div>
+    </details>);
+}
+
 export default function Settings() {
   const {data, error, reload} = useApi<any>('/settings', 4000);
   const [notice, setNotice] = useState('');
@@ -340,6 +353,7 @@ export default function Settings() {
       <h1>Settings</h1>
       <p className="sub">Providers by production capability. A provider counts as verified only after a real job on the worker succeeds ({verified} verified).</p>
       {notice && <div className="card"><span className="badge">{notice}</span></div>}
+      <AdvancedCard />
       <div className="grid cols-2">
         <Credentials creds={data.credentials || {}} reload={reload} />
         <CodexCard reload={reload} />

@@ -1,23 +1,31 @@
 'use client';
+// The studio frame (clean dashboard, 2026-11-25): one top bar with four places only: Episodes, Characters, Chat and
+// Settings. Everything else (Overview, Ideas, Scripts, Storyboards, Production, Lab, Video Library, Publishing, Bin) is
+// still at its own address and listed under Settings › Advanced; nothing was removed.
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
 import {api} from '@/lib/api';
-import {useApi} from '@/lib/hooks';
 
-const NAV = [
-  ['/', 'Overview'], ['/ideas', 'Ideas'], ['/scripts', 'Scripts'], ['/characters', 'Characters'],
-  ['/storyboards', 'Storyboards'], ['/production', 'Production'], ['/lab', 'Lab'], ['/library', 'Video Library'],
-  ['/publishing', 'Publishing'], ['/settings', 'Settings'], ['/bin', 'Bin'],
+const NAV = [['/', 'Episodes'], ['/characters', 'Characters'], ['/chat', 'Chat'], ['/settings', 'Settings']] as const;
+
+// the pages reached from Settings › Advanced keep Settings highlighted
+export const ADVANCED = [
+  ['/overview', 'Overview', 'Studio totals, disk use and recent activity'], ['/ideas', 'Ideas', 'Script-first ideas and audio uploads'],
+  ['/scripts', 'Scripts', 'Scripts waiting for approval'], ['/storyboards', 'Storyboards', 'Storyboards waiting for approval'],
+  ['/production', 'Production', 'Every job: running, failed, retry'], ['/lab', 'Lab', 'Shot and model comparisons'],
+  ['/library', 'Video Library', 'Finished videos'], ['/publishing', 'Publishing', 'YouTube uploads'],
+  ['/bin', 'Bin', 'Deleted episodes, characters and sets'],
 ] as const;
+
+function active(path: string, href: string): boolean {
+  if (href === '/') return path === '/' || path.startsWith('/episodes');
+  if (href === '/settings') return path.startsWith('/settings') || ADVANCED.some(([h]) => path.startsWith(h));
+  return path.startsWith(href);
+}
 
 export default function Shell({children}: {children: React.ReactNode}) {
   const path = usePathname();
   const router = useRouter();
-  const {data: o} = useApi<any>('/overview', 15000);
-  const count: Record<string, number | undefined> = o ? {
-    '/ideas': o.ideas_awaiting, '/scripts': o.scripts_awaiting_approval, '/storyboards': o.storyboards_awaiting_approval,
-    '/production': o.failed_jobs || o.active_jobs, '/library': o.videos_awaiting_review,
-  } : {};
   const toggle = () => {
     const el = document.documentElement;
     const dark = el.dataset.theme ? el.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
@@ -26,21 +34,18 @@ export default function Shell({children}: {children: React.ReactNode}) {
   };
   const logout = async () => { await api('/auth/logout', {method: 'POST'}).catch(() => {}); router.push('/login'); };
   return (
-    <div className="shell">
-      <aside className="side">
-        <div className="brand"><div className="brand-mark">OR</div><div>Oddly Relatable<small>Studio</small></div></div>
-        <nav className="nav">
-          {NAV.map(([href, label]) => {
-            const on = href === '/' ? path === '/' : path.startsWith(href) || (href === '/production' && path.startsWith('/episodes'));
-            const n = count[href];
-            return <Link key={href} href={href} className={on ? 'on' : ''}>{label}{n ? <span className="badge">{n}</span> : null}</Link>;
-          })}
+    <div className="app">
+      <header className="appbar">
+        <Link href="/" className="brand"><span className="brand-mark" aria-hidden>OR</span><span>Oddly Relatable</span></Link>
+        <nav className="topnav" aria-label="Main">
+          {NAV.map(([href, label]) => <Link key={href} href={href} className={active(path, href) ? 'on' : ''}
+            aria-current={active(path, href) ? 'page' : undefined}>{label}</Link>)}
         </nav>
-        <div className="side-foot">
+        <div className="appbar-tools">
           <button className="btn sm" onClick={toggle} aria-label="Switch light or dark theme">Theme</button>
           <button className="btn sm" onClick={logout}>Sign out</button>
         </div>
-      </aside>
+      </header>
       <main className="main">{children}</main>
     </div>
   );
