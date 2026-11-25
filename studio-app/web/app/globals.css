@@ -213,6 +213,33 @@ p.bad, .small.bad { color: var(--bad); }
 .frames figure { margin: 0; }
 .frame-ph { aspect-ratio: 9 / 16; border: 1px dashed var(--line); border-radius: 8px; display: grid; place-items: center; }
 video.wide { aspect-ratio: 16 / 9; } video.tall { max-height: 60vh; }
+/* the storyboard step: one frame per shot, its takes and the animatic */
+.sf-toolbar { padding: 8px 0; border-top: 1px dashed var(--line); }
+.sf-animatic { margin: 0; }
+.sf-animatic figcaption { margin-top: 4px; }
+.sf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.sf-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); min-width: 0; }
+.sf-card.ok { border-color: var(--good); }
+.sf-thumb { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--line); }
+.sf-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sf-drawing { position: absolute; inset: auto 0 0 0; padding: 4px 8px; background: var(--busy-soft); color: var(--busy); text-align: center; }
+.sf-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sf-people { overflow-wrap: anywhere; }
+.sf-retake { border-top: 1px dashed var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.sf-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.sf-people-list { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.sf-person { display: flex; flex-direction: column; gap: 4px; }
+.sf-person select { padding: 4px 8px; font-size: 12px; }
+.sf-versions { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.sf-take { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
+  color: var(--text); font: inherit; text-align: left; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.sf-take img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 6px; background: var(--panel); }
+.sf-take.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); cursor: default; }
+.sf-take:hover:not(:disabled) { border-color: var(--accent); }
+.sf-take:disabled { opacity: 1; }
+@media (max-width: 760px) { .sf-grid { grid-template-columns: 1fr; } }
 
 /* Settings › Advanced */
 .advanced { margin-bottom: 16px; }

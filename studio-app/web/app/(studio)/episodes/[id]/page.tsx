@@ -11,6 +11,8 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {jobLine, showLastError, type Section} from '@/lib/workspace';
 import {episodeCharacters, generatePlan, ICON, money, STEP_TONE, steps, type Step} from '@/lib/dashboard';
+import {activeJobs, EXPRESSIONS, lastFailure, makingText, peopleText, retakeBody, retakeForm, retakeRunning, SHOT_SIZES,
+  shotStatus, sideMembers, summary, timeRange, type RetakeForm, type ShotSize} from '@/lib/shotFrames';
 
 const BUSY = ['audio_preparing', 'audio_transcribing', 'outline_generating', 'script_generating', 'storyboard_generating', 'producing', 'publishing'];
 
@@ -205,8 +207,133 @@ function Storyboard({c, s}: {c: Ctx; s: Step}) {
         <span className="small">One frame per shot. Approve them all, or send scenes back in the Advanced view.</span>
         <div className="row"><Link className="btn sm" href={c.adv('storyboard')}>Send some back</Link>
           <button className="btn sm good" disabled={!!act.busy} onClick={() => act.run('sb-ok', () => api(`/episodes/${ep.id}/storyboard/approve`, {body: {comment: ''}}))}>Approve all</button></div></div>}
+      {ep.source === 'audio' && (ep.scenes || []).length > 0 && <ShotFrames c={c} />}
       <Pending s={s} c={c} skip={[...(build || can('approve_script') ? ['script'] : []), ...(can('approve_storyboard') ? ['storyboard'] : [])]} />
     </div>);
+}
+
+// One frame per shot of the reference video, for the video generator (shot_frames.py). Every action here is free (CPU
+// on the server) and every approval is the owner's click: nothing approves by itself.
+function ShotFrames({c}: {c: Ctx}) {
+  const {ep} = c;
+  const base = `/episodes/${ep.id}/shot-frames`;
+  const [poll, setPoll] = useState(15000);
+  const {data: v, reload} = useApi<any>(base, poll);
+  const act = useAction(reload);
+  const busy = activeJobs(v).length > 0;
+  useEffect(() => { setPoll(busy ? 3000 : 15000); }, [busy]);
+  const names = Object.fromEntries(c.chars.map(x => [x.key, x.name]));
+  const making = makingText(v);
+  const animating = activeJobs(v, 'shot_animatic').length > 0;
+  const shots: any[] = v?.shots || [];
+  const failure = lastFailure(v);
+  if (!v) return <p className="small muted">Loading the shot frames…</p>;
+  return (
+    <div className="stack sf">
+      <ErrorBox error={act.error} />
+      {failure && <div className="alert bad small">{failure}</div>}
+      {!shots.length ? <div className="spread pending">
+        <span className="small">{making || 'One frame per shot of the video, drawn from the approved characters and sets.'}</span>
+        <button className="btn sm primary" disabled={!!act.busy || !!making} onClick={() => act.run('sf-make', () => api(base, {method: 'POST'}))}>
+          {making ? 'Making…' : 'Make storyboard (free)'}</button></div>
+        : <>
+          <div className="spread sf-toolbar">
+            <span className="small">{summary(v)}{making ? ` · ${making}` : ''}</span>
+            <div className="row">
+              <button className="btn sm good" disabled={!!act.busy || busy || shots.every(s => s.approved)}
+                onClick={() => act.run('sf-all', () => api(`${base}/approve-all`, {method: 'POST'}))}>Approve all</button>
+              <button className="btn sm" disabled={!!act.busy || animating || !!making}
+                onClick={() => act.run('sf-anim', () => api(`${base}/animatic`, {method: 'POST'}))}>{animating ? 'Making the animatic…' : 'Make animatic (free)'}</button>
+              <button className="btn sm" disabled={!!act.busy || busy}
+                onClick={() => { if (window.confirm('Draw every frame again? The current frames and their takes are replaced by a new storyboard.')) act.run('sf-make', () => api(base, {method: 'POST'})); }}>Make again</button>
+            </div>
+          </div>
+          {v.animatic_url && <figure className="sf-animatic">
+            <video src={v.animatic_url} controls preload="metadata" className={ep.layout === 'landscape' ? 'wide' : 'tall'} />
+            <figcaption className="small muted">Animatic: the storyboard on the recording · a draft, not for publishing</figcaption></figure>}
+          <div className="sf-grid">{shots.map(s => <ShotCard key={s.index} s={s} v={v} base={base} act={act} names={names} />)}</div>
+        </>}
+    </div>);
+}
+
+function ShotCard({s, v, base, act, names}: {s: any; v: any; base: string; act: ReturnType<typeof useAction>; names: Record<string, string>}) {
+  const [panel, setPanel] = useState<'' | 'retake' | 'versions'>('');
+  const st = shotStatus(s);
+  const drawing = retakeRunning(v, s.index);
+  const locked = !!act.busy || activeJobs(v, 'shot_frames').length > 0;
+  const toggle = (p: 'retake' | 'versions') => setPanel(x => (x === p ? '' : p));
+  return (
+    <article className={`sf-card ${s.approved ? 'ok' : ''}`}>
+      <a className="sf-thumb" href={s.url || undefined} target="_blank" rel="noreferrer">
+        {s.url ? <img src={s.url} alt={`Shot ${s.index}`} loading="lazy" /> : <span className="small muted">no frame</span>}
+        {drawing && <span className="sf-drawing small">Drawing a new take…</span>}
+      </a>
+      <div className="sf-meta">
+        <div className="spread"><strong>Shot {s.index}</strong><span className={`badge ${st.tone}`}>{st.text}</span></div>
+        <span className="small muted">{timeRange(s)} · {s.shot} · {s.versions.length} {s.versions.length === 1 ? 'take' : 'takes'}</span>
+        <span className="small sf-people">{peopleText(s.people, names)}</span>
+      </div>
+      <div className="row">
+        <button className="btn sm" aria-expanded={panel === 'retake'} disabled={locked || drawing} onClick={() => toggle('retake')}>Retake</button>
+        <button className="btn sm" aria-expanded={panel === 'versions'} disabled={s.versions.length < 2} onClick={() => toggle('versions')}>Versions</button>
+        {s.approved
+          ? <button className="btn sm" disabled={locked} onClick={() => act.run('sf-un', () => api(`${base}/${s.index}/unapprove`, {method: 'POST'}))}>Unapprove</button>
+          : <button className="btn sm good" disabled={locked || drawing || !s.chosen} onClick={() => act.run('sf-ok', () => api(`${base}/${s.index}/approve`, {method: 'POST'}))}>Approve</button>}
+      </div>
+      {panel === 'retake' && <Retake s={s} v={v} base={base} act={act} names={names} done={() => setPanel('')} />}
+      {panel === 'versions' && <div className="sf-versions">{s.versions.map((x: any, i: number) => (
+        <button key={x.asset_id} type="button" className={`sf-take ${x.asset_id === s.chosen ? 'on' : ''}`} disabled={locked || x.asset_id === s.chosen}
+          title={x.note || (x.source === 'first' ? 'first take' : 'retake')}
+          onClick={() => act.run('sf-choose', () => api(`${base}/${s.index}/choose`, {body: {asset_id: x.asset_id}}))}>
+          {x.url ? <img src={x.url} alt={`Take ${i + 1}`} loading="lazy" /> : <span className="small muted">no frame</span>}
+          <span className="small">Take {i + 1}{x.asset_id === s.chosen ? ' · chosen' : ''}</span>
+          {x.note && <span className="small muted">{x.note}</span>}
+        </button>))}</div>}
+    </article>);
+}
+
+function Retake({s, v, base, act, names, done}: {s: any; v: any; base: string; act: ReturnType<typeof useAction>;
+  names: Record<string, string>; done: () => void}) {
+  const [f, setF] = useState<RetakeForm>(() => retakeForm(s));
+  const sides = Object.keys(v.sides || {});
+  const members = sideMembers(v, f.side);
+  const {body, error} = retakeBody(s, f);
+  const togglePerson = (k: string) => setF(x => ({...x, people: x.people.includes(k) ? x.people.filter(p => p !== k)
+    : members.filter(m => m === k || x.people.includes(m))}));
+  const submit = async (e: {preventDefault: () => void}) => {
+    e.preventDefault();
+    if (error) return;
+    if (await act.run('sf-retake', () => api(`${base}/${s.index}/retake`, {body}))) done();
+  };
+  return (
+    <form className="sf-retake" onSubmit={submit}>
+      <div className="sf-fields">
+        <div><label htmlFor={`sz-${s.index}`}>Shot size</label>
+          <select id={`sz-${s.index}`} value={f.shot} onChange={e => setF({...f, shot: e.target.value as ShotSize})}>
+            {SHOT_SIZES.map(z => <option key={z} value={z}>{z}</option>)}</select></div>
+        {sides.length > 1 && <div><label htmlFor={`sd-${s.index}`}>Side of the room</label>
+          <select id={`sd-${s.index}`} value={f.side} onChange={e => setF({...f, side: e.target.value, people: [...sideMembers(v, e.target.value)], emotions: {}})}>
+            {sides.map(x => <option key={x} value={x}>{x}</option>)}</select></div>}
+      </div>
+      <fieldset className="sf-people-list">
+        <legend className="small muted">People in the shot</legend>
+        {members.map(k => (
+          <div key={k} className="sf-person">
+            <label className="check"><input type="checkbox" checked={f.people.includes(k)} onChange={() => togglePerson(k)} /> {names[k] || k}</label>
+            {f.people.includes(k) && <select aria-label={`Expression for ${names[k] || k}`} value={f.emotions[k] || ''}
+              onChange={e => setF({...f, emotions: {...f.emotions, [k]: e.target.value}})}>
+              <option value="">expression: as before</option>
+              {EXPRESSIONS.map(x => <option key={x} value={x}>{x}</option>)}</select>}
+          </div>))}
+        {!f.people.length && <p className="small muted">Nobody: the frame shows the room only.</p>}
+      </fieldset>
+      {error && <p className="small bad">{error}</p>}
+      <div className="row">
+        <button className="btn sm primary" type="submit" disabled={!!act.busy || !!error}>Draw a new take (free)</button>
+        <button className="btn sm" type="button" onClick={done}>Cancel</button>
+        <span className="small muted">The older takes are kept; the new one needs your approval.</span>
+      </div>
+    </form>);
 }
 
 function VideoStep({c, s}: {c: Ctx; s: Step}) {
