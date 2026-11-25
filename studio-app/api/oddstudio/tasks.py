@@ -243,7 +243,10 @@ def _acting_stills(ctx: Ctx, ep: Episode, sc: StoryboardScene, kind: str) -> Ass
     shots = [s for s in rep.get("stills") or [] if s]
     if not shots:
         raise engine.EngineRunError("the acting renderer made no stills")
-    tw, th = 360, 640
+    with Image.open(shots[0]["file"]) as first:
+        fw, fh = first.size
+    # each frame keeps its own shape on the sheet (a landscape frame is not squeezed into a 9:16 box)
+    tw, th = (480, round(480 * fh / fw)) if fw > fh else (360, 640)
     cols = min(3, len(shots))
     rows = (len(shots) + cols - 1) // cols
     sheet = Image.new("RGB", (cols * tw + (cols + 1) * 12, rows * (th + 36) + 12), (24, 24, 24))
