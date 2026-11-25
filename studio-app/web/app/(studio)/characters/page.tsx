@@ -4,6 +4,7 @@ import {api} from '@/lib/api';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
 import HeadAngles from '@/components/HeadAngles';
+import StickMaster from '@/components/StickMaster';
 import {Empty, ErrorBox} from '@/components/ui';
 import {groupCharacters, imageCost, isCandidate, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
@@ -67,6 +68,9 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
 }
 
 function thumbOf(c: any): string | null {
+  // the stick pipeline's approved master is the character's look when there is one
+  const master = c.assets.find((a: any) => a.kind === 'master' && a.status === 'approved');
+  if (master) return master.url;
   const poses = c.assets.filter((a: any) => a.kind === 'pose');
   const p = poses.find((a: any) => a.status === 'approved' && a.expression === 'neutral') || poses.find((a: any) => a.status === 'approved')
     || poses.find((a: any) => a.status === 'review');
@@ -198,6 +202,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
             Reject other poses in review ({others.length})</button>}
         </div>);
       })()}
+      <StickMaster characterId={c.id} name={c.name} locked={c.locked} />
       {c.art_status === 'approved' && <HeadAngles characterId={c.id} locked={c.locked} />}
       {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
         <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}

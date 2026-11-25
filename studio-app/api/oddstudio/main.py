@@ -97,6 +97,10 @@ app.include_router(studio_bin.router)
 app.include_router(gpu.router)
 from . import system_disk  # noqa: E402
 app.include_router(system_disk.router)
+from . import chat, stick_pipeline, stick_shots  # noqa: E402
+app.include_router(stick_pipeline.router)
+app.include_router(stick_shots.router)
+app.include_router(chat.router)
 
 
 @app.middleware("http")

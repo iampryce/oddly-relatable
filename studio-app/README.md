@@ -81,6 +81,33 @@ flowchart LR
 - **Failures:** a failed job keeps its error and log. **Retry** re-runs only that job. When the last scene job succeeds, the render is queued.
 - **Restarts:** a worker restart marks interrupted jobs as failed (retryable) and re-announces queued jobs, so nothing is lost.
 
+## Stick pipeline (hosted images and video) and the chat
+
+Owner decision 2026-11-25. Code: `api/oddstudio/stick_pipeline.py`, `stick_shots.py`, `chat.py`; settings under
+Settings > Studio style and Settings > Chat.
+
+| Step | Job | Provider and price | References |
+|---|---|---|---|
+| Character master | `stick_master` | WaveSpeed `google/nano-banana-2.1/edit`, $0.04 per image x candidates (default 2) | the studio style prompt + the character's look; the owner's style reference image |
+| Expressions / turnaround sheet | `stick_sheet` | same, one image ($0.04) | the approved master ONLY |
+| Shot still | `stick_shot_still` | same, one image ($0.04) | the shot's set, then the approved master of each character in the shot |
+| Animate an approved shot | `stick_shot_animate` | WaveSpeed `wavespeed-ai/wan-2.2/i2v-720p`, **$0.06 per second of video** (5 s = $0.30, 8 s = $0.48) | the approved still |
+
+- **Cost first:** every paid button shows its price (`count x price per image`, or `seconds x price per second`) and asks
+  before it starts; the request carries that price (`confirm_usd`) and the API refuses any other amount. Animate all
+  approved shows the total (clips x seconds x price per second). WaveSpeed's model list gives a video model's
+  `base_price` per second, an image model's per image.
+- **Never retried:** a submit is one paid call; failures are not retried by the worker. Spend counts against the
+  experimental budget (Settings > Motion).
+- **No approvals by code:** candidates, sheets, stills and clips go to review; only the owner's clicks approve them.
+  A still is a new take of the storyboard shot (older takes kept); clips are kept per shot as versions.
+- **Seams:** a self-hosted GPU video provider (`gpu-self-hosted`, not connected yet) and talking shots
+  (`wavespeed-ai/infinitetalk-fast`, see `shot_compare.py`) are TODOs.
+- **Chat:** Anthropic (`claude-opus-5-5`, $4 / $20 per million input / output tokens) when `anthropic_api_key` is saved,
+  else OpenAI (`gpt-4.1-mini`). Read-only context: episodes, characters, recent jobs, non-secret settings. Each message
+  shows its estimate before sending and its real usage after; conversations are stored as `_chat:<id>` settings rows.
+  Keys only come from the credential store and are never logged or returned.
+
 ## What needs credentials or other infrastructure
 
 Nothing below is faked. Without the dependency, the step fails with a clear "Not configured" message.
