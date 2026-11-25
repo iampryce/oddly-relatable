@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 
 SHOTS = ("wide", "medium", "close")
+STAGING_POSITIONS = ("seated", "standing", "off")
 INTERACTIVE = ("none", "viewer-choice", "poll")
 MAX_LINE_CHARS = 140
 MAX_RECORDED_CHARS = 400      # an audio-first line is what was recorded (the transcript), not written to fit
@@ -200,8 +201,9 @@ def validate_script(doc: dict, known_characters: set[str] | None = None, fmt: st
             scene["set"] = s["set"].strip()[:80]     # checked against the episode's sets by scene_sets.continuity
         st = s.get("staging")
         if isinstance(st, dict) and st:
-            # how the scene starts (feat/seating): {character: seated | standing}, in seat order
-            bad = [k for k, v in st.items() if k not in keys or v not in ("seated", "standing")]
+            # how the scene starts (feat/seating): {character: seated | standing | off}, in seat order; off = not in
+            # this picture (a speaker who is off is heard, not seen: shot / reverse shot with one narrator)
+            bad = [k for k, v in st.items() if k not in keys or v not in STAGING_POSITIONS]
             if bad:
                 raise ScriptError(f"{where}.staging: unknown character or position for {', '.join(map(str, bad[:3]))}")
             scene["staging"] = {k: st[k] for k in list(st)[:12]}

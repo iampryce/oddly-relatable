@@ -233,10 +233,14 @@ def rig_for(ctx, c) -> Path:
 
 def seat_starts(staging: dict, cast: list[str], seats: int) -> tuple[dict[str, str], list[str]]:
     """How the first scene starts: seated characters take seats 0, 1, ... in staging order (speaker first); standing
-    ones start on stage. Returns ({key: "seat:N" | "on"}, [seated characters left standing for want of a seat])."""
+    ones start on stage; "off" ones are not in this picture (a speaker who is off is heard, not seen). Returns
+    ({key: "seat:N" | "on" | "off"}, [seated characters left standing for want of a seat])."""
     out, left, n = {}, [], 0
     for k, pos in staging.items():
         if k not in cast:
+            continue
+        if pos == "off":
+            out[k] = "off"
             continue
         if pos == "seated" and n < seats:
             out[k], n = f"seat:{n}", n + 1
@@ -418,7 +422,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
             for r in entry.get("reactions", []):
                 if r.get("expression") and r["character"] in faces:
                     r["expression"] = face_for(faces[r["character"]], chars_by_key[r["character"]], r["expression"])
-            if k not in entered and "move" not in entry:
+            off_here = ((getattr(scenes[sid], "staging", None) or {}).get(k) == "off")
+            if k not in entered and "move" not in entry and not off_here:
                 entry["move"] = {"type": "enter", "auto": True}   # a character not on stage walks in for their first line
             entered.add(k)
             lines.append(entry)

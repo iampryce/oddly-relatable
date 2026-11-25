@@ -171,7 +171,7 @@ def build_script(title: str, lines: list[dict], cast: list[str], silent: list[st
                        "action": str(s.get("action") or ""), "camera": str(s.get("camera") or "")[:400], "lines": sl})
         # how the scene starts: the writer's staging when valid, else the note covering its first line (speaker first)
         st = s.get("staging") if isinstance(s.get("staging"), dict) else None
-        st = {k: v for k, v in (st or {}).items() if k in keys and v in ("seated", "standing")} or None
+        st = {k: v for k, v in (st or {}).items() if k in keys and v in ("seated", "standing", "off")} or None
         if st is None and notes:
             from . import video_notes as VN
             from .reference_plan import staging_for

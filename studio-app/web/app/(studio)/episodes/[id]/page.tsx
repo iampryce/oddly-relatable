@@ -158,7 +158,7 @@ function FrameLayout({ep, act}: {ep: any; act: ReturnType<typeof useAction>}) {
       <label htmlFor="frame-layout">Frame layout</label>
       <select id="frame-layout" value={ep.layout || 'full'} disabled={locked || !!act.busy}
               onChange={e => act.run('layout', () => api(`/episodes/${ep.id}/layout`, {method: 'PUT', body: {value: e.target.value}}))}>
-        <option value="full">Full frame (9:16)</option><option value="band">16:9 band, captions below</option>
+        <option value="full">Full frame (9:16)</option><option value="band">16:9 band, captions below</option><option value="landscape">Landscape 16:9 (1920x1080, YouTube long)</option>
       </select>
       <div className="muted small">{locked ? 'Locked while rendering' : ep.layout === 'band' && ep.dialogue_display !== 'captions'
         ? 'Tip: choose Captions above; they sit under the band' : 'Applies to the stills and the next render'}</div>
