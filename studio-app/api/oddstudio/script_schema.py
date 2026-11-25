@@ -51,7 +51,7 @@ def _str(obj: dict, key: str, where: str, required: bool = True, max_len: int = 
 
 # Limits per format. Shorts keep their original limits; long episodes (D-L3: 3 acts, 5–7 minutes) allow more scenes and a
 # larger cast (still at most 4 on screen per scene, checked when the scene is built).
-LIMITS = {"short": {"scenes": 12, "characters": 4}, "long": {"scenes": 60, "characters": 8}}
+LIMITS = {"short": {"scenes": 12, "characters": 4}, "long": {"scenes": 60, "characters": 10}}
 
 
 # Acting instructions (optional per line; the studio rig animator performs them). Unknown values are dropped, not

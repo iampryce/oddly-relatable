@@ -157,10 +157,12 @@ def seats_needed(view: str, people: int) -> int:
 
 
 def prompt_for(db, rec: dict, view: str, words: str, people: int) -> str:
-    from .sets import LAYOUT_LEAD, SET_STYLE_SHORT, rules_text
+    from .sets import LAYOUT_LEAD, rules_text, set_style
+    # the view keeps the set's shape and drawing style
     return "\n".join([LAYOUT_LEAD + (rec.get("description") or ""),
                       f"This picture is another camera angle of the same room: the {VIEW_LABEL[view]} view. Camera: {words}",
-                      SET_STYLE_SHORT, rules_text(seats_needed(view, people)), VIEW_REFERENCE])
+                      set_style(rec.get("orientation") or "portrait", rec.get("style") or "flat"),
+                      rules_text(seats_needed(view, people)), VIEW_REFERENCE])
 
 
 def _set(db, sid: str) -> dict:
@@ -362,7 +364,9 @@ def set_view_candidate(ctx: Ctx) -> dict:
         raise ValueError(f"the set {sid}'s wide picture is missing: regenerate or re-approve the set before drawing its views")
     folder = ctx.folder("sets", sid, "views")
     ref = storage().get_to_file(wide.storage_key, folder / Path(wide.storage_key).name)
-    cfg = {**get_section(db, "image"), "provider": "openai", "fallback": "none", "size": sets.SET_SIZE, "use_reference": True,
+    # the view keeps the set's shape (a landscape set's views are landscape) and its provider (Codex when Settings selects it)
+    size = sets.SET_SIZES.get(rec.get("orientation") or "portrait", sets.SET_SIZE)
+    cfg = {**get_section(db, "image"), "provider": sets.set_provider(db), "fallback": "none", "size": size, "use_reference": True,
            "background": None}
     if get_section(db, "image").get("provider") != "openai":
         cfg["model"] = ""

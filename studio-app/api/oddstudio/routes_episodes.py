@@ -268,7 +268,7 @@ def set_dialogue_display(eid: int, body: DialogueDisplayIn, db: Session = Depend
 
 
 class LayoutIn(BaseModel):
-    value: Literal["full", "band"]
+    value: Literal["full", "band", "landscape"]
 
 
 @router.put("/episodes/{eid}/layout")

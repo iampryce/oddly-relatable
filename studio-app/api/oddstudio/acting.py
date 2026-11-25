@@ -50,6 +50,11 @@ def line_texts(text: str) -> tuple[str, str]:
 FONTS = REPO_ROOT / "skills/directing-stickman-videos/assets/fonts"
 
 
+def frame_size(ep) -> tuple[int, int]:
+    """The rendered frame: 1920x1080 for a landscape episode (YouTube long), else the 9:16 Shorts frame."""
+    return (1920, 1080) if (getattr(ep, "layout", None) or "full") == "landscape" else (1080, 1920)
+
+
 def presentation(ep, hook: str) -> dict:
     """How the dialogue and the hook appear (owner decision 2026-11-20): the episode's dialogue display (bubbles | none
     | captions) and the POV banner (heavy condensed font, colour emoji kept)."""
@@ -481,7 +486,8 @@ def render(ctx, ep, refs: list[list[tuple[int, int]]], clips: dict, chars_by_key
     from .tasks import current_script
     hook = episode_hook(db, ep)
     # presentation (locked, owner 2026-11-17): comic speech bubbles by the speaker and a permanent top hook banner
-    spec = {"width": 1080, "height": 1920, "fps": int(prod.get("fps", 30)), "duration": duration,
+    fw, fh = frame_size(ep)
+    spec = {"width": fw, "height": fh, "fps": int(prod.get("fps", 30)), "duration": duration,
             **presentation(ep, hook),
             "font": str(REPO_ROOT / "skills/directing-stickman-videos/assets/fonts/NotoSans.ttf"), "set": st, "cast": cast, "lines": lines,
             **({"scenes": scene_specs} if scene_specs else {}),
