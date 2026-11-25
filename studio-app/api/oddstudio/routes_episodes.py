@@ -466,6 +466,31 @@ def edit_scene(eid: int, sid: int, body: SceneIn, db: Session = Depends(get_db))
     return S.scene(sc, None)
 
 
+class SceneStagingIn(BaseModel):
+    staging: dict[str, str]
+
+
+@router.put("/episodes/{eid}/scenes/{sid}/staging")
+def edit_scene_staging(eid: int, sid: int, body: SceneStagingIn, db: Session = Depends(get_db)):
+    """How a scene starts, edited on the storyboard: {character: seated | standing | off}, in seat order. "off" keeps a
+    character out of this scene's picture; a speaker who is off is heard, not seen (shot / reverse shot: on the
+    listeners' side the narrator is off). The dialogue, timing and the script are not changed."""
+    from .script_schema import STAGING_POSITIONS
+    ep = get_episode(db, eid)
+    if ep.stage != "storyboard_review":
+        raise HTTPException(409, "a scene's staging can be changed while the storyboard is in review (approve it again after)")
+    sc = get_scene(db, ep, sid)
+    known = set(by_key(db))
+    bad = [k for k, v in body.staging.items() if k not in known or v not in STAGING_POSITIONS]
+    if bad:
+        raise HTTPException(422, f"unknown character or position for {', '.join(bad[:3])} (seated, standing or off)")
+    sc.staging = dict(list(body.staging.items())[:12])
+    sc.status, sc.revision_note = "draft", ""
+    log_event(db, ep.id, "storyboard", f"Scene {sc.position} staging: " + ", ".join(f"{k} {v}" for k, v in sc.staging.items()))
+    db.commit()
+    return S.scene(sc, None)
+
+
 class LineExpressionIn(BaseModel):
     expression: str = Field(min_length=2, max_length=40)
     character: str | None = Field(default=None, max_length=41)   # a reacting character's expression (else the speaker's)
