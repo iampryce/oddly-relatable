@@ -34,7 +34,9 @@ LIVE = ("PROVISIONING", "STARTING", "RUNNING")
 # Fallback list prices, RunPod pricing page dated 2026-11-12 (Secure Cloud, USD per hour). The live catalog price is
 # used when it can be read; the pod's own reported `cost` replaces both once it exists.
 PRICES = {"NVIDIA GeForce RTX 4090": 0.89, "NVIDIA GeForce RTX 5090": 1.39, "NVIDIA L40S": 1.09, "NVIDIA A40": 0.59,
-          "NVIDIA A100 80GB PCIe": 2.09, "NVIDIA H100 PCIe": 2.89, "NVIDIA H100 80GB HBM3": 4.39}
+          "NVIDIA A100 80GB PCIe": 2.09, "NVIDIA H100 PCIe": 2.89, "NVIDIA H100 80GB HBM3": 4.39,
+          # the owner's figure for talking-shot sessions, 2026-11-26 (the live catalog price is used when readable)
+          "NVIDIA RTX 6000 Ada Generation": 1.09}
 
 _test_transport = None   # tests only: fn(method, path, json, params) -> (status, body)
 
@@ -70,13 +72,29 @@ def _call(method: str, path: str, json: dict | None = None, params: dict | None 
     return status, body
 
 
-def create(name: str, gpu_id: str, image: str, env: dict, disk_gb: int, cloud: str = "SECURE", port: int = 8000) -> dict:
+class GpuTypeUnavailable(ProviderError):
+    """HTTP 400 on create: no pod of this GPU type is free right now (the caller may try the next type)."""
+
+    def __init__(self, gpu_id: str, detail: str = ""):
+        super().__init__(f"RunPod: no {gpu_id} is available right now" + (f" ({detail[:120]})" if detail else ""),
+                         transient=False)
+        self.gpu_id = gpu_id
+
+
+def create(name: str, gpu_id: str, image: str, env: dict, disk_gb: int, cloud: str = "SECURE", port: int = 8000,
+           ports: list[str] | None = None) -> dict:
+    """Launch one pod. `ports` (e.g. ["8188/http", "22/tcp"]) replaces the single worker port when given. HTTP 400
+    raises GpuTypeUnavailable: RunPod answers 400 when that GPU type cannot be placed now."""
     if not name.startswith(NAME_PREFIX):
         raise ValueError("pod names start with " + NAME_PREFIX)
     if cloud != "SECURE":
         raise ValueError("Secure Cloud only")
-    _, pod = _call("POST", "/v2/pods", json={"name": name, "cloud": cloud, "gpu": {"id": gpu_id, "count": 1}, "image": image,
-                                             "disk": int(disk_gb), "env": env, "ports": [f"{port}/http"]}, ok=(200, 201))
+    status, pod = _call("POST", "/v2/pods", json={"name": name, "cloud": cloud, "gpu": {"id": gpu_id, "count": 1}, "image": image,
+                                                  "disk": int(disk_gb), "env": env, "ports": list(ports or [f"{port}/http"])},
+                        ok=(200, 201, 400))
+    if status == 400:
+        detail = (pod.get("detail") or pod.get("title") or "") if isinstance(pod, dict) else ""
+        raise GpuTypeUnavailable(gpu_id, str(detail))
     if not isinstance(pod, dict) or not pod.get("id"):
         raise ProviderError("RunPod: the create call returned no pod id")
     return pod

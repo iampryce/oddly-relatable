@@ -900,6 +900,7 @@ def face_expressions(ctx: Ctx) -> dict:
         db.commit()
     return {"made": made, "neutral": neutral.id, "approved_by_setting": auto}
 
+from . import talking_s2v  # noqa: E402,F401  (guided flow: talking-shot render job)
 from . import shot_frames  # noqa: E402,F401  (registers the shot_frames job)
 from . import stick_pipeline, stick_shots  # noqa: E402,F401  (stick pipeline jobs)
 from . import acting_analysis  # noqa: E402,F401  (guided flow: acting analysis job)

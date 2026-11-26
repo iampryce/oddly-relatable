@@ -95,6 +95,8 @@ from . import draft as episode_draft  # noqa: E402
 app.include_router(episode_draft.router)
 app.include_router(studio_bin.router)
 app.include_router(gpu.router)
+from . import talking_s2v  # noqa: E402  (guided flow step 9: talking shots on a rented ComfyUI GPU)
+app.include_router(talking_s2v.router)
 from . import system_disk  # noqa: E402
 app.include_router(system_disk.router)
 from . import chat, stick_pipeline, stick_shots  # noqa: E402

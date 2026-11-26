@@ -3,9 +3,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {costText, currentStep, moveHelp, statusOf, STEPS} from './guide.ts';
 
-test('eleven steps in order; 6-11 are placeholders', () => {
+test('eleven steps in order; 6-8, 10 and 11 are placeholders (9, talking shots, is live)', () => {
   assert.deepEqual(STEPS.map(s => s.key), ['upload', 'acting', 'prompts', 'masters', 'sets', 'closeups', 'faces', 'movement', 'talking', 'quality', 'assembly']);
-  assert.deepEqual(STEPS.filter(s => !s.available).map(s => s.key), ['closeups', 'faces', 'movement', 'talking', 'quality', 'assembly']);
+  assert.deepEqual(STEPS.filter(s => !s.available).map(s => s.key), ['closeups', 'faces', 'movement', 'quality', 'assembly']);
   assert.ok(STEPS.find(s => s.key === 'sets')!.help.join(' ').includes('rotate'));
   assert.ok(STEPS.find(s => s.key === 'talking')!.help.join(' ').includes('Wan 2.2 Speech-to-Video'));
   for (const s of STEPS) assert.ok(s.what && s.why && s.before && s.help.length > 0, s.key);
