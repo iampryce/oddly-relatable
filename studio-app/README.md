@@ -146,6 +146,37 @@ running, needs your approval, done), and a Help panel that walks through one ins
 - Keys come only from the credential store (`gemini_api_key`, `openai_api_key`) and are never logged or returned.
 - Tests: `api/tests/test_guided_generation.py` (HTTP mocked, fake credentials), `web/lib/guide.test.ts`.
 
+## Chat under each shot
+
+A small chat box sits under each thing being made: every character master card (Characters page), every shot still
+and every shot clip (storyboard), each shot's acting notes and each prompt draft (Guided steps). Click "Chat about
+this …", say what you want in plain words ("he should look smug, not angry"), and the assistant answers. It can
+propose **one** change, shown as a card with "What will change", its cost and Apply / Dismiss buttons. Code:
+`api/oddstudio/shot_chat.py`; web `components/ShotChat.tsx`, `lib/shotChat.ts`.
+
+- **What it knows** (built on the server, never sent from the browser): the episode title, the step, the shot number
+  and time range, the item's current prompt or draft, that shot's acting beats (the reference video is described by
+  those notes only, never by its frames), the approved character descriptions, the house style (Settings > Studio
+  style), the item's settings (model, length, price) and the last 10 messages of the thread. Never any key.
+- **What it can propose** (a fixed list per step, checked strictly; anything else is left out of the reply): master:
+  new master candidates (paid); still: a new still, optionally with a new prompt (paid); clip: a new clip with a new
+  motion prompt or length (paid); acting notes: change one beat (free); prompt: replace the draft (free, it stays a
+  draft until you click "Use this prompt"); or advice only. Apply goes through the step's own handler, so the same
+  checks apply; paid changes ask first and carry the price shown (HTTP 409 otherwise, nothing starts). A clip change
+  asking for cfg or steps is saved as "Queued for when this step exists" (the current video service has no such
+  settings; they wait for the own-GPU animation step), with no Apply button.
+- **Cost:** each message shows its cost before it is sent (about, and at most) and the send carries the maximum, like
+  the studio chat. Default assistant: OpenAI `gpt-5.5` at $5 / $30 per million tokens in / out, at most 2,000 tokens of
+  answer (a few cents per message). Settings > Chat under each shot can switch to Anthropic (the studio chat's model).
+- **No credit or no key:** a plain-English message (e.g. "Your OpenAI balance is empty; add credit at
+  platform.openai.com > Billing, or switch the assistant in Settings") and the typed message stays in the box.
+- **Storage:** settings rows `threads:<episode_id>` (one thread per step and item, e.g. `still:3`, `prompt:<id>`) and
+  `threads:characters` for masters. Each message keeps its role, text, time, any proposal and its status (pending,
+  applied, dismissed, queued, advice only), and the tokens and cost of each answer.
+- Also added for Apply: `PUT /api/episodes/<id>/acting-analysis/shots/<shot>/beats/<n>` (edit one beat, free) and an
+  optional `prompt` on a shot still request.
+- Tests: `api/tests/test_shot_chat.py` (SDKs on a mocked transport, fake credentials), `web/lib/shotChat.test.ts`.
+
 ## What needs credentials or other infrastructure
 
 Nothing below is faked. Without the dependency, the step fails with a clear "Not configured" message.

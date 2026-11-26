@@ -452,6 +452,26 @@ export default function Settings() {
                 <input id="gd-aout" type="number" min={0} step={0.01} value={v.acting_usd_out} onChange={e => set('acting_usd_out', Number(e.target.value))} /></div>
             </div>
           </div>)}</Section>
+        <Section name="shot_chat" title="Chat under each shot" value={s.shot_chat}>{(v, set) => (
+          <div className="stack">
+            <p className="muted small">The chat box under each master, still, clip, acting note and prompt. Each message shows its cost before it is sent; changes it proposes run only when you click Apply.</p>
+            <div className="grid cols-2">
+              <div><label htmlFor="sc-provider">Assistant for shot chat</label>
+                <select id="sc-provider" value={v.provider} onChange={e => set('provider', e.target.value)}>
+                  <option value="openai">OpenAI (the model below)</option>
+                  <option value="anthropic">Anthropic (Claude Opus 5.5, as in the studio chat)</option></select></div>
+              <div><label htmlFor="sc-max">Longest answer (tokens; caps what one message can cost)</label>
+                <input id="sc-max" type="number" min={256} max={16000} step={256} value={v.max_tokens} onChange={e => set('max_tokens', Number(e.target.value))} /></div>
+              {v.provider === 'openai' && <>
+                <div><label htmlFor="sc-model">OpenAI model</label>
+                  <input id="sc-model" value={v.model} onChange={e => set('model', e.target.value)} /></div>
+                <div><label htmlFor="sc-in">Input price ($ per million tokens)</label>
+                  <input id="sc-in" type="number" min={0} step={0.01} value={v.usd_in} onChange={e => set('usd_in', Number(e.target.value))} /></div>
+                <div><label htmlFor="sc-out">Output price ($ per million tokens)</label>
+                  <input id="sc-out" type="number" min={0} step={0.01} value={v.usd_out} onChange={e => set('usd_out', Number(e.target.value))} /></div>
+              </>}
+            </div>
+          </div>)}</Section>
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (
           <div><label htmlFor="comfyui-url">ComfyUI server URL</label><input id="comfyui-url" value={v.url} onChange={e => set('url', e.target.value)} placeholder="https://…" /></div>)}</Section>

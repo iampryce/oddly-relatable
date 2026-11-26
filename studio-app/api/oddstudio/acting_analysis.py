@@ -26,7 +26,9 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from . import serialize as S
@@ -393,6 +395,44 @@ def accept(eid: int, db: Session = Depends(get_db), user: str = Depends(current_
     v["accepted"] = True
     save(db, ep.id, v)
     db.add(Event(episode_id=ep.id, kind="approval", message=f"Acting analysis accepted by {user}"))
+    db.commit()
+    return view(db, ep)
+
+
+class BeatEditIn(BaseModel):
+    """The owner's correction of one acting beat (free). Only the fields given change."""
+    model_config = ConfigDict(extra="forbid")
+    t_start: float | None = Field(default=None, ge=0, le=36000)
+    t_end: float | None = Field(default=None, ge=0, le=36000)
+    on_word: str | None = Field(default=None, max_length=80)
+    expression: str | None = Field(default=None, max_length=400)
+    eyes_and_gaze: str | None = Field(default=None, max_length=400)
+    head_and_body: str | None = Field(default=None, max_length=400)
+    hands: str | None = Field(default=None, max_length=400)
+    hold_or_move: Literal["hold", "move"] | None = None
+    intensity: Literal["subtle", "clear", "big"] | None = None
+
+
+@router.put("/episodes/{eid}/acting-analysis/shots/{shot}/beats/{index}")
+def edit_beat(eid: int, shot: int, index: int, body: BeatEditIn, db: Session = Depends(get_db),
+              user: str = Depends(current_user)):
+    """Change one beat of one shot (free; e.g. applied from the chat under the shot). The beat keeps its other fields
+    and is marked as edited by the owner."""
+    ep = _episode(db, eid)
+    v = stored(db, ep.id)
+    s = next((x for x in ((v.get("result") or {}).get("shots") or []) if x.get("shot") == shot), None)
+    if s is None:
+        raise HTTPException(404, f"the acting analysis has no shot {shot}")
+    beats = s.get("beats") or []
+    if not 0 <= index < len(beats):
+        raise HTTPException(404, f"shot {shot} has no beat {index + 1}")
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(422, "nothing to change")
+    beats[index].update(fields)
+    beats[index]["edited_by"] = user
+    save(db, ep.id, v)
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"Acting notes: shot {shot}, beat {index + 1} edited by {user}"))
     db.commit()
     return view(db, ep)
 

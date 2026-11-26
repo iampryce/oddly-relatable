@@ -7,6 +7,8 @@ import {useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction} from '@/lib/hooks';
 import {chosenClip, clipStatus, confirmText} from '@/lib/stickPipeline';
+import {episodeIdFromBase} from '@/lib/shotChat';
+import ShotChat from '@/components/ShotChat';
 
 type Act = ReturnType<typeof useAction>;
 
@@ -28,6 +30,7 @@ export function StickShotRow({s, sk, base, act, names}: {s: any; sk: any; base: 
   const missing = info.missing_masters.map((k: string) => names[k] || k);
   const clip = chosenClip(info);
   const cs = clipStatus(info);
+  const eid = episodeIdFromBase(base);
   const still = () => {
     if (!window.confirm(confirmText(`Make a still for shot ${s.index}`, stillCost))) return;
     act.run('sk-still', () => api(`${base}/${s.index}/still`, {body: {confirm_usd: stillCost.usd}}));
@@ -50,6 +53,7 @@ export function StickShotRow({s, sk, base, act, names}: {s: any; sk: any; base: 
       </div>
       {missing.length > 0 && <span className="small muted">No approved master: {missing.join(', ')}</span>}
       {prompt && <pre className="small" style={{whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto'}}>{info.prompt}</pre>}
+      {eid && <ShotChat step="still" item={s.index} episodeId={eid} onApplied={() => act.run('sk-chat', async () => {})} />}
       {clip && <figure style={{margin: 0}}>
         {clip.url && <video src={clip.url} controls preload="metadata" style={{width: '100%', borderRadius: 6}} />}
         <figcaption className="row small" style={{gap: 6, flexWrap: 'wrap'}}>
@@ -60,6 +64,7 @@ export function StickShotRow({s, sk, base, act, names}: {s: any; sk: any; base: 
           {info.clips.length > 1 && <select aria-label={`Clip of shot ${s.index}`} value={info.clip_chosen ?? ''}
             onChange={e => clipCall('choose', Number(e.target.value))}>
             {info.clips.map((c: any, i: number) => <option key={c.asset_id} value={c.asset_id}>Clip {i + 1}</option>)}</select>}
-        </figcaption></figure>}
+        </figcaption>
+        {eid && <ShotChat step="clip" item={s.index} episodeId={eid} onApplied={() => act.run('sk-chat', async () => {})} />}</figure>}
     </div>);
 }

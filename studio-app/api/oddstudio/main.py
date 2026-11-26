@@ -105,6 +105,8 @@ from . import acting_analysis, guided, prompt_writer  # noqa: E402
 app.include_router(guided.router)
 app.include_router(acting_analysis.router)
 app.include_router(prompt_writer.router)
+from . import shot_chat  # noqa: E402
+app.include_router(shot_chat.router)
 
 
 @app.middleware("http")
