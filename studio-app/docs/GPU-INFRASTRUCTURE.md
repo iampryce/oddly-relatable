@@ -761,3 +761,32 @@ read. "About" uses the first GPU type's price; "at most" the most expensive allo
 "at most" (HTTP 409 otherwise), a render that would pass the monthly cap is refused (409), and the job stops before a
 shot that would take the run past the confirmed amount. When a shot would not finish within the maximum session length,
 the session is replaced (a new reservation, a new cap check).
+
+# Part 4: Reactions and close-ups on the same ComfyUI sessions (built 2026-11-26)
+
+## 20. Guided steps 6-8 (`reactions.py`)
+
+The owner-tested acting method of 2026-11-26 (scripts `gpu_acting.py` and `compose_acting.py`), run from the dashboard.
+A reaction shot is any storyboard shot that is not a talking shot and shows at least one character (one person on a
+close or medium shot = close-up; otherwise a group shot). It uses the `comfyui` session kind of §19 unchanged: same
+image, GPU order, cap reservation, sweep and termination. A job turns the GPU off at its end unless another ComfyUI job
+(`talking_render`, `reaction_poses`, `reaction_animate`) is queued or running (`comfy_session.others_waiting`).
+
+| Stage | Where | What |
+|---|---|---|
+| Crop (step 6) | studio server, free | Exact zoom crop of the owner-picked seating master of the shot's side (approved storyboard stills only), 16:9, upscaled to 1280x720 with Lanczos. Suggested from the head found in the master (white round regions matched to the side's seat order); the owner moves and zooms it and approves it. |
+| Poses (step 7) | GPU | One pose per acting beat (pose 0 = the crop as it is; a big snap adds an overshoot pose). Each changed face is a Qwen-Image-Edit-2511 edit masked with `SetLatentNoiseMask` to an oval over the face interior, then pasted back through the same oval (softened inward only), so no pixel outside the oval changes. Group shots: one masked edit per character, one after another. A face whose exact prompt already has a result in the shot is reused (free). Every prompt carries the eyeline (listeners slightly screen-left toward the main speaker, the speaker screen-right, the camera only when the beat says so). |
+| Moves (step 8) | GPU | Wan 2.2 i2v 14B `WanFirstLastFrameToVideo`, 33 frames at 16 fps, 1280x720, high-noise steps 0-2 + low-noise 2-4 with the lightx2v 4-step LoRAs, CFG 1, shift 5. Holds of 0.4 s or more are living holds (same pose first and last, tremble/blink prompt). |
+| Assembly (step 8) | studio server, free | Timeline from the poses; moves eased out (power 2.2), living holds at natural speed (looped), the clip shown only inside a feathered box around the character(s) and the crop's own pixels outside; 25 fps H.264 per shot, plus a review copy with the episode's original audio. |
+
+**Models** (ComfyUI-Manager): `qwen_image_edit_2511_fp8mixed`, `qwen_2.5_vl_7b_fp8_scaled`, `qwen_image_vae` for poses;
+`wan2.2_i2v_high/low_noise_14B_fp8_scaled`, `wan2.2_i2v_lightx2v_4steps_lora_v1_high/low_noise`,
+`umt5_xxl_fp8_e4m3fn_scaled`, `wan_2.1_vae` for moves (URLs in `reactions.QWEN_MODELS` / `WAN_MODELS`).
+
+**Cost.** GPU price per hour x (about 10 min start-up + 60-90 s per masked face edit + about 2.5 min per Wan clip).
+"About" uses the first GPU type and 60 s edits; "at most" the most expensive allowed type, 90 s edits and 25% margin. The
+request must carry "at most" (`confirm_usd`, HTTP 409 otherwise); a run that would pass the monthly cap or the maximum
+session length is refused (409); the job stops before a step that would pass the confirmed amount. Nothing is approved by
+itself: the crop, each pose and each assembled shot wait for the owner's click. The chat under each pose
+(`pose:<shot>:<pose>`) can propose `redo_pose {prompt}`; the chat under a reaction shot's clip (`clip:<shot>`) offers
+`reanimate_shot {move_prompts?}` instead of the stick clip's `rerender_shot`; both go through the same paid routes.

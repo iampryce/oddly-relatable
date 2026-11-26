@@ -1228,9 +1228,8 @@ def talking_render(ctx: Ctx) -> dict:
                 _set_run(db, ep.id, i, status="failed", error=str(e)[:300], stage="")
         raise
     finally:
-        # terminate now unless another talking render is waiting for the same session
-        others = db.query(Job).filter(Job.kind == JOB, Job.id != job.id, Job.status == "queued").first()
-        if not others:
+        # terminate now unless another ComfyUI job (talking shots or reactions) is waiting for the same session
+        if not CS.others_waiting(db, job.id):
             try:
                 CS.stop(db, "talking shots finished")
             except Exception as e:   # noqa: BLE001 -- the sweep tries again

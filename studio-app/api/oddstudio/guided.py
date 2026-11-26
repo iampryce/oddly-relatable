@@ -5,7 +5,7 @@ It also keeps the episode's reference video for the acting analysis. The video i
 private/ (never in the episode's asset list, so nothing else can pick it up as an image or video reference) and only
 ever sent to the acting analysis. The owner can remove it at any time.
 
-Step statuses: not_started | running | needs_approval | done. Steps 6-11 are not in the dashboard yet ("available":
+Step statuses: not_started | running | needs_approval | done. Steps 10-11 are not in the dashboard yet ("available":
 false) and never offer a button.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
-PLACEHOLDERS = ("closeups", "faces", "movement", "quality", "assembly")
+PLACEHOLDERS = ("quality", "assembly")
 ORDER = ("upload", "acting", "prompts", "masters", "sets", "closeups", "faces", "movement", "talking", "quality", "assembly")
 
 
@@ -204,6 +204,10 @@ def guide(db: Session, ep: Episode) -> dict:
 
     for k in PLACEHOLDERS:
         steps[k] = {"status": "not_started", "cost": None, "detail": "", "available": False}
+
+    # 6-8. close-up crops, face poses and movement of the reaction shots (reactions.py)
+    from . import reactions
+    steps.update(reactions.summary(db, ep))
 
     # 9. talking shots (talking_s2v.py)
     from . import talking_s2v

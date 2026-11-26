@@ -253,6 +253,17 @@ def ssh_endpoint(pod_id: str) -> tuple[str, int] | None:
     return (m.group(1), int(m.group(2))) if m else None
 
 
+# the jobs that use a ComfyUI session (talking shots, reaction poses and reaction animation): a job turns the GPU off
+# when it ends unless another of these is queued or running, since they all share the one live session
+JOB_KINDS = ("talking_render", "reaction_poses", "reaction_animate")
+
+
+def others_waiting(db: Session, job_id: int) -> bool:
+    from .models import Job
+    return db.query(Job).filter(Job.kind.in_(JOB_KINDS), Job.id != job_id,
+                                Job.status.in_(("queued", "running"))).first() is not None
+
+
 def stop(db: Session, reason: str) -> list[str]:
     """Terminate every live ComfyUI session (the owner's stop button, or the end of a render)."""
     done = []
