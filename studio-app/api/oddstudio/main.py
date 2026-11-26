@@ -101,6 +101,10 @@ from . import chat, stick_pipeline, stick_shots  # noqa: E402
 app.include_router(stick_pipeline.router)
 app.include_router(stick_shots.router)
 app.include_router(chat.router)
+from . import acting_analysis, guided, prompt_writer  # noqa: E402
+app.include_router(guided.router)
+app.include_router(acting_analysis.router)
+app.include_router(prompt_writer.router)
 
 
 @app.middleware("http")

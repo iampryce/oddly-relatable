@@ -74,7 +74,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <div>
           <p className="small" style={{margin: '0 0 4px'}}><Link href="/">← Episodes</Link></p>
           <h1>{ep.title}</h1>
-          <span className="muted small">{ep.format === 'long' ? 'YouTube long' : 'Short'}{ep.layout === 'landscape' ? ' · 16:9' : ep.format === 'short' ? ' · 9:16' : ''} · <Link href={adv()}>Advanced view</Link></span>
+          <span className="muted small">{ep.format === 'long' ? 'YouTube long' : 'Short'}{ep.layout === 'landscape' ? ' · 16:9' : ep.format === 'short' ? ' · 9:16' : ''} · <Link href={adv()}>Advanced view</Link> · <Link href={`/episodes/${ep.id}/guide`}>Guided steps</Link></span>
         </div>
         <div className="ep-generate">
           <button className="btn primary" disabled={plan.kind !== 'free' || !!act.busy} onClick={() => { setAuto(true); runFree(); }}>

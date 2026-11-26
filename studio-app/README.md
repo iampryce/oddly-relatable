@@ -108,6 +108,44 @@ Settings > Studio style and Settings > Chat.
   shows its estimate before sending and its real usage after; conversations are stored as `_chat:<id>` settings rows.
   Keys only come from the credential store and are never logged or returned.
 
+## Guided generation
+
+Page: `/episodes/<id>/guide` (linked as "Guided steps" from the episode page). Code: `api/oddstudio/guided.py`,
+`acting_analysis.py`, `prompt_writer.py`; web `app/(studio)/episodes/[id]/guide/page.tsx`, `lib/guide.ts`. Settings
+under Settings > Guided generation.
+
+One list of eleven steps, each with what it does, why, what it needs, its live cost and its status (not started,
+running, needs your approval, done), and a Help panel that walks through one instruction at a time:
+
+| # | Step | In the dashboard |
+|---|---|---|
+| 1 | Upload: script, voice recording, reference video | yes (the reference video is kept under `private/`, never in the asset list) |
+| 2 | Acting analysis (Gemini) | yes: job `acting_analysis` |
+| 3 | Prompt writing (OpenAI) | yes: every generation prompt is written first, then edited and approved by the owner |
+| 4 | Character masters | links to the stick pipeline (Characters page) |
+| 5 | Sets and seating masters | links to the storyboard stills; each wall is drawn straight-on (the image model cannot rotate a room) |
+| 6-11 | Close-ups, faces, movement, talking shots, quality check, assembly | help text only, "Not in the dashboard yet" |
+
+- **Acting analysis:** the reference video is uploaded once to the Gemini Files API (resumable), read in up to 3
+  batches of shots (`video_metadata` fps 5 with the batch's start and end offsets; JSON output, temperature 0.4, 30,000
+  output tokens, thinking level low) and deleted from Google afterwards, also on failure. Shots come from the
+  storyboard, or even 4 s slices of the video. Answers that come back as a bare list, or a list wrapping the object,
+  are normalised. Default model `gemini-3.1-pro-preview` (paid tier); the free-tier models are tried on 429/503 only
+  when the owner ticks it for that run (the free tier may train on uploads). Key frames are cut with FFmpeg into
+  private storage and shown as "Reference — private, never sent to an image or video generator". Stored as the
+  `acting:<episode>` settings row.
+- **Prompt writer:** official `openai` SDK (Responses API), default model `gpt-5.5`, one call, never retried. Input:
+  the kind (master, still, face edit, movement), the owner's notes, the chosen shot's acting beats, the character's
+  approved description and the studio style text. Drafts are stored as `prompts:<episode>`; an edit after approval
+  makes the prompt a draft again. An empty OpenAI balance is reported as "Your OpenAI balance is empty; add credit at
+  platform.openai.com > Billing".
+- **Cost first:** both paid actions show an estimate (typical and maximum) and the request must carry the maximum
+  (`confirm_usd`); any other amount is refused with HTTP 409 and nothing is sent. Real token usage and cost are
+  recorded after each call. Prices per million tokens are editable in Settings (defaults: Gemini $2 in / $12 out,
+  about 300 tokens per second of video; OpenAI $5 in / $30 out, check the current price list).
+- Keys come only from the credential store (`gemini_api_key`, `openai_api_key`) and are never logged or returned.
+- Tests: `api/tests/test_guided_generation.py` (HTTP mocked, fake credentials), `web/lib/guide.test.ts`.
+
 ## What needs credentials or other infrastructure
 
 Nothing below is faked. Without the dependency, the step fails with a clear "Not configured" message.

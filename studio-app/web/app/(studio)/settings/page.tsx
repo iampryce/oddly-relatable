@@ -430,6 +430,28 @@ export default function Settings() {
             <div><label htmlFor="chat-max">Longest answer (tokens; caps what one message can cost)</label>
               <input id="chat-max" type="number" min={256} max={16000} step={256} value={v.max_tokens} onChange={e => set('max_tokens', Number(e.target.value))} /></div>
           </div>)}</Section>
+        <Section name="guide" title="Guided generation" value={s.guide}>{(v, set) => (
+          <div className="stack">
+            <p className="muted small">Prompt writing uses OpenAI; the acting analysis uses Gemini. Prices are per million tokens and set the cost shown before each run: check them on the providers&apos; pricing pages.</p>
+            <div className="grid cols-2">
+              <div><label htmlFor="gd-pmodel">Prompt writer model (OpenAI)</label>
+                <input id="gd-pmodel" value={v.prompt_model} onChange={e => set('prompt_model', e.target.value)} /></div>
+              <div><label htmlFor="gd-pmax">Longest prompt answer (tokens)</label>
+                <input id="gd-pmax" type="number" min={256} max={32000} step={256} value={v.prompt_max_tokens} onChange={e => set('prompt_max_tokens', Number(e.target.value))} /></div>
+              <div><label htmlFor="gd-pin">Prompt writer: input price ($ per million tokens)</label>
+                <input id="gd-pin" type="number" min={0} step={0.01} value={v.prompt_usd_in} onChange={e => set('prompt_usd_in', Number(e.target.value))} /></div>
+              <div><label htmlFor="gd-pout">Prompt writer: output price ($ per million tokens)</label>
+                <input id="gd-pout" type="number" min={0} step={0.01} value={v.prompt_usd_out} onChange={e => set('prompt_usd_out', Number(e.target.value))} /></div>
+              <div><label htmlFor="gd-amodel">Acting analysis model (Gemini, paid tier)</label>
+                <input id="gd-amodel" value={v.acting_model} onChange={e => set('acting_model', e.target.value)} /></div>
+              <div><label htmlFor="gd-afree">Free-tier models, used only when ticked for a run (comma separated)</label>
+                <input id="gd-afree" value={(v.acting_free_models || []).join(', ')} onChange={e => set('acting_free_models', e.target.value.split(',').map((x: string) => x.trim()).filter(Boolean))} /></div>
+              <div><label htmlFor="gd-ain">Acting analysis: input price ($ per million tokens)</label>
+                <input id="gd-ain" type="number" min={0} step={0.01} value={v.acting_usd_in} onChange={e => set('acting_usd_in', Number(e.target.value))} /></div>
+              <div><label htmlFor="gd-aout">Acting analysis: output price ($ per million tokens)</label>
+                <input id="gd-aout" type="number" min={0} step={0.01} value={v.acting_usd_out} onChange={e => set('acting_usd_out', Number(e.target.value))} /></div>
+            </div>
+          </div>)}</Section>
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (
           <div><label htmlFor="comfyui-url">ComfyUI server URL</label><input id="comfyui-url" value={v.url} onChange={e => set('url', e.target.value)} placeholder="https://…" /></div>)}</Section>

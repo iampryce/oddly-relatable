@@ -247,3 +247,30 @@ video.wide { aspect-ratio: 16 / 9; } video.tall { max-height: 60vh; }
 .advanced-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 12px; }
 .advanced-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 .advanced-link:hover { border-color: var(--accent); text-decoration: none; }
+
+/* Guided generation (/episodes/[id]/guide) */
+.gd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.gd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.gd-step.gd-current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+.gd-title { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.gd-n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--panel-2); color: var(--muted); font-size: 12px; font-weight: 700; }
+.gd-facts { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; margin: 12px 0 0; }
+.gd-facts dt { color: var(--muted); font-size: 12px; font-weight: 600; }
+.gd-facts dd { margin: 0; }
+.gd-action { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.gd-help { position: sticky; top: 72px; }
+.gd-help h2 { margin: 4px 0 8px; font-size: 16px; }
+.gd-help-line { font-size: 15px; margin: 0 0 8px; }
+.gd-shot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 10px 0; border-top: 1px dashed var(--line); }
+.gd-beats { margin: 6px 0 0; padding-left: 18px; }
+.gd-frames { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px; align-content: flex-start; }
+.gd-frames img { width: 132px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.gd-frames figcaption { flex-basis: 100%; }
+.gd-prompt { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--panel-2); }
+.gd-prompt textarea { margin: 8px 0; }
+@media (max-width: 860px) {
+  .gd-layout { grid-template-columns: 1fr; }
+  .gd-help { position: static; order: -1; }
+  .gd-facts { grid-template-columns: 1fr; }
+  .gd-shot { grid-template-columns: 1fr; }
+}
