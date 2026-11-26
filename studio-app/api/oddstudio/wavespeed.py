@@ -124,3 +124,60 @@ def run(db, endpoint: str, body: dict, cost: float, note: str, out: Path, log, p
     out.write_bytes(_get(outs[0], {}, "download", key, timeout=300).content)
     return {**d, "id": tid}, {"request_id": tid, "seconds": round(time.time() - t0, 1),
                               "inference_ms": (d.get("timings") or {}).get("inference"), "output_url": outs[0]}
+
+
+# ------------------------------------------------------------------ reference uploads and balance (stick pipeline)
+# Reference images (style example, character masters, set plates) must be URLs: each is uploaded first with
+# POST /media/upload/binary (multipart field "file") -> data.download_url. An upload is free (not a generation) but it
+# is still a POST: it is not repeated by itself either. The balance is a plain GET.
+_test_upload = None    # tests only: fn(path) -> url
+_test_balance = None   # tests only: fn() -> float
+
+
+def set_test_upload(fn) -> None:
+    """Tests only: replace the reference upload with fn(path) -> url."""
+    global _test_upload
+    _test_upload = fn
+
+
+def set_test_balance(fn) -> None:
+    """Tests only: replace the balance GET with fn() -> float."""
+    global _test_balance
+    _test_balance = fn
+
+
+def _no_network_in_tests(what: str) -> None:
+    from .config import get_settings
+    if get_settings().env == "test":
+        raise ProviderError(f"WaveSpeed {what}: no network calls in tests (set a test stub)", transient=False)
+
+
+def upload(path: Path) -> str:
+    """Upload one local image and return its WaveSpeed URL (to pass as a reference)."""
+    if _test_upload is not None:
+        return _test_upload(Path(path))
+    key = _key()
+    _no_network_in_tests("upload")
+    import mimetypes
+    ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+    try:
+        r = httpx.post(f"{API}/media/upload/binary", headers={"Authorization": f"Bearer {key}"}, timeout=120,
+                       files={"file": (Path(path).name, Path(path).read_bytes(), ctype)})
+    except httpx.HTTPError as e:
+        raise ProviderError(f"WaveSpeed upload: {type(e).__name__}; not retried", transient=False)
+    if r.status_code >= 400:
+        raise _error("upload", r, key)
+    url = ((r.json() or {}).get("data") or {}).get("download_url")
+    if not url:
+        raise ProviderError("WaveSpeed upload: no download_url in the answer", transient=False)
+    return url
+
+
+def balance() -> float:
+    """The prepaid WaveSpeed balance in USD (a GET: free)."""
+    if _test_balance is not None:
+        return float(_test_balance())
+    key = _key()
+    _no_network_in_tests("balance")
+    d = (_get(f"{API}/balance", {"Authorization": f"Bearer {key}"}, "balance", key).json() or {}).get("data") or {}
+    return float(d.get("balance") or 0.0)

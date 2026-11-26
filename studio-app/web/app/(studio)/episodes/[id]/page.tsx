@@ -9,6 +9,7 @@ import {use, useEffect, useRef, useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import {AnimateAll, StickShotRow} from '@/components/StickShot';
 import {jobLine, showLastError, type Section} from '@/lib/workspace';
 import {episodeCharacters, generatePlan, ICON, money, STEP_TONE, steps, type Step} from '@/lib/dashboard';
 import {activeJobs, EXPRESSIONS, lastFailure, makingText, peopleText, retakeBody, retakeForm, retakeRunning, SHOT_SIZES,
@@ -219,19 +220,24 @@ function ShotFrames({c}: {c: Ctx}) {
   const base = `/episodes/${ep.id}/shot-frames`;
   const [poll, setPoll] = useState(15000);
   const {data: v, reload} = useApi<any>(base, poll);
-  const act = useAction(reload);
-  const busy = activeJobs(v).length > 0;
+  // the stick pipeline: stills and clips per shot, their prices (stick_shots.py)
+  const {data: sk, reload: reloadSk} = useApi<any>(`/episodes/${ep.id}/stick-shots`, poll);
+  const act = useAction(async () => { await reload(); await reloadSk(); });
+  const busy = activeJobs(v).length > 0 || (sk?.shots || []).some((x: any) => x.busy);
   useEffect(() => { setPoll(busy ? 3000 : 15000); }, [busy]);
   const names = Object.fromEntries(c.chars.map(x => [x.key, x.name]));
   const making = makingText(v);
   const animating = activeJobs(v, 'shot_animatic').length > 0;
   const shots: any[] = v?.shots || [];
   const failure = lastFailure(v);
+  const lastStick = (sk?.jobs || [])[0];
+  const stickFailure = lastStick?.status === 'failed' ? `${lastStick.kind === 'stick_shot_still' ? 'Still' : 'Animation'} of shot ${lastStick.payload?.index}: ${lastStick.error}` : '';
   if (!v) return <p className="small muted">Loading the shot frames…</p>;
   return (
     <div className="stack sf">
       <ErrorBox error={act.error} />
       {failure && <div className="alert bad small">{failure}</div>}
+      {stickFailure && <div className="alert bad small">{stickFailure}</div>}
       {!shots.length ? <div className="spread pending">
         <span className="small">{making || 'One frame per shot of the video, drawn from the approved characters and sets.'}</span>
         <button className="btn sm primary" disabled={!!act.busy || !!making} onClick={() => act.run('sf-make', () => api(base, {method: 'POST'}))}>
@@ -242,6 +248,7 @@ function ShotFrames({c}: {c: Ctx}) {
             <div className="row">
               <button className="btn sm good" disabled={!!act.busy || busy || shots.every(s => s.approved)}
                 onClick={() => act.run('sf-all', () => api(`${base}/approve-all`, {method: 'POST'}))}>Approve all</button>
+              <AnimateAll sk={sk} base={base} act={act} />
               <button className="btn sm" disabled={!!act.busy || animating || !!making}
                 onClick={() => act.run('sf-anim', () => api(`${base}/animatic`, {method: 'POST'}))}>{animating ? 'Making the animatic…' : 'Make animatic (free)'}</button>
               <button className="btn sm" disabled={!!act.busy || busy}
@@ -251,12 +258,12 @@ function ShotFrames({c}: {c: Ctx}) {
           {v.animatic_url && <figure className="sf-animatic">
             <video src={v.animatic_url} controls preload="metadata" className={ep.layout === 'landscape' ? 'wide' : 'tall'} />
             <figcaption className="small muted">Animatic: the storyboard on the recording · a draft, not for publishing</figcaption></figure>}
-          <div className="sf-grid">{shots.map(s => <ShotCard key={s.index} s={s} v={v} base={base} act={act} names={names} />)}</div>
+          <div className="sf-grid">{shots.map(s => <ShotCard key={s.index} s={s} v={v} sk={sk} base={base} act={act} names={names} />)}</div>
         </>}
     </div>);
 }
 
-function ShotCard({s, v, base, act, names}: {s: any; v: any; base: string; act: ReturnType<typeof useAction>; names: Record<string, string>}) {
+function ShotCard({s, v, sk, base, act, names}: {s: any; v: any; sk: any; base: string; act: ReturnType<typeof useAction>; names: Record<string, string>}) {
   const [panel, setPanel] = useState<'' | 'retake' | 'versions'>('');
   const st = shotStatus(s);
   const drawing = retakeRunning(v, s.index);
@@ -280,6 +287,7 @@ function ShotCard({s, v, base, act, names}: {s: any; v: any; base: string; act: 
           ? <button className="btn sm" disabled={locked} onClick={() => act.run('sf-un', () => api(`${base}/${s.index}/unapprove`, {method: 'POST'}))}>Unapprove</button>
           : <button className="btn sm good" disabled={locked || drawing || !s.chosen} onClick={() => act.run('sf-ok', () => api(`${base}/${s.index}/approve`, {method: 'POST'}))}>Approve</button>}
       </div>
+      <StickShotRow s={s} sk={sk} base={base} act={act} names={names} />
       {panel === 'retake' && <Retake s={s} v={v} base={base} act={act} names={names} done={() => setPanel('')} />}
       {panel === 'versions' && <div className="sf-versions">{s.versions.map((x: any, i: number) => (
         <button key={x.asset_id} type="button" className={`sf-take ${x.asset_id === s.chosen ? 'on' : ''}`} disabled={locked || x.asset_id === s.chosen}

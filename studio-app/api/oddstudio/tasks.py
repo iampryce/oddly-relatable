@@ -901,3 +901,4 @@ def face_expressions(ctx: Ctx) -> dict:
     return {"made": made, "neutral": neutral.id, "approved_by_setting": auto}
 
 from . import shot_frames  # noqa: E402,F401  (registers the shot_frames job)
+from . import stick_pipeline, stick_shots  # noqa: E402,F401  (stick pipeline jobs)

@@ -5,11 +5,12 @@ import {ADVANCED} from '@/components/Shell';
 import SetStaging from '@/components/SetStaging';
 import {SpacingWarning} from '@/components/SetPanel';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
-import {api} from '@/lib/api';
+import {api, uploadFile} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {stagingSummary} from '@/lib/setStaging';
 import {gpuLine, sessionLine, allInPerClip} from '@/lib/gpuView';
+import {usd} from '@/lib/stickPipeline';
 
 // Capabilities come from the server's provider registry (capabilities.py): which providers exist, what they need,
 // whether they are integrated, configured and VERIFIED by a real worker test. Nothing here is assumed.
@@ -20,7 +21,7 @@ const CREDENTIALS: [string, string][] = [
   ['aws_access_key_id', 'AWS access key ID (S3)'], ['aws_secret_access_key', 'AWS secret access key (S3)'],
   ['youtube_client_id', 'YouTube OAuth client ID'], ['youtube_client_secret', 'YouTube OAuth client secret'],
   ['youtube_refresh_token', 'YouTube refresh token (set by "Connect YouTube")'], ['comfyui_token', 'ComfyUI access token (optional)'],
-  ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (hosted talking shots)'],
+  ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (talking shots; stick pipeline images and video)'], ['gemini_api_key', 'Gemini API key (video quality checks; use a billing-enabled project)'],
   ['runpod_api_key', 'RunPod API key (rented GPU sessions; stays on the studio)'], ['gpu_worker_token', 'GPU worker token (our own GPU machine)'],
 ];
 const NEED_LABEL = (n: string) => n === 'tool:codex' ? 'Codex installed and signed in with ChatGPT on the server' : n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :
@@ -328,6 +329,67 @@ function CodexCard({reload}: {reload: () => unknown}) {
 }
 
 // Settings › Advanced: every page that left the main menu, still at its own address (nothing was removed).
+// The stick pipeline (2026-11-25): the studio style prompt every character master starts from, the owner's style
+// reference image, and the hosted image and video providers (prices: per image, and per SECOND of video).
+function StudioStyleCard({value}: {value: any}) {
+  const s = useSection('stick', value);
+  const {data: cfg, reload} = useApi<any>('/stick/config');
+  const act = useAction(reload);
+  const [bal, setBal] = useState<string>('');
+  const ref = s.v.style_reference;
+  const imgs = cfg?.image_providers || {}, vids = cfg?.video_providers || {};
+  const vp = vids[s.v.video_provider];
+  // an upload is chosen at once on the server; the form follows so a later Save keeps it
+  const upload = (f?: File) => f && act.run('upload', async () => {
+    const r: any = await uploadFile('/stick/style-reference/upload', f);
+    if (r?.style_reference) s.set('style_reference', {kind: r.style_reference.kind, id: r.style_reference.id});
+  });
+  const chosen = (cfg?.options || []).find((o: any) => ref && ref.kind === o.kind && ref.id === o.id);
+  return (
+    <div className="card stack" id="studio-style" style={{gridColumn: '1 / -1'}}>
+      <h2>Studio style (stick pipeline)</h2>
+      <ErrorBox error={s.error || act.error} />
+      <div><label htmlFor="stick-style">Studio style: the master prompt every new character master starts from (the character&apos;s own lines are added after it)</label>
+        <textarea id="stick-style" style={{minHeight: 220}} value={s.v.style_prompt} onChange={e => s.set('style_prompt', e.target.value)} /></div>
+      <div className="grid cols-2">
+        <div><label htmlFor="stick-image">Image provider (masters, sheets, shot stills)</label>
+          <select id="stick-image" value={s.v.image_provider} onChange={e => s.set('image_provider', e.target.value)}>
+            <option value="none">Off</option>
+            {Object.entries(imgs).map(([k, p]: [string, any]) => <option key={k} value={k}>{p.label} · {usd(p.usd_per_image)} per image</option>)}</select></div>
+        <div><label htmlFor="stick-video">Video provider (animating approved stills)</label>
+          <select id="stick-video" value={s.v.video_provider} onChange={e => s.set('video_provider', e.target.value)}>
+            <option value="none">Off</option>
+            {Object.entries(vids).map(([k, p]: [string, any]) => <option key={k} value={k} disabled={!p.implemented}>{p.label}{p.implemented ? ` · ${usd(p.usd_per_second)} per second of video` : ''}</option>)}</select></div>
+        <div><label htmlFor="stick-cands">Master candidates per click</label>
+          <input id="stick-cands" type="number" min={1} max={4} value={s.v.master_candidates} onChange={e => s.set('master_candidates', Number(e.target.value))} /></div>
+        <div><label htmlFor="stick-secs">Clip length</label>
+          <select id="stick-secs" value={s.v.video_seconds} onChange={e => s.set('video_seconds', Number(e.target.value))}>
+            {(vp?.durations || [5, 8]).map((d: number) => <option key={d} value={d}>{d} s{vp?.implemented ? ` (${usd(d * vp.usd_per_second)} per clip)` : ''}</option>)}</select></div>
+      </div>
+      <div className="stack">
+        <strong className="small">Style reference image</strong>
+        <span className="muted small">Given to the image model as reference 1 when a character master is drawn (for the drawing style only). Choose one of the approved images or upload your style example.</span>
+        {chosen ? <img src={chosen.url} alt="Chosen style reference" style={{maxWidth: 160, borderRadius: 6}} /> : <span className="small bad">None chosen yet.</span>}
+        <span className="muted small">Pick one below, then Save (an upload is chosen at once).</span>
+        <div className="row" style={{gap: 6, flexWrap: 'wrap'}}>
+          {(cfg?.options || []).slice(0, 24).map((o: any) => {
+            const on = ref && ref.kind === o.kind && ref.id === o.id;
+            return <button key={`${o.kind}-${o.id}`} type="button" className={`btn sm ${on ? 'primary' : ''}`} title={o.label} disabled={!!act.busy}
+              onClick={() => s.set('style_reference', {kind: o.kind, id: o.id})}>
+              <img src={o.url} alt="" style={{width: 36, height: 48, objectFit: 'contain', verticalAlign: 'middle'}} /> {o.label}</button>;
+          })}
+        </div>
+        <label className="btn sm" style={{display: 'inline-block', margin: 0, width: 'fit-content'}}>Upload style example (PNG or JPEG)
+          <input type="file" accept="image/png,image/jpeg" hidden onChange={e => upload(e.target.files?.[0])} /></label>
+      </div>
+      <SaveRow s={s} />
+      <div className="row small" style={{gap: 6}}>
+        <button className="btn sm" onClick={() => api('/stick/balance').then(r => setBal(`WaveSpeed balance: ${usd(r.usd)}`), e => setBal(e.message))}>Check WaveSpeed balance (free)</button>
+        {bal && <span>{bal}</span>}</div>
+      <p className="muted small">Paid steps (masters, sheets, stills, clips) show their price on the button and ask before they start; they count against the experimental budget in Motion and are never retried by themselves.</p>
+    </div>);
+}
+
 function AdvancedCard() {
   return (
     <details className="card advanced" id="advanced">
@@ -358,6 +420,16 @@ export default function Settings() {
         <Credentials creds={data.credentials || {}} reload={reload} />
         <CodexCard reload={reload} />
         {CAP_ORDER.filter(id => caps[id]).map(id => <CapabilityCard key={id} id={id} cap={caps[id]} sections={s} data={data} reload={reload} />)}
+        <StudioStyleCard value={s.stick} />
+        <Section name="chat" title="Chat" value={s.chat}>{(v, set) => (
+          <div className="grid cols-2">
+            <div><label htmlFor="chat-provider">Answered by</label>
+              <select id="chat-provider" value={v.provider} onChange={e => set('provider', e.target.value)}>
+                <option value="auto">Automatic: Anthropic if its key is saved, else OpenAI</option>
+                <option value="anthropic">Anthropic (Claude Opus 5.5)</option><option value="openai">OpenAI (GPT-4.1 mini)</option></select></div>
+            <div><label htmlFor="chat-max">Longest answer (tokens; caps what one message can cost)</label>
+              <input id="chat-max" type="number" min={256} max={16000} step={256} value={v.max_tokens} onChange={e => set('max_tokens', Number(e.target.value))} /></div>
+          </div>)}</Section>
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (
           <div><label htmlFor="comfyui-url">ComfyUI server URL</label><input id="comfyui-url" value={v.url} onChange={e => set('url', e.target.value)} placeholder="https://…" /></div>)}</Section>

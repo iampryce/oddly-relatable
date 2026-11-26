@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .config import get_settings
 from .secrets_store import secret
 from .models import Setting
+from .stick_style import STICK_MAN_MASTER_PROMPT
 
 DEFAULTS: dict[str, dict] = {
     # Text generation (scripts, section and scene regeneration).
@@ -58,6 +59,16 @@ DEFAULTS: dict[str, dict] = {
         # Owner's choice (off by default): face expressions drawn by code on an APPROVED neutral (face_expressions.py)
         # are approved as they are made. Only the face changes, so the approved drawing stays the character.
         "auto_approve_face_expressions": False},
+    # The stick pipeline (stick_pipeline.py, owner decision 2026-11-25): character masters drawn from the studio style
+    # prompt + the character's own lines, every later image of a character made FROM its approved master, shot stills
+    # from the set + masters, and approved stills animated. style_reference: the owner's chosen style example
+    # ({"kind": "character_asset" | "asset", "id": n}) or None. Every paid call shows its cost first and needs a click.
+    "stick": {"style_prompt": STICK_MAN_MASTER_PROMPT, "style_reference": None,
+              "image_provider": "wavespeed-nano-banana-2.1", "video_provider": "wavespeed-wan-2.2-i2v-720p",
+              "master_candidates": 2, "video_seconds": 5},
+    # The studio chat (chat.py): auto = Anthropic when its key is saved, else OpenAI. Each message shows its estimated
+    # cost first; max_tokens caps the answer (and so the most one message can cost).
+    "chat": {"provider": "auto", "max_tokens": 4000},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -120,6 +131,15 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         cap = value.get("talking_plan_cap_usd", 0.5)
         if not (isinstance(cap, (int, float)) and 0 < cap <= 10):
             raise ValueError("motion.talking_plan_cap_usd must be more than 0 and at most 10")
+    if key == "stick":
+        from .stick_pipeline import check_stick_settings
+        check_stick_settings(db, value)
+    if key == "chat":
+        if value.get("provider", "auto") not in ("auto", "anthropic", "openai"):
+            raise ValueError("chat.provider must be auto, anthropic or openai")
+        mt = value.get("max_tokens", 4000)
+        if not (isinstance(mt, int) and not isinstance(mt, bool) and 256 <= mt <= 16000):
+            raise ValueError("chat.max_tokens must be a whole number between 256 and 16000")
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
