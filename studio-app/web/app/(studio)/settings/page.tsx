@@ -72,6 +72,9 @@ function GpuCard({value}: {value: any}) {
           <div><label htmlFor="gpu-warn">Warn at (share of the cap)</label><input id="gpu-warn" type="number" min={0.1} max={1} step={0.05} value={v.warn_at} onChange={num('warn_at')} /></div>
           <div><label htmlFor="gpu-idle">Terminate after idle (minutes)</label><input id="gpu-idle" type="number" min={1} max={60} value={v.idle_minutes} onChange={num('idle_minutes')} /></div>
           <div><label htmlFor="gpu-life">Maximum session length (minutes)</label><input id="gpu-life" type="number" min={15} max={480} value={v.max_lifetime_minutes} onChange={num('max_lifetime_minutes')} /></div>
+          <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
+            <input type="checkbox" style={{width: 'auto'}} checked={!!v.allow_expensive_gpus} onChange={e => s.set('allow_expensive_gpus', e.target.checked)} />
+            Allow expensive GPUs for talking shots: try the A100 (about $2.09–2.19/h) when no L40S or RTX 6000 Ada (about $1.09/h) is free</label>
         </>}
       </div>
       <SaveRow s={s} />

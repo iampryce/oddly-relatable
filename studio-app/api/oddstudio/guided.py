@@ -26,7 +26,8 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
-PLACEHOLDERS = ("closeups", "faces", "movement", "talking", "quality", "assembly")
+PLACEHOLDERS = ("closeups", "faces", "movement", "quality", "assembly")
+ORDER = ("upload", "acting", "prompts", "masters", "sets", "closeups", "faces", "movement", "talking", "quality", "assembly")
 
 
 def key(eid: int) -> str:
@@ -203,6 +204,11 @@ def guide(db: Session, ep: Episode) -> dict:
 
     for k in PLACEHOLDERS:
         steps[k] = {"status": "not_started", "cost": None, "detail": "", "available": False}
+
+    # 9. talking shots (talking_s2v.py)
+    from . import talking_s2v
+    steps["talking"] = talking_s2v.summary(db, ep)
+    steps = {k: steps[k] for k in ORDER if k in steps}
     for k in steps:
         steps[k].setdefault("available", True)
     return {"episode": {"id": ep.id, "title": ep.title, "source": ep.source}, "steps": steps,

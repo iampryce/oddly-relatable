@@ -721,3 +721,43 @@ At 720p, generation takes about 3.2× as long (official table), and the GPU cost
 - RunPod pricing (dated 2026-11-12): https://www.runpod.io/pricing
 - RunPod billing: https://docs.runpod.io/pods/pricing
 - fal.ai pricing and model pages: https://fal.ai/pricing, https://fal.ai/models/fal-ai/wan/v2.2-a14b/image-to-video, https://fal.ai/models/fal-ai/wan/v2.2-14b/speech-to-video, https://fal.ai/models/fal-ai/kling-video/ai-avatar/v2/standard, https://fal.ai/models/fal-ai/kling-video/v2.6/pro/image-to-video
+
+# Part 3: Talking shots on rented ComfyUI sessions (built 2026-11-26)
+
+## 19. How the talking-shot step uses the GPU manager
+
+The guided page's step 9 renders talking shots with Wan 2.2 Speech-to-Video (owner-approved settings "B"). Code:
+`talking_s2v.py` (the step, its routes and the render job), `comfy_session.py` (the session kind), `comfy.py` (the
+ComfyUI client) and `pose_remote.py` (the actor's pose points).
+
+**A second session kind, not a new worker job.** The portable worker image (§11.2) is not built or published yet. The
+official image `runpod/comfyui:2.5.0-comfyuiv0.45.0-cuda13.2` ran this exact method on real GPUs, so a session of kind
+`comfyui` launches it unchanged and the studio talks to ComfyUI directly. Everything that controls money is shared with
+`gpu.py`: the same ledger row, the reservation of price x (maximum lifetime + 5 min) before the pod is created and the
+monthly cap, the same pod name prefix (so the orphan sweep covers these pods), the same sweep (idle timer, maximum
+lifetime, cap, pod gone) and `terminate_session` (terminate, never stop). The render job carries `"backend": "gpu"`, so
+the idle timer never fires while it runs. Worker-image sessions and ComfyUI sessions are never reused for each other.
+
+| Item | Value |
+|---|---|
+| Image | `runpod/comfyui:2.5.0-comfyuiv0.45.0-cuda13.2`, 120 GB disk, no volume, Secure Cloud |
+| Ports | `8188/http` (ComfyUI through `https://<pod>-8188.proxy.runpod.net`), `22/tcp` (pose points only) |
+| Auth | a random `COMFYUI_PASSWORD` per session (Bearer); header `User-Agent: curl/8.7.1` (Cloudflare blocks the Python agent) |
+| GPU order | NVIDIA L40S, then NVIDIA RTX 6000 Ada Generation (about $1.09/h); NVIDIA A100 80GB PCIe only with Settings > GPU worker "allow expensive GPUs" (off by default). RunPod's HTTP 400 on create means that type is not free: the next is tried, each cap-checked at its own price |
+| Models | ComfyUI-Manager `POST /v2/manager/queue/install_model` + `POST /v2/manager/queue/start` (headers `Sec-Fetch-Site: same-origin`, `Origin: <proxy url>`), then `GET /v2/manager/queue/status` until idle; each file is then checked in `GET /models/<folder>` |
+| End | the session is terminated when the render ends (unless another talking render is queued); the sweep is the backstop |
+
+**Pose points (MediaPipe 0.10.14) run on the GPU session, not on the studio server.** MediaPipe 0.10.14 has wheels for
+Python 3.8-3.12 only; the API image (Debian trixie) runs Python 3.13. The studio cuts the needed reference frames itself
+(FFmpeg), copies them to the pod over SSH with a throwaway ed25519 key made for that session (public half as
+`PUBLIC_KEY`, private half encrypted in the ledger and dropped when the session ends), runs MediaPipe there and copies
+back only the points. The frames are deleted on both sides. ComfyUI and the model only ever receive the drawn head
+skeleton, never the reference picture. Host-key checking is off for these throwaway pods (their key cannot be known in
+advance). If anything in this part fails, the shots render without a movement guide.
+
+**Cost.** About 11 GPU minutes per 77-frame piece (measured on L40S / RTX 6000 Ada, including model load), scaled by
+frames, plus about 10 minutes of start-up and model download per session, plus about 4 minutes when pose points must be
+read. "About" uses the first GPU type's price; "at most" the most expensive allowed type plus 25%. The request must carry
+"at most" (HTTP 409 otherwise), a render that would pass the monthly cap is refused (409), and the job stops before a
+shot that would take the run past the confirmed amount. When a shot would not finish within the maximum session length,
+the session is replaced (a new reservation, a new cap check).

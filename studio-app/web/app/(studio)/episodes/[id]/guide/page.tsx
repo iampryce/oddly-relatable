@@ -9,6 +9,7 @@ import {api, uploadFile} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import ShotChat from '@/components/ShotChat';
+import GuideTalkingShots from '@/components/GuideTalkingShots';
 import {costText, currentStep, KIND_LABEL, moveHelp, STATUS_TEXT, STATUS_TONE, statusOf, STEPS, type GuideStep} from '@/lib/guide';
 
 type Act = ReturnType<typeof useAction>;
@@ -90,6 +91,7 @@ function StepCard({n, s, g, id, act, reload, current, onHelp}: {n: number; s: Gu
         {s.key === 'masters' && <MastersStep info={info} />}
         {s.key === 'sets' && <p className="small"><Link className="btn sm primary" href={`/episodes/${id}`}>Open the storyboard</Link>
           {' '}Each still shows its price on its own button.</p>}
+        {s.key === 'talking' && <GuideTalkingShots id={id} onChange={reload} />}
       </div>}
     </li>);
 }

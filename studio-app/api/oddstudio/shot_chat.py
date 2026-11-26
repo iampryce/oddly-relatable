@@ -29,6 +29,10 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
                                                           them is queued for the own-GPU animation step)
   acting  note_only | edit_beat {shot, beat_index, fields} (free, acting_analysis.edit_beat)
   prompt  note_only | update_prompt {prompt}             (free, the draft becomes this text: prompt_writer.edit)
+  talk    note_only | rerender_talking_shot {prompt?, use_guide?}
+                                                         (a new talking-shot render on the rented GPU: paid,
+                                                          talking_s2v.render with its confirm_usd / cap 409s; thread
+                                                          key talk:<shot>)
 """
 from __future__ import annotations
 
@@ -52,10 +56,11 @@ from .settings_store import get_section
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
-         "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft"}
+         "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
+         "talk": "Talking shot"}
 ALLOWED = {"master": ("note_only", "redo_master"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot"), "acting": ("note_only", "edit_beat"),
-           "prompt": ("note_only", "update_prompt")}
+           "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot")}
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
@@ -143,7 +148,14 @@ class RerenderShot(_Strict):
     settings: RerenderSettings
 
 
-Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot], Field(discriminator="type")]
+class RerenderTalkingShot(_Strict):
+    type: Literal["rerender_talking_shot"]
+    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    use_guide: bool | None = None
+
+
+Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot],
+                     Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
 
@@ -186,6 +198,11 @@ def describe(p: dict) -> str:
         bits = [f"{k}: {v}" for k, v in s.items() if k != "prompt"]
         return ("A new clip for this shot (the earlier clips are kept)" + (f", with {', '.join(bits)}" if bits else "")
                 + (", moved as the prompt below says." if s.get("prompt") else "."))
+    if t == "rerender_talking_shot":
+        guide = ("" if "use_guide" not in p else
+                 ", following the actor's head" if p["use_guide"] else ", without the movement guide")
+        return ("A new render of this talking shot on the rented GPU (the earlier results are kept)" + guide
+                + (", from the prompt below (it also becomes the shot's prompt)." if p.get("prompt") else ", from the shot's current prompt."))
     return "Nothing changes: this is advice only."
 
 
@@ -242,7 +259,7 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -263,7 +280,7 @@ def check_ref(db: Session, ref: Ref) -> None:
         return
     if ref.episode_id is None or db.get(Episode, ref.episode_id) is None:
         raise HTTPException(404, "episode not found")
-    if ref.step in ("still", "clip", "acting") and not ref.item.isdigit():
+    if ref.step in ("still", "clip", "acting", "talk") and not ref.item.isdigit():
         raise HTTPException(422, "the item of this step is a shot number")
 
 
@@ -395,6 +412,10 @@ def build_context(db: Session, ref: Ref) -> dict:
                                   "clips": len(SS.clips_of(shot)), "still_approved": bool(shot.get("approved")),
                                   "clip_approved": bool(shot.get("clip_approved")),
                                   "note": "the current video service takes a prompt and a length only (no cfg or steps)"}
+        if ref.step == "talk":
+            from . import talking_s2v as TS
+            cx["item"] = f"Talking shot {n} (Wan 2.2 Speech-to-Video from the approved still)"
+            cx.update(TS.chat_context(db, ep, n))
         if ref.step == "acting":
             cx["item"] = f"Acting notes of shot {n}"
             cx["settings"] = {"analysis_model": ", ".join(AA.stored(db, ep.id).get("model_used") or []) or "not run yet"}
@@ -424,6 +445,10 @@ SCHEMAS = {
     "rerender_shot": ('{"type": "rerender_shot", "settings": {"prompt": "<the motion prompt>", "seconds": <one of the '
                       'allowed seconds>}}  (add "cfg" or "steps" only if the owner asks for them: they wait for the '
                       'own-GPU step)'),
+    "rerender_talking_shot": ('{"type": "rerender_talking_shot", "prompt": "<the full new positive prompt, or leave out to '
+                              'keep the current one>", "use_guide": <true|false, or leave out to keep the current '
+                              'choice>}  (the model and its settings are fixed; only the prompt and the movement guide '
+                              'can change)'),
 }
 
 SYSTEM = """You help the owner of Oddly Relatable, a small studio making short 2D stick-figure comedy cartoons. The
@@ -537,6 +562,9 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
         if not vp or not vp["implemented"]:
             return {"usd": None, "label": "no video service connected"}
         return video_cost(int(p["settings"].get("seconds") or st.get("video_seconds") or 5), vp["usd_per_second"])
+    if p["type"] == "rerender_talking_shot":
+        from . import talking_s2v as TS
+        return TS.chat_render_cost(db, ref.episode_id, int(ref.item), p.get("use_guide"))
     return None
 
 
@@ -661,6 +689,10 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
         j = SS.animate(ref.episode_id, int(ref.item), SS.AnimateIn(seconds=seconds, confirm_usd=confirm_usd,
                                                                     prompt=s.get("prompt")), db, user)
         return {"done": "A new clip is being made.", "job_id": j["id"]}
+    if t == "rerender_talking_shot":
+        from . import talking_s2v as TS
+        j = TS.rerender_from_chat(db, ref.episode_id, int(ref.item), p.get("prompt"), p.get("use_guide"), confirm_usd, user)
+        return {"done": "The talking shot is being rendered again on the rented GPU.", "job_id": j["id"]}
     raise HTTPException(409, "this proposal has nothing to apply")
 
 

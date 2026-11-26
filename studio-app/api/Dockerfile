@@ -2,9 +2,10 @@
 #   docker build -f studio-app/api/Dockerfile -t oddstudio-api .
 FROM node:22-trixie-slim
 # xvfb + Mesa (libgl1, libglx-mesa0, libgl1-mesa-dri, libxi6): the Studio 3D rig animator's headless-gl draws in software
-# on a virtual display (no GPU, nothing shown)
+# on a virtual display (no GPU, nothing shown). openssh-client: talking shots read the actor's pose points with MediaPipe
+# on the rented GPU over SSH (pose_remote.py; MediaPipe 0.10.14 has no wheel for this image's Python 3.13).
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ffmpeg fonts-dejavu-core ca-certificates curl \
-    xvfb xauth libgl1 libglx-mesa0 libgl1-mesa-dri libxi6 \
+    xvfb xauth libgl1 libglx-mesa0 libgl1-mesa-dri libxi6 openssh-client \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 studio
 WORKDIR /app

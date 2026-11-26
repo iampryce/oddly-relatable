@@ -30,7 +30,9 @@ DEFAULTS: dict[str, dict] = {
     # rented (a RunPod Secure Cloud pod per session, terminated when idle). The monthly cap applies to rented sessions
     # (separate from fal.ai's budget); the owner's accepted defaults: $50, warn at 80%, 5 min idle, 120 min lifetime.
     "gpu": {"mode": "off", "worker_url": "", "provider": "runpod", "gpu_type": "NVIDIA H100 PCIe", "image": "",
-            "disk_gb": 150, "monthly_cap_usd": 50.0, "warn_at": 0.8, "idle_minutes": 5, "max_lifetime_minutes": 120},
+            "disk_gb": 150, "monthly_cap_usd": 50.0, "warn_at": 0.8, "idle_minutes": 5, "max_lifetime_minutes": 120,
+            # talking shots (comfy_session.py): the A100 (about twice the price) is tried only when this is on
+            "allow_expensive_gpus": False},
     # Reference analysis (Create from Reference): speech-to-text with word timestamps, and frame analysis.
     "transcription": {"provider": "none", "model": "", "fallback": "none", "language": ""},
     # notes_cap_usd: the most one episode's video notes may cost (checked before the upload; owner default $0.50)
@@ -207,6 +209,8 @@ def check_gpu(v: dict) -> None:
     for k, (lo, hi) in rng.items():
         if k in v and not (isinstance(v[k], (int, float)) and not isinstance(v[k], bool) and lo <= v[k] <= hi):
             raise ValueError(f"gpu.{k} must be between {lo} and {hi}")
+    if "allow_expensive_gpus" in v and not isinstance(v["allow_expensive_gpus"], bool):
+        raise ValueError("gpu.allow_expensive_gpus must be true or false")
     gt = v.get("gpu_type", "")
     if gt and (len(gt) > 60 or not all(ch.isalnum() or ch in " -_." for ch in gt)):
         raise ValueError("gpu.gpu_type is not a GPU type name")

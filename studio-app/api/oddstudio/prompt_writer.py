@@ -60,6 +60,12 @@ WHAT = {
     "movement": ("a MOVEMENT clip from an approved still (image-to-video): describe the motion from the first pose to "
                  "the last, its timing and how big it is. The camera does not move unless the notes say so. The "
                  "characters' design never changes."),
+    # used by the talking-shots step (talking_s2v.py), not offered in the step-3 picker
+    "talking": ("a TALKING clip (speech-to-video): the approved still is animated so the speaker's mouth follows the "
+                "recorded line. Say who speaks and how: the mouth stays SMALL and simple (no teeth, tongue or lips), "
+                "opens and closes softly with each syllable and closes when the speaking stops; small natural head "
+                "moves and brow lifts from the acting notes; hands keep holding what they hold. The others stay still. "
+                "Static camera; same drawing, line style and colours throughout."),
 }
 
 SYSTEM = ("You write prompts for image and video generation models for a small studio making 2D stick-figure comedy "

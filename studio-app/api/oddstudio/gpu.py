@@ -265,7 +265,8 @@ def ensure_worker(db: Session, log=print) -> dict:
         save(db, {"sessions": {}, "orphans": []})
         db.commit()
     led = ledger(db, lock=True)
-    live = [s for s in led["sessions"].values() if s.get("status") in LIVE]
+    # only worker-image sessions are reused here; ComfyUI sessions (comfy_session.py) have their own entry point
+    live = [s for s in led["sessions"].values() if s.get("status") in LIVE and s.get("kind", "worker") == "worker"]
     if live:
         s = live[0]
         db.commit()
@@ -401,6 +402,8 @@ def _close(db: Session, sid: str, reason: str, pod_gone: bool = False) -> dict:
     if s["status"] in LIVE:
         t = clock()
         s.update(status="ended", ended_at=t, reason=reason, cost_usd=0.0 if pod_gone and not s.get("pod_id") else accrued(s, t))
+        for k in ("password", "ssh_key"):     # a ComfyUI session's secrets are of no use once the pod is gone
+            s.pop(k, None)
         save(db, led)
         _event(db, f"GPU session {sid} ended ({reason}); cost ${s['cost_usd']:.2f}")
     db.commit()
@@ -497,7 +500,7 @@ def start_sweeper(interval: float = 30.0, log=print) -> threading.Thread:
 
 # ------------------------------------------------------------------ routes (status and the owner's stop button)
 def public_session(s: dict, t: float) -> dict:
-    return {k: s.get(k) for k in ("id", "status", "gpu_type", "price_per_hour", "price_source", "reserved_usd", "pod_id",
+    return {k: s.get(k) for k in ("id", "kind", "status", "gpu_type", "price_per_hour", "price_source", "reserved_usd", "pod_id",
                                   "clips", "reason", "launched_at", "ready_at", "ended_at", "last_used")} | {"cost_usd": accrued(s, t)}
 
 

@@ -29,4 +29,7 @@ test('proposal detail is the new prompt when there is one', () => {
   assert.equal(proposalDetail({type: 'update_prompt', prompt: 'P'}), 'P');
   assert.equal(proposalDetail({type: 'rerender_shot', settings: {prompt: 'slow'}}), 'slow');
   assert.equal(proposalDetail({type: 'edit_beat'}), '');
+  assert.equal(proposalDetail({type: 'rerender_talking_shot', prompt: 'smaller mouth'}), 'smaller mouth');
+  assert.equal(proposalDetail({type: 'rerender_talking_shot', use_guide: false}), '');
+  assert.equal(threadQuery('talk', 4, '12'), '/shot-chat/thread?step=talk&item=4&episode_id=12');
 });
