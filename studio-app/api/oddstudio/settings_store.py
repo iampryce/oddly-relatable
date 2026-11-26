@@ -81,6 +81,14 @@ DEFAULTS: dict[str, dict] = {
     # Chat under each shot (shot_chat.py): openai (the model below at its official price per million tokens) or
     # anthropic (the studio chat's model and price). max_tokens caps the answer, and so what one message can cost.
     "shot_chat": {"provider": "openai", "model": "gpt-5.5", "usd_in": 5.0, "usd_out": 30.0, "max_tokens": 2000},
+    # Quality check of the finished clips (clip_qa.py) and the "Make whole episode" autopilot (autopilot.py).
+    # qa_paid_tier: the owner says the Gemini key is on a paid tier (then qa_model, at its price per million tokens);
+    # otherwise the free-tier model is used ONLY when qa_use_free_tier is on (Google may use free-tier uploads to
+    # improve its models). qa_inline_mb: a clip up to this size is sent whole besides its frames.
+    # max_redos_per_shot: automatic redos the autopilot may make per shot for problems the check calls "clear".
+    "quality": {"qa_paid_tier": False, "qa_use_free_tier": False, "qa_model": "gemini-3.1-pro-preview",
+                "qa_usd_in": 2.0, "qa_usd_out": 12.0, "qa_free_model": "gemini-3.5-flash", "qa_inline_mb": 12,
+                "max_redos_per_shot": 1},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -157,6 +165,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
     if key == "shot_chat":
         from .shot_chat import check_settings
         check_settings(value)
+    if key == "quality":
+        check_quality(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
@@ -186,6 +196,27 @@ def check_guide(v: dict) -> None:
     free = v.get("acting_free_models", [])
     if not (isinstance(free, list) and len(free) <= 5 and all(isinstance(m, str) and name.match(m) for m in free)):
         raise ValueError("guide.acting_free_models must be a list of up to 5 model names")
+
+
+def check_quality(v: dict) -> None:
+    """Settings > Quality check and autopilot: plain model names, prices and limits in range, switches true/false."""
+    import re
+    name = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+    for k in ("qa_paid_tier", "qa_use_free_tier"):
+        if k in v and not isinstance(v[k], bool):
+            raise ValueError(f"quality.{k} must be true or false")
+    for k in ("qa_model", "qa_free_model"):
+        if k in v and not (isinstance(v[k], str) and name.match(v[k])):
+            raise ValueError(f"quality.{k} must be a model name (letters, digits, dots, dashes)")
+    for k in ("qa_usd_in", "qa_usd_out"):
+        if k in v and not (isinstance(v[k], (int, float)) and not isinstance(v[k], bool) and 0 < v[k] <= 200):
+            raise ValueError(f"quality.{k} must be a price per million tokens above 0 and at most 200")
+    mb = v.get("qa_inline_mb", 12)
+    if not (isinstance(mb, (int, float)) and not isinstance(mb, bool) and 0 <= mb <= 14):
+        raise ValueError("quality.qa_inline_mb must be between 0 and 14")
+    n = v.get("max_redos_per_shot", 1)
+    if not (isinstance(n, int) and not isinstance(n, bool) and 0 <= n <= 3):
+        raise ValueError("quality.max_redos_per_shot must be 0 to 3")
 
 
 def check_gpu(v: dict) -> None:

@@ -1,11 +1,11 @@
-// node --test: the guided steps (order, placeholders without buttons), the help panel's next/back and the cost text.
+// node --test: the guided steps (order, all available), the help panel's next/back and the cost text.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {costText, currentStep, moveHelp, statusOf, STEPS} from './guide.ts';
 
-test('eleven steps in order; 10 and 11 are placeholders (6-8 reactions and 9 talking shots are live)', () => {
+test('eleven steps in order, all in the dashboard (10 quality check, 11 assembly)', () => {
   assert.deepEqual(STEPS.map(s => s.key), ['upload', 'acting', 'prompts', 'masters', 'sets', 'closeups', 'faces', 'movement', 'talking', 'quality', 'assembly']);
-  assert.deepEqual(STEPS.filter(s => !s.available).map(s => s.key), ['quality', 'assembly']);
+  assert.deepEqual(STEPS.filter(s => !s.available).map(s => s.key), []);
   assert.ok(STEPS.find(s => s.key === 'faces')!.help.join(' ').includes('screen-left'));
   assert.ok(STEPS.find(s => s.key === 'movement')!.help.join(' ').includes('living holds'));
   assert.ok(STEPS.find(s => s.key === 'sets')!.help.join(' ').includes('rotate'));

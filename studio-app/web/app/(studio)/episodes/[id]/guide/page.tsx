@@ -2,7 +2,8 @@
 // Guided generation: every step from the uploads to the final review, in order, each with what it does, why, what it
 // needs, its live cost and its status, and a help panel that walks through the current step one instruction at a time.
 // Paid buttons show their price and ask first; the request carries that price (the API refuses any other with 409).
-// Nothing here approves anything by itself. Steps that are not in the dashboard yet show their help and no buttons.
+// Nothing here approves anything by itself. "Make whole episode" (the autopilot) sits on top: one budget, then it runs
+// the steps and stops at every approval.
 import Link from 'next/link';
 import {use, useEffect, useState} from 'react';
 import {api, uploadFile} from '@/lib/api';
@@ -12,6 +13,9 @@ import GuideReactions from '@/components/GuideReactions';
 import GuideSets from '@/components/GuideSets';
 import ShotChat from '@/components/ShotChat';
 import GuideTalkingShots from '@/components/GuideTalkingShots';
+import Autopilot from '@/components/Autopilot';
+import GuideAssembly from '@/components/GuideAssembly';
+import GuideQuality from '@/components/GuideQuality';
 import {costText, currentStep, KIND_LABEL, moveHelp, STATUS_TEXT, STATUS_TONE, statusOf, STEPS, type GuideStep} from '@/lib/guide';
 
 type Act = ReturnType<typeof useAction>;
@@ -38,6 +42,7 @@ export default function GuidePage({params}: {params: Promise<{id: string}>}) {
         </div>
       </div>
       <ErrorBox error={act.error} />
+      <Autopilot id={id} onChange={reload} />
       <div className="gd-layout">
         <ol className="gd-steps">
           {STEPS.map((s, i) => <StepCard key={s.key} n={i + 1} s={s} g={g} id={id} act={act} reload={reload}
@@ -96,6 +101,8 @@ function StepCard({n, s, g, id, act, reload, current, onHelp}: {n: number; s: Gu
           {' '}for the shot stills made from these pictures. Each still shows its price on its own button.</p></>}
         {(s.key === 'closeups' || s.key === 'faces' || s.key === 'movement') && <GuideReactions id={id} part={s.key} onChange={reload} />}
         {s.key === 'talking' && <GuideTalkingShots id={id} onChange={reload} />}
+        {s.key === 'quality' && <GuideQuality id={id} onChange={reload} />}
+        {s.key === 'assembly' && <GuideAssembly id={id} onChange={reload} />}
       </div>}
     </li>);
 }

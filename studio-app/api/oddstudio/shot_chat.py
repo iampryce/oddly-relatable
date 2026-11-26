@@ -42,6 +42,11 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
   seating note_only | repaint_background {prompt, box?}  (the background behind the seated people repainted on the
   repair  note_only | repaint_background {prompt, box?}   rented GPU: paid, room_sets.start_repair; thread keys
                                                           seating:<side> and repair:<repair id>)
+  final   note_only | redo_shot {shot, prompt?}          (the final cut, thread key final:<episode id>: one shot made
+                                                          again through its own step's redo route: a talking shot
+                                                          rendered again, a reaction shot animated again, or a still
+                                                          drawn again; paid, with that route's confirm_usd / cap 409s)
+The quality check (clip_qa.py) posts into the talk:/clip: threads as an assistant message from "Quality check".
 """
 from __future__ import annotations
 
@@ -67,12 +72,13 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
          "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
-         "seating": "Seating picture", "repair": "Repaired picture"}
+         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode"}
 ALLOWED = {"master": ("note_only", "redo_master"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
            "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
            "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
-           "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background")}
+           "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background"),
+           "final": ("note_only", "redo_shot")}
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
@@ -196,8 +202,14 @@ class RepaintBackground(_Strict):
     box: Box | None = None
 
 
+class RedoShot(_Strict):
+    type: Literal["redo_shot"]
+    shot: int = Field(ge=1, le=999)
+    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
 Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
-                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground],
+                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
@@ -267,6 +279,10 @@ def describe(p: dict) -> str:
     if t == "remake_wall":
         return ("A new straight-on picture of this wall from the prompt below (the earlier pictures are kept; nothing is "
                 "approved for you).")
+    if t == "redo_shot":
+        return (f"Shot {p['shot']} is made again through its own step (a talking shot is rendered again, a reaction "
+                "shot animated again, a still drawn again); the earlier results are kept and nothing is approved for you"
+                + (", from the prompt below." if p.get("prompt") else "."))
     if t == "repaint_background":
         where = "inside the box below" if p.get("box") else "above the people (the usual box)"
         return (f"The background {where} is repainted as the prompt says, on the rented GPU. The people are cut out and "
@@ -338,7 +354,7 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -362,6 +378,8 @@ def check_ref(db: Session, ref: Ref) -> None:
         return
     if ref.episode_id is None or db.get(Episode, ref.episode_id) is None:
         raise HTTPException(404, "episode not found")
+    if ref.step == "final" and ref.item != str(ref.episode_id):
+        raise HTTPException(422, "the item of the final cut's thread is the episode id")
     if ref.step in ("still", "clip", "acting", "talk") and not ref.item.isdigit():
         raise HTTPException(422, "the item of this step is a shot number")
 
@@ -443,6 +461,10 @@ def build_context(db: Session, ref: Ref) -> dict:
         cx["settings"] = {"image_model": ip["model"] if ip else "none", "candidates_per_run": int(st.get("master_candidates") or 2),
                           "usd_per_image": ip["usd_per_image"] if ip else None,
                           "has_approved_master": approved_master(db, c.id) is not None}
+    elif ref.step == "final":
+        ep = db.get(Episode, ref.episode_id)
+        cx["episode"] = ep.title
+        cx.update(final_context(db, ep))
     elif ref.step in ("wall", "seating", "repair"):
         from . import room_sets as RS
         ep = db.get(Episode, ref.episode_id)
@@ -525,6 +547,25 @@ def build_context(db: Session, ref: Ref) -> dict:
     return cx
 
 
+def final_context(db: Session, ep: Episode) -> dict:
+    """The final cut: its shot-by-shot list (source, length, warnings) and the quality check's findings, as text."""
+    from . import assembly as A
+    from . import clip_qa as Q
+    p = A.plan_rows(db, ep)
+    qa = Q.stored(db, ep.id).get("checks") or {}
+    found: dict = {}
+    for c in qa.values():
+        if c.get("issues"):
+            found.setdefault(c.get("shot"), []).extend(f"{i['t']:.1f} s {i['kind']}: {i['what']}" for i in c["issues"][:4])
+    av = A.stored(db, ep.id)
+    cut = (av.get("cuts") or [None])[0]
+    return {"item": "The final cut of the episode (all shots over the original recording)",
+            "settings": {"shots": [{"shot": r["index"], "from_s": r["start"], "seconds": r["seconds"], "source": r["label"],
+                                    "warnings": r["warnings"], "quality_check": found.get(r["index"], [])} for r in p["rows"]],
+                         "latest_cut": ({"seconds": cut["seconds"], "approved": av.get("approved") == cut["id"]} if cut else None),
+                         "redo": "redo_shot makes ONE shot again through its own step; say which shot"}}
+
+
 def _pose_context(db: Session, ep: Episode, n: int, i: int) -> dict:
     from . import reactions as R
     row = next((r for r in R.reaction_rows(db, ep) if r["index"] == n), None)
@@ -591,6 +632,8 @@ SCHEMAS = {
     "repaint_background": ('{"type": "repaint_background", "prompt": "<what the background should become, e.g. the '
                            'fireplace wall with the bearded portrait instead of the window>", "box": {"x": <px>, "y": <px>, '
                            '"w": <px>, "h": <px>}}  (leave "box" out for the usual area above the people)'),
+    "redo_shot": ('{"type": "redo_shot", "shot": <the shot number>, "prompt": "<a new prompt for that shot, or leave out to '
+                  'keep its current one>"}  (the shot is made again through its own step and comes back for approval)'),
     "rerender_talking_shot": ('{"type": "rerender_talking_shot", "prompt": "<the full new positive prompt, or leave out to '
                               'keep the current one>", "use_guide": <true|false, or leave out to keep the current '
                               'choice>}  (the model and its settings are fixed; only the prompt and the movement guide '
@@ -731,7 +774,38 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
     if p["type"] in ("remake_wall", "repaint_background"):
         from . import room_sets as RS
         return RS.chat_cost(db, p)
+    if p["type"] == "redo_shot":
+        return redo_shot_cost(db, ref.episode_id, p["shot"])
     return None
+
+
+def shot_kind(db: Session, ep: Episode, n: int) -> str:
+    """talking | reaction | still: which step makes this storyboard shot."""
+    from . import reactions as R
+    from . import talking_s2v as TS
+    if any(r["index"] == n for r in TS.talking_rows(db, ep)):
+        return "talking"
+    if any(r["index"] == n for r in R.reaction_rows(db, ep)):
+        return "reaction"
+    return "still"
+
+
+def redo_shot_cost(db: Session, eid: int, n: int) -> dict:
+    """The price of a redo_shot: the price of that step's own redo for this shot."""
+    from .stick_pipeline import IMAGE_PROVIDERS, image_cost
+    ep = db.get(Episode, eid)
+    kind = shot_kind(db, ep, n)
+    if kind == "talking":
+        from . import talking_s2v as TS
+        return TS.chat_render_cost(db, eid, n, None)
+    if kind == "reaction":
+        from . import reactions as R
+        row = next(r for r in R.reaction_rows(db, ep) if r["index"] == n)
+        st = R.ensure_shot(db, ep, R.stored(db, eid), row)
+        est = R.estimate(0, len(R.clips_needed(R.timeline(st.get("poses") or [], row["t1"] - row["t0"]))), R._prices(db))
+        return {"usd": est["usd_max"], "label": f"up to ${est['usd_max']:.2f} of GPU time ({est['label']})"}
+    ip = IMAGE_PROVIDERS.get(get_section(db, "stick").get("image_provider"))
+    return image_cost(1, ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
 
 
 def message_out(db: Session, ref: Ref, m: dict) -> dict:
@@ -882,7 +956,25 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
     if t in ("remake_wall", "repaint_background"):
         from . import room_sets as RS
         return RS.chat_apply(db, db.get(Episode, ref.episode_id), ref.step, ref.item, p, confirm_usd, user)
+    if t == "redo_shot":
+        return redo_shot(db, ref.episode_id, p["shot"], p.get("prompt"), confirm_usd, user)
     raise HTTPException(409, "this proposal has nothing to apply")
+
+
+def redo_shot(db: Session, eid: int, n: int, prompt: str | None, confirm_usd: float | None, user: str) -> dict:
+    """One shot made again through ITS step's existing redo route (all that route's checks and its confirm_usd)."""
+    from . import stick_shots as SS
+    kind = shot_kind(db, db.get(Episode, eid), n)
+    if kind == "talking":
+        from . import talking_s2v as TS
+        j = TS.rerender_from_chat(db, eid, n, prompt, None, confirm_usd, user)
+        return {"done": f"Talking shot {n} is being rendered again on the rented GPU.", "job_id": j["id"]}
+    if kind == "reaction":
+        from . import reactions as R
+        j = R.animate(eid, n, R.AnimateIn(confirm_usd=confirm_usd), db, user)
+        return {"done": f"Reaction shot {n} is being animated again.", "job_id": j["id"]}
+    j = SS.make_still(eid, n, SS.StillIn(confirm_usd=confirm_usd, prompt=prompt), db, user)
+    return {"done": f"A new still is being made for shot {n}.", "job_id": j["id"]}
 
 
 def _set_status(db: Session, ref: Ref, message_id: str, status: str, extra: dict) -> None:

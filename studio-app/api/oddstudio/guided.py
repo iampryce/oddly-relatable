@@ -5,8 +5,8 @@ It also keeps the episode's reference video for the acting analysis. The video i
 private/ (never in the episode's asset list, so nothing else can pick it up as an image or video reference) and only
 ever sent to the acting analysis. The owner can remove it at any time.
 
-Step statuses: not_started | running | needs_approval | done. Steps 10-11 are not in the dashboard yet ("available":
-false) and never offer a button.
+Step statuses: not_started | running | needs_approval | done. Step 10 (quality check) is clip_qa.py, step 11 (assembly
+and the owner's review) is assembly.py; the "Make whole episode" autopilot on top of the page is autopilot.py.
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 MAX_VIDEO_BYTES = 250 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
-PLACEHOLDERS = ("quality", "assembly")
 ORDER = ("upload", "acting", "prompts", "masters", "sets", "closeups", "faces", "movement", "talking", "quality", "assembly")
 
 
@@ -171,11 +170,7 @@ def guide(db: Session, ep: Episode) -> dict:
                         "detail": f"{len(approved)} ready, {len(drafts)} to check" if (drafts or approved) else ""}
 
     # 4. character masters (the episode's cast)
-    cast_keys: list[str] = []
-    for sc in ep.scenes:
-        cast_keys += [k for k in sc.characters or [] if k not in cast_keys]
-    chars = [c for c in db.query(Character).filter(Character.key.in_(cast_keys))] if cast_keys else []
-    chars += [c for c in db.query(Character).filter_by(scope="episode", episode_id=ep.id) if c.key not in cast_keys]
+    chars = cast(db, ep)
     ids = [c.id for c in chars]
     masters = {a.character_id for a in db.query(CharacterAsset).filter(CharacterAsset.character_id.in_(ids),
                CharacterAsset.kind == "master", CharacterAsset.status == "approved")} if ids else set()
@@ -209,9 +204,6 @@ def guide(db: Session, ep: Episode) -> dict:
                      "detail": "; ".join(x for x in (rs["detail"], f"{len(ok)} of {len(shots)} shots have an approved still"
                                                      if shots else "no storyboard yet") if x)}
 
-    for k in PLACEHOLDERS:
-        steps[k] = {"status": "not_started", "cost": None, "detail": "", "available": False}
-
     # 6-8. close-up crops, face poses and movement of the reaction shots (reactions.py)
     from . import reactions
     steps.update(reactions.summary(db, ep))
@@ -219,11 +211,26 @@ def guide(db: Session, ep: Episode) -> dict:
     # 9. talking shots (talking_s2v.py)
     from . import talking_s2v
     steps["talking"] = talking_s2v.summary(db, ep)
+
+    # 10. quality check (clip_qa.py) and 11. assembly and the owner's review (assembly.py)
+    from . import assembly, clip_qa
+    steps["quality"] = clip_qa.summary(db, ep)
+    steps["assembly"] = assembly.summary(db, ep)
     steps = {k: steps[k] for k in ORDER if k in steps}
     for k in steps:
         steps[k].setdefault("available", True)
     return {"episode": {"id": ep.id, "title": ep.title, "source": ep.source}, "steps": steps,
             "keys": {"gemini": bool(_secret("gemini_api_key", db)), "openai": bool(_secret("openai_api_key", db))}}
+
+
+def cast(db: Session, ep: Episode) -> list[Character]:
+    """The episode's characters: everyone in its storyboard scenes, then its own episode-only characters."""
+    cast_keys: list[str] = []
+    for sc in ep.scenes:
+        cast_keys += [k for k in sc.characters or [] if k not in cast_keys]
+    chars = [c for c in db.query(Character).filter(Character.key.in_(cast_keys))] if cast_keys else []
+    chars += [c for c in db.query(Character).filter_by(scope="episode", episode_id=ep.id) if c.key not in cast_keys]
+    return chars
 
 
 def _secret(name: str, db: Session) -> str:

@@ -117,8 +117,8 @@ class GuideTest(Base):
         g = self.c.get(f"/api/episodes/{self.eid}/guide").json()
         self.assertEqual(len(g["steps"]), 11)
         self.assertEqual(g["steps"]["upload"]["detail"], "0 of 3 uploaded")
-        for k in ("quality", "assembly"):
-            self.assertFalse(g["steps"][k]["available"])
+        for k in ("quality", "assembly"):                            # steps 10-11: clip_qa.py and assembly.py
+            self.assertTrue(g["steps"][k]["available"])
         for k in ("closeups", "faces", "movement"):                  # steps 6-8 are in the dashboard (reactions.py)
             self.assertTrue(g["steps"][k]["available"])
         self.assertTrue(g["steps"]["talking"]["available"])          # step 9 is in the dashboard (talking_s2v.py)

@@ -113,6 +113,10 @@ app.include_router(acting_analysis.router)
 app.include_router(prompt_writer.router)
 from . import shot_chat  # noqa: E402
 app.include_router(shot_chat.router)
+from . import assembly, autopilot, clip_qa  # noqa: E402  (guided steps 10-11 and "Make whole episode")
+app.include_router(clip_qa.router)
+app.include_router(assembly.router)
+app.include_router(autopilot.router)
 
 
 @app.middleware("http")

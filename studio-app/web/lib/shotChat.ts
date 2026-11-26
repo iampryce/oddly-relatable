@@ -2,12 +2,12 @@
 // every proposal and routes Apply to the step's own handler; these only shape what the page shows.
 import {usd4} from './stickPipeline.ts';
 
-export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk' | 'pose' | 'wall' | 'seating' | 'repair';
+export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk' | 'pose' | 'wall' | 'seating' | 'repair' | 'final';
 
 export const STEP_NOUN: Record<Step, string> = {
   master: 'this master', still: 'this still', clip: 'this clip', acting: 'these acting notes', prompt: 'this prompt',
   talk: 'this talking shot', pose: 'this pose', wall: 'this wall', seating: 'this seating picture',
-  repair: 'this repair',
+  repair: 'this repair', final: 'the final cut',
 };
 
 // GET /shot-chat/thread?... (episode_id is left out for a character master: those threads are studio-wide)
@@ -43,6 +43,7 @@ export const PROPOSAL_TITLE: Record<string, string> = {
   rerender_talking_shot: 'Render the talking shot again',
   redo_pose: 'Redraw this face', reanimate_shot: 'Animate the shot again',
   remake_wall: 'Draw this wall again', repaint_background: 'Repaint the background behind the people',
+  redo_shot: 'Make one shot again',
 };
 
 // the text shown in the proposal card besides "What will change" (the new prompt, if any)
@@ -54,6 +55,7 @@ export function proposalDetail(p: any): string {
   if (p.type === 'reanimate_shot') return Object.entries(p.move_prompts || {})
     .map(([k, v]) => `${k.startsWith('hold-') ? `Hold of pose ${k.slice(5)}` : `Move into pose ${k}`}: ${v}`).join('\n');
   if (p.type === 'rerender_shot') return p.settings?.prompt || '';
+  if (p.type === 'redo_shot') return `Shot ${p.shot}` + (p.prompt ? `\n${p.prompt}` : '');
   return '';
 }
 
