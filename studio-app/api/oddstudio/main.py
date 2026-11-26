@@ -97,6 +97,10 @@ app.include_router(studio_bin.router)
 app.include_router(gpu.router)
 from . import talking_s2v  # noqa: E402  (guided flow step 9: talking shots on a rented ComfyUI GPU)
 app.include_router(talking_s2v.router)
+from . import reactions  # noqa: E402  (guided flow steps 6-8: reactions and close-ups on a rented ComfyUI GPU)
+app.include_router(reactions.router)
+from . import room_sets  # noqa: E402  (guided flow step 5: sets and seating masters)
+app.include_router(room_sets.router)
 from . import system_disk  # noqa: E402
 app.include_router(system_disk.router)
 from . import chat, stick_pipeline, stick_shots  # noqa: E402
@@ -109,6 +113,10 @@ app.include_router(acting_analysis.router)
 app.include_router(prompt_writer.router)
 from . import shot_chat  # noqa: E402
 app.include_router(shot_chat.router)
+from . import assembly, autopilot, clip_qa  # noqa: E402  (guided steps 10-11 and "Make whole episode")
+app.include_router(clip_qa.router)
+app.include_router(assembly.router)
+app.include_router(autopilot.router)
 
 
 @app.middleware("http")

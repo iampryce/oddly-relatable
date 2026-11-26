@@ -492,6 +492,12 @@ def start_sweeper(interval: float = 30.0, log=print) -> threading.Thread:
                     sweep(db, log)
             except Exception as e:  # noqa: BLE001 -- never let the sweeper die
                 log(f"GPU sweep failed: {type(e).__name__}: {str(e)[:200]}")
+            try:                           # the "Make whole episode" autopilots move on from here too (autopilot.py)
+                from . import autopilot
+                with new_session() as db:
+                    autopilot.tick_all(db, log)
+            except Exception as e:  # noqa: BLE001
+                log(f"autopilot tick failed: {type(e).__name__}: {str(e)[:200]}")
             time.sleep(interval)
     th = threading.Thread(target=loop, name="gpu-sweeper", daemon=True)
     th.start()

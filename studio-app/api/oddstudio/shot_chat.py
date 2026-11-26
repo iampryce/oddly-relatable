@@ -33,6 +33,20 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
                                                          (a new talking-shot render on the rented GPU: paid,
                                                           talking_s2v.render with its confirm_usd / cap 409s; thread
                                                           key talk:<shot>)
+  pose    note_only | redo_pose {prompt, character?}     (a new picture of one reaction pose: paid, the masked face
+          | edit_beat                                     edit of reactions.generate_poses; item "<shot>:<pose>")
+  clip    ... | reanimate_shot {move_prompts?}           (a reaction shot animated again: paid, reactions.animate)
+  wall    note_only | remake_wall {prompt}               (a new straight-on picture of one wall: paid, Nano,
+                                                          room_sets.make_wall; a prompt asking to move the camera is
+                                                          refused; thread key wall:<wall id>)
+  seating note_only | repaint_background {prompt, box?}  (the background behind the seated people repainted on the
+  repair  note_only | repaint_background {prompt, box?}   rented GPU: paid, room_sets.start_repair; thread keys
+                                                          seating:<side> and repair:<repair id>)
+  final   note_only | redo_shot {shot, prompt?}          (the final cut, thread key final:<episode id>: one shot made
+                                                          again through its own step's redo route: a talking shot
+                                                          rendered again, a reaction shot animated again, or a still
+                                                          drawn again; paid, with that route's confirm_usd / cap 409s)
+The quality check (clip_qa.py) posts into the talk:/clip: threads as an assistant message from "Quality check".
 """
 from __future__ import annotations
 
@@ -57,14 +71,19 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
-         "talk": "Talking shot"}
+         "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
+         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode"}
 ALLOWED = {"master": ("note_only", "redo_master"), "still": ("note_only", "redo_still"),
-           "clip": ("note_only", "rerender_shot"), "acting": ("note_only", "edit_beat"),
-           "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot")}
+           "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
+           "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
+           "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
+           "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background"),
+           "final": ("note_only", "redo_shot")}
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
 ITEM = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+POSE_ITEM = re.compile(r"^\d{1,3}:\d{1,2}$")       # "<shot>:<pose>": the thread is "pose:<shot>:<pose>"
 NO_CREDIT = {"openai": "Your OpenAI balance is empty; add credit at platform.openai.com > Billing, or switch the "
                        "assistant in Settings > Chat under each shot. Your message was not sent and is still in the box.",
              "anthropic": "Your Anthropic balance is empty; add credit at console.anthropic.com > Billing, or switch the "
@@ -154,29 +173,75 @@ class RerenderTalkingShot(_Strict):
     use_guide: bool | None = None
 
 
-Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot],
+class RedoPose(_Strict):
+    type: Literal["redo_pose"]
+    prompt: str = Field(min_length=1, max_length=4000)
+    character: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class ReanimateShot(_Strict):
+    type: Literal["reanimate_shot"]
+    move_prompts: dict[str, str] | None = Field(default=None, max_length=40)
+
+
+class RemakeWall(_Strict):
+    type: Literal["remake_wall"]
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
+class Box(_Strict):
+    x: float = Field(ge=0, le=20000)
+    y: float = Field(ge=0, le=20000)
+    w: float = Field(ge=8, le=20000)
+    h: float = Field(ge=8, le=20000)
+
+
+class RepaintBackground(_Strict):
+    type: Literal["repaint_background"]
+    prompt: str = Field(min_length=3, max_length=2000)
+    box: Box | None = None
+
+
+class RedoShot(_Strict):
+    type: Literal["redo_shot"]
+    shot: int = Field(ge=1, le=999)
+    prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+
+
+Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
+                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
 
-def validate_proposal(step: str, item: str, raw) -> dict:
+def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -> dict:
     """The proposal as a clean dict, or ValueError (unknown type, a type this step does not offer, unknown or invalid
     fields, an edit_beat for another shot, a beat edit that changes nothing)."""
     if not isinstance(raw, dict):
         raise ValueError("the proposal is not an object")
-    if raw.get("type") not in ALLOWED[step]:
+    if raw.get("type") not in (allowed or ALLOWED[step]):
         raise ValueError(f"\"{raw.get('type')}\" is not a change this step can make")
     try:
         p = _proposal.validate_python(raw).model_dump(exclude_none=True)
     except ValidationError as e:
         raise ValueError(f"the proposal is not valid ({e.error_count()} problem(s))")
     if p["type"] == "edit_beat":
-        if str(p["shot"]) != str(item):
+        if str(p["shot"]) != str(item).split(":")[0]:
             raise ValueError("a beat edit must be for this thread's shot")
         if not p["fields"]:
             raise ValueError("the beat edit changes nothing")
     if p["type"] == "rerender_shot" and not p["settings"]:
         p["settings"] = {}
+    if p["type"] == "remake_wall":
+        from .room_sets import straight_on_problem
+        why = straight_on_problem(p["prompt"])
+        if why:
+            raise ValueError(why)
+    if p["type"] == "reanimate_shot":
+        from .reactions import check_move_prompts
+        p["move_prompts"] = check_move_prompts(p.get("move_prompts") or {})
+        if not p["move_prompts"]:
+            p.pop("move_prompts")
     return p
 
 
@@ -203,6 +268,25 @@ def describe(p: dict) -> str:
                  ", following the actor's head" if p["use_guide"] else ", without the movement guide")
         return ("A new render of this talking shot on the rented GPU (the earlier results are kept)" + guide
                 + (", from the prompt below (it also becomes the shot's prompt)." if p.get("prompt") else ", from the shot's current prompt."))
+    if t == "redo_pose":
+        who = f" of {p['character']}" if p.get("character") else ""
+        return (f"A new picture of this pose: only the face{who} is redrawn inside its oval, from the prompt below "
+                "(the earlier pictures are kept; nothing is approved for you).")
+    if t == "reanimate_shot":
+        n = len(p.get("move_prompts") or {})
+        return ("This reaction shot is animated again from its approved poses (the earlier results are kept)"
+                + (f", with {n} move prompt(s) changed as below." if n else ", with the current move prompts."))
+    if t == "remake_wall":
+        return ("A new straight-on picture of this wall from the prompt below (the earlier pictures are kept; nothing is "
+                "approved for you).")
+    if t == "redo_shot":
+        return (f"Shot {p['shot']} is made again through its own step (a talking shot is rendered again, a reaction "
+                "shot animated again, a still drawn again); the earlier results are kept and nothing is approved for you"
+                + (", from the prompt below." if p.get("prompt") else "."))
+    if t == "repaint_background":
+        where = "inside the box below" if p.get("box") else "above the people (the usual box)"
+        return (f"The background {where} is repainted as the prompt says, on the rented GPU. The people are cut out and "
+                "pasted back exactly as they are. You see before and after and decide; nothing is approved for you.")
     return "Nothing changes: this is advice only."
 
 
@@ -225,6 +309,17 @@ def assistant(db: Session) -> dict:
                 "usd_out": m["usd_out"], "max_tokens": int(cfg["max_tokens"])}
     return {"provider": "openai", "model": cfg["model"], "label": f"{cfg['model']} (OpenAI)",
             "usd_in": float(cfg["usd_in"]), "usd_out": float(cfg["usd_out"]), "max_tokens": int(cfg["max_tokens"])}
+
+
+def allowed_for(db: Session, ref) -> tuple:
+    """The proposals this thread offers. A clip thread of a REACTION shot (reactions.py) offers reanimate_shot only (its
+    clip is made from approved poses, not by the stick video service); other clip threads keep rerender_shot."""
+    if ref.step != "clip":
+        return ALLOWED[ref.step]
+    from . import reactions as R
+    ep = db.get(Episode, ref.episode_id) if ref.episode_id else None
+    is_reaction = bool(ep and ref.item.isdigit() and any(r["index"] == int(ref.item) for r in R.reaction_rows(db, ep)))
+    return ("note_only", "reanimate_shot") if is_reaction else ("note_only", "rerender_shot")
 
 
 def check_settings(v: dict) -> None:
@@ -259,7 +354,7 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt", "talk"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -272,7 +367,10 @@ def thread_id(ref: Ref) -> str:
 
 
 def check_ref(db: Session, ref: Ref) -> None:
-    if not ITEM.match(ref.item):
+    if ref.step == "pose":
+        if not POSE_ITEM.match(ref.item):
+            raise HTTPException(422, "the item of a pose thread is <shot>:<pose>")
+    elif not ITEM.match(ref.item):
         raise HTTPException(422, "not a valid item")
     if ref.step == "master":
         if not ref.item.isdigit() or db.get(Character, int(ref.item)) is None:
@@ -280,6 +378,8 @@ def check_ref(db: Session, ref: Ref) -> None:
         return
     if ref.episode_id is None or db.get(Episode, ref.episode_id) is None:
         raise HTTPException(404, "episode not found")
+    if ref.step == "final" and ref.item != str(ref.episode_id):
+        raise HTTPException(422, "the item of the final cut's thread is the episode id")
     if ref.step in ("still", "clip", "acting", "talk") and not ref.item.isdigit():
         raise HTTPException(422, "the item of this step is a shot number")
 
@@ -361,11 +461,23 @@ def build_context(db: Session, ref: Ref) -> dict:
         cx["settings"] = {"image_model": ip["model"] if ip else "none", "candidates_per_run": int(st.get("master_candidates") or 2),
                           "usd_per_image": ip["usd_per_image"] if ip else None,
                           "has_approved_master": approved_master(db, c.id) is not None}
+    elif ref.step == "final":
+        ep = db.get(Episode, ref.episode_id)
+        cx["episode"] = ep.title
+        cx.update(final_context(db, ep))
+    elif ref.step in ("wall", "seating", "repair"):
+        from . import room_sets as RS
+        ep = db.get(Episode, ref.episode_id)
+        cx["episode"] = ep.title
+        cx.update(RS.chat_context(db, ep, ref.step, ref.item))
+        if ref.step == "seating":
+            names = RS.sides_of(db, ep.id).get(ref.item, [])
+            chars = [c for c in db.query(Character).filter(Character.key.in_(names))] if names else []
     else:
         ep = db.get(Episode, ref.episode_id)
         cx["episode"] = ep.title
         analysis = AA.stored(db, ep.id).get("result")
-        n = int(ref.item) if ref.item.isdigit() else None
+        n = int(ref.item) if ref.item.isdigit() else int(ref.item.split(":")[0]) if ref.step == "pose" else None
         if ref.step == "prompt":
             p = next((x for x in PW.stored(db, ep.id).get("prompts") or [] if x.get("id") == ref.item), None)
             if p is None:
@@ -416,6 +528,12 @@ def build_context(db: Session, ref: Ref) -> dict:
             from . import talking_s2v as TS
             cx["item"] = f"Talking shot {n} (Wan 2.2 Speech-to-Video from the approved still)"
             cx.update(TS.chat_context(db, ep, n))
+        if ref.step == "pose":
+            cx.update(_pose_context(db, ep, n, int(ref.item.split(":")[1])))
+        if ref.step == "clip":
+            rc = _reaction_clip_context(db, ep, n)
+            if rc:
+                cx.update(rc)
         if ref.step == "acting":
             cx["item"] = f"Acting notes of shot {n}"
             cx["settings"] = {"analysis_model": ", ".join(AA.stored(db, ep.id).get("model_used") or []) or "not run yet"}
@@ -427,6 +545,66 @@ def build_context(db: Session, ref: Ref) -> dict:
     t = get_thread(db, ref)
     cx["history"] = [{"role": m["role"], "content": m["text"]} for m in (t.get("messages") or [])][-HISTORY:]
     return cx
+
+
+def final_context(db: Session, ep: Episode) -> dict:
+    """The final cut: its shot-by-shot list (source, length, warnings) and the quality check's findings, as text."""
+    from . import assembly as A
+    from . import clip_qa as Q
+    p = A.plan_rows(db, ep)
+    qa = Q.stored(db, ep.id).get("checks") or {}
+    found: dict = {}
+    for c in qa.values():
+        if c.get("issues"):
+            found.setdefault(c.get("shot"), []).extend(f"{i['t']:.1f} s {i['kind']}: {i['what']}" for i in c["issues"][:4])
+    av = A.stored(db, ep.id)
+    cut = (av.get("cuts") or [None])[0]
+    return {"item": "The final cut of the episode (all shots over the original recording)",
+            "settings": {"shots": [{"shot": r["index"], "from_s": r["start"], "seconds": r["seconds"], "source": r["label"],
+                                    "warnings": r["warnings"], "quality_check": found.get(r["index"], [])} for r in p["rows"]],
+                         "latest_cut": ({"seconds": cut["seconds"], "approved": av.get("approved") == cut["id"]} if cut else None),
+                         "redo": "redo_shot makes ONE shot again through its own step; say which shot"}}
+
+
+def _pose_context(db: Session, ep: Episode, n: int, i: int) -> dict:
+    from . import reactions as R
+    row = next((r for r in R.reaction_rows(db, ep) if r["index"] == n), None)
+    if row is None:
+        raise HTTPException(404, f"shot {n} is not a reaction shot")
+    v = R.stored(db, ep.id)
+    st = R.ensure_shot(db, ep, v, row)
+    if not 0 <= i < len(st.get("poses") or []):
+        raise HTTPException(404, "no such pose")
+    p = st["poses"][i]
+    chars = R._people(db, row["people"])
+    pr = R.pose_prompts(db, ep, v, row, p, chars, R.shot_beats(db, ep.id, n))
+    return {"item": f"Pose {i} ('{p['label']}') of reaction shot {n}",
+            "current_prompt": {k: x["text"] for k, x in pr.items()} or "(no face change: the crop as it is)",
+            "settings": {"method": "Qwen-Image-Edit-2511 masked edit (face interior only), pasted back onto the original pixels",
+                         "pose_time_s": p["t"], "faces": {k: f.get("want") for k, f in (p.get("faces") or {}).items()},
+                         "characters_in_pose": list((p.get("faces") or {}).keys()), "pictures": len(p.get("takes") or []),
+                         "approved": bool(p.get("approved")),
+                         "rules": "prompts must keep the eyeline sentence (screen-left / screen-right); never a huge mouth"}}
+
+
+def _reaction_clip_context(db: Session, ep: Episode, n: int | None) -> dict | None:
+    from . import reactions as R
+    if not n:
+        return None
+    row = next((r for r in R.reaction_rows(db, ep) if r["index"] == n), None)
+    if row is None:
+        return None
+    v = R.stored(db, ep.id)
+    st = R.ensure_shot(db, ep, v, row)
+    seg = R.timeline(st.get("poses") or [], row["t1"] - row["t0"])
+    mp = R.move_prompts(st, row, seg, R._people(db, row["people"]))
+    return {"item": f"Animated reaction shot {n}",
+            "current_prompt": {x["key"]: x["text"] for x in mp.values()},
+            "settings": {"method": "Wan 2.2 first+last frame between approved poses (33 frames, 16 fps, 4 steps), "
+                                   "living holds over 0.4 s, assembled at 25 fps with the room locked",
+                         "poses": [{"pose": j, "label": p["label"], "t": p["t"]} for j, p in enumerate(st.get("poses") or [])],
+                         "move_prompt_keys": "the pose number a move goes into (2), or hold-2 for pose 2's living hold",
+                         "results": len(st.get("clips") or []), "approved": bool(st.get("approved"))}}
 
 
 def SF_plan(db: Session, eid: int) -> dict:
@@ -442,9 +620,20 @@ SCHEMAS = {
                   'hold_or_move ("hold"|"move"), intensity ("subtle"|"clear"|"big")}}'),
     "redo_still": '{"type": "redo_still", "prompt": "<the full new still prompt, or leave out to reuse the current one>"}',
     "redo_master": '{"type": "redo_master"}',
+    "redo_pose": ('{"type": "redo_pose", "prompt": "<the full new face prompt, keeping the eyeline sentence>", '
+                  '"character": "<the character key, only when the pose changes several faces>"}'),
+    "reanimate_shot": ('{"type": "reanimate_shot", "move_prompts": {"<pose number or hold-<pose>>": "<new move prompt>"}}  '
+                       '(only for an animated reaction shot; leave move_prompts out to animate again as it is)'),
     "rerender_shot": ('{"type": "rerender_shot", "settings": {"prompt": "<the motion prompt>", "seconds": <one of the '
                       'allowed seconds>}}  (add "cfg" or "steps" only if the owner asks for them: they wait for the '
                       'own-GPU step)'),
+    "remake_wall": ('{"type": "remake_wall", "prompt": "<the full new wall prompt: the wall seen straight-on and what is '
+                    'on it; never ask to move, turn or rotate the camera>"}'),
+    "repaint_background": ('{"type": "repaint_background", "prompt": "<what the background should become, e.g. the '
+                           'fireplace wall with the bearded portrait instead of the window>", "box": {"x": <px>, "y": <px>, '
+                           '"w": <px>, "h": <px>}}  (leave "box" out for the usual area above the people)'),
+    "redo_shot": ('{"type": "redo_shot", "shot": <the shot number>, "prompt": "<a new prompt for that shot, or leave out to '
+                  'keep its current one>"}  (the shot is made again through its own step and comes back for approval)'),
     "rerender_talking_shot": ('{"type": "rerender_talking_shot", "prompt": "<the full new positive prompt, or leave out to '
                               'keep the current one>", "use_guide": <true|false, or leave out to keep the current '
                               'choice>}  (the model and its settings are fixed; only the prompt and the movement guide '
@@ -466,9 +655,9 @@ Rules:
 Reply with JSON only: {{"reply": "<your answer to the owner>", "proposal": <one of the shapes above, or null>}}"""
 
 
-def system_prompt(ref: Ref, cx: dict) -> str:
+def system_prompt(ref: Ref, cx: dict, allowed: tuple | None = None) -> str:
     body = {k: v for k, v in cx.items() if k != "history"}
-    schemas = "\n".join(f"  {SCHEMAS[t]}" for t in ALLOWED[ref.step])
+    schemas = "\n".join(f"  {SCHEMAS[t]}" for t in (allowed or ALLOWED[ref.step]))
     return SYSTEM.format(schemas=schemas) + "\n\nTHE ITEM (read-only, from the studio):\n" + json.dumps(body, indent=1, default=str)
 
 
@@ -526,7 +715,7 @@ def call(db: Session, a: dict, system: str, messages: list[dict]) -> dict:
             "output_tokens": int(getattr(u, "output_tokens", 0) or 0)}
 
 
-def parse_reply(step: str, item: str, text: str) -> tuple[str, dict | None, str | None]:
+def parse_reply(step: str, item: str, text: str, allowed: tuple | None = None) -> tuple[str, dict | None, str | None]:
     """(reply text, valid proposal or None, why a proposal was left out or None)."""
     raw = text.strip()
     m = re.search(r"\{.*\}", raw, re.S)
@@ -541,7 +730,7 @@ def parse_reply(step: str, item: str, text: str) -> tuple[str, dict | None, str 
     if p is None:
         return reply, None, None
     try:
-        return reply, validate_proposal(step, item, p), None
+        return reply, validate_proposal(step, item, p, allowed), None
     except ValueError as e:
         return reply, None, str(e)
 
@@ -565,7 +754,58 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
     if p["type"] == "rerender_talking_shot":
         from . import talking_s2v as TS
         return TS.chat_render_cost(db, ref.episode_id, int(ref.item), p.get("use_guide"))
+    if p["type"] in ("redo_pose", "reanimate_shot"):
+        from . import reactions as R
+        ep = db.get(Episode, ref.episode_id)
+        n = int(ref.item.split(":")[0])
+        row = next((r for r in R.reaction_rows(db, ep) if r["index"] == n), None)
+        if row is None:
+            return {"usd": None, "label": "not a reaction shot"}
+        v = R.stored(db, ep.id)
+        st = R.ensure_shot(db, ep, v, row)
+        if p["type"] == "redo_pose":
+            i = int(ref.item.split(":")[1])
+            poses = st.get("poses") or []
+            faces = len((poses[i].get("faces") or {})) if 0 <= i < len(poses) else 1
+            est = R.estimate(max(1, faces), 0, R._prices(db))      # at most every face of the pose is redrawn
+        else:
+            est = R.estimate(0, len(R.clips_needed(R.timeline(st.get("poses") or [], row["t1"] - row["t0"]))), R._prices(db))
+        return {"usd": est["usd_max"], "label": f"up to ${est['usd_max']:.2f} of GPU time ({est['label']})"}
+    if p["type"] in ("remake_wall", "repaint_background"):
+        from . import room_sets as RS
+        return RS.chat_cost(db, p)
+    if p["type"] == "redo_shot":
+        return redo_shot_cost(db, ref.episode_id, p["shot"])
     return None
+
+
+def shot_kind(db: Session, ep: Episode, n: int) -> str:
+    """talking | reaction | still: which step makes this storyboard shot."""
+    from . import reactions as R
+    from . import talking_s2v as TS
+    if any(r["index"] == n for r in TS.talking_rows(db, ep)):
+        return "talking"
+    if any(r["index"] == n for r in R.reaction_rows(db, ep)):
+        return "reaction"
+    return "still"
+
+
+def redo_shot_cost(db: Session, eid: int, n: int) -> dict:
+    """The price of a redo_shot: the price of that step's own redo for this shot."""
+    from .stick_pipeline import IMAGE_PROVIDERS, image_cost
+    ep = db.get(Episode, eid)
+    kind = shot_kind(db, ep, n)
+    if kind == "talking":
+        from . import talking_s2v as TS
+        return TS.chat_render_cost(db, eid, n, None)
+    if kind == "reaction":
+        from . import reactions as R
+        row = next(r for r in R.reaction_rows(db, ep) if r["index"] == n)
+        st = R.ensure_shot(db, ep, R.stored(db, eid), row)
+        est = R.estimate(0, len(R.clips_needed(R.timeline(st.get("poses") or [], row["t1"] - row["t0"]))), R._prices(db))
+        return {"usd": est["usd_max"], "label": f"up to ${est['usd_max']:.2f} of GPU time ({est['label']})"}
+    ip = IMAGE_PROVIDERS.get(get_section(db, "stick").get("image_provider"))
+    return image_cost(1, ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
 
 
 def message_out(db: Session, ref: Ref, m: dict) -> dict:
@@ -584,7 +824,7 @@ def thread_out(db: Session, ref: Ref) -> dict:
     return {"step": ref.step, "item": ref.item, "step_label": STEPS[ref.step],
             "messages": [message_out(db, ref, m) for m in t.get("messages") or []], "usd": round(t.get("usd") or 0.0, 4),
             "assistant": {"label": a["label"], "key_set": bool(secret(f"{a['provider']}_api_key", db))},
-            "proposals": list(ALLOWED[ref.step])}
+            "proposals": list(allowed_for(db, ref))}
 
 
 # ------------------------------------------------------------------ routes
@@ -608,7 +848,7 @@ def _prepare(db: Session, body: SendIn):
     check_ref(db, ref)
     a = assistant(db)
     cx = build_context(db, ref)
-    system = system_prompt(ref, cx)
+    system = system_prompt(ref, cx, allowed_for(db, ref))
     return ref, a, system, messages_for(cx, body.text)
 
 
@@ -629,7 +869,7 @@ def send(body: SendIn, db: Session = Depends(get_db), user: str = Depends(curren
         raise HTTPException(409, f"this message can cost up to ${est['usd_max']:.4f}: confirm that amount to send it (nothing was sent)")
     out = call(db, a, system, messages)
     usd = cost_usd(a, out["input_tokens"], out["output_tokens"])
-    reply, proposal, rejected = parse_reply(ref.step, ref.item, out["text"])
+    reply, proposal, rejected = parse_reply(ref.step, ref.item, out["text"], allowed_for(db, ref))
     now = time.time()
     msg = {"id": pysecrets.token_hex(5), "role": "assistant", "text": reply, "at": now, "model": a["model"],
            "usage": {"input_tokens": out["input_tokens"], "output_tokens": out["output_tokens"]}, "usd": usd,
@@ -693,7 +933,48 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
         from . import talking_s2v as TS
         j = TS.rerender_from_chat(db, ref.episode_id, int(ref.item), p.get("prompt"), p.get("use_guide"), confirm_usd, user)
         return {"done": "The talking shot is being rendered again on the rented GPU.", "job_id": j["id"]}
+    if t == "redo_pose":
+        from . import reactions as R
+        n, i = (int(x) for x in ref.item.split(":"))
+        ep = db.get(Episode, ref.episode_id)
+        row = R._row(db, ep, n)
+        v = R.stored(db, ref.episode_id)
+        st = R.ensure_shot(db, ep, v, row)
+        faces = list((R._pose_or_404(st, i).get("faces") or {}))
+        who = p.get("character") or (faces[0] if len(faces) == 1 else None)
+        if who not in faces:
+            raise HTTPException(409, "say which character's face to redraw (this pose changes several or none)")
+        R.apply_pose_edit(st, row, i, R.PoseEditIn(prompts={who: p["prompt"]}), user)
+        R.save(db, ref.episode_id, v)
+        db.commit()
+        j = R.generate_poses(ref.episode_id, n, R.GenerateIn(poses=[i], confirm_usd=confirm_usd), db, user)
+        return {"done": f"A new picture of pose {i} is being made.", "job_id": j["id"]}
+    if t == "reanimate_shot":
+        from . import reactions as R
+        j = R.animate(ref.episode_id, int(ref.item), R.AnimateIn(move_prompts=p.get("move_prompts"), confirm_usd=confirm_usd), db, user)
+        return {"done": "The shot is being animated again.", "job_id": j["id"]}
+    if t in ("remake_wall", "repaint_background"):
+        from . import room_sets as RS
+        return RS.chat_apply(db, db.get(Episode, ref.episode_id), ref.step, ref.item, p, confirm_usd, user)
+    if t == "redo_shot":
+        return redo_shot(db, ref.episode_id, p["shot"], p.get("prompt"), confirm_usd, user)
     raise HTTPException(409, "this proposal has nothing to apply")
+
+
+def redo_shot(db: Session, eid: int, n: int, prompt: str | None, confirm_usd: float | None, user: str) -> dict:
+    """One shot made again through ITS step's existing redo route (all that route's checks and its confirm_usd)."""
+    from . import stick_shots as SS
+    kind = shot_kind(db, db.get(Episode, eid), n)
+    if kind == "talking":
+        from . import talking_s2v as TS
+        j = TS.rerender_from_chat(db, eid, n, prompt, None, confirm_usd, user)
+        return {"done": f"Talking shot {n} is being rendered again on the rented GPU.", "job_id": j["id"]}
+    if kind == "reaction":
+        from . import reactions as R
+        j = R.animate(eid, n, R.AnimateIn(confirm_usd=confirm_usd), db, user)
+        return {"done": f"Reaction shot {n} is being animated again.", "job_id": j["id"]}
+    j = SS.make_still(eid, n, SS.StillIn(confirm_usd=confirm_usd, prompt=prompt), db, user)
+    return {"done": f"A new still is being made for shot {n}.", "job_id": j["id"]}
 
 
 def _set_status(db: Session, ref: Ref, message_id: str, status: str, extra: dict) -> None:

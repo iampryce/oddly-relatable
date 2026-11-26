@@ -2,11 +2,12 @@
 // every proposal and routes Apply to the step's own handler; these only shape what the page shows.
 import {usd4} from './stickPipeline.ts';
 
-export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk';
+export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk' | 'pose' | 'wall' | 'seating' | 'repair' | 'final';
 
 export const STEP_NOUN: Record<Step, string> = {
   master: 'this master', still: 'this still', clip: 'this clip', acting: 'these acting notes', prompt: 'this prompt',
-  talk: 'this talking shot',
+  talk: 'this talking shot', pose: 'this pose', wall: 'this wall', seating: 'this seating picture',
+  repair: 'this repair', final: 'the final cut',
 };
 
 // GET /shot-chat/thread?... (episode_id is left out for a character master: those threads are studio-wide)
@@ -40,13 +41,21 @@ export const PROPOSAL_TITLE: Record<string, string> = {
   update_prompt: 'Change the prompt', edit_beat: 'Change an acting beat', redo_still: 'Make a new still',
   redo_master: 'Make new master candidates', rerender_shot: 'Make a new clip', note_only: 'Advice',
   rerender_talking_shot: 'Render the talking shot again',
+  redo_pose: 'Redraw this face', reanimate_shot: 'Animate the shot again',
+  remake_wall: 'Draw this wall again', repaint_background: 'Repaint the background behind the people',
+  redo_shot: 'Make one shot again',
 };
 
 // the text shown in the proposal card besides "What will change" (the new prompt, if any)
 export function proposalDetail(p: any): string {
   if (!p) return '';
-  if (p.type === 'update_prompt' || p.type === 'redo_still' || p.type === 'rerender_talking_shot') return p.prompt || '';
+  if (p.type === 'update_prompt' || p.type === 'redo_still' || p.type === 'rerender_talking_shot' || p.type === 'redo_pose'
+    || p.type === 'remake_wall') return p.prompt || '';
+  if (p.type === 'repaint_background') return (p.prompt || '') + (p.box ? `\nBox: ${Math.round(p.box.w)} x ${Math.round(p.box.h)} px at ${Math.round(p.box.x)}, ${Math.round(p.box.y)}` : '');
+  if (p.type === 'reanimate_shot') return Object.entries(p.move_prompts || {})
+    .map(([k, v]) => `${k.startsWith('hold-') ? `Hold of pose ${k.slice(5)}` : `Move into pose ${k}`}: ${v}`).join('\n');
   if (p.type === 'rerender_shot') return p.settings?.prompt || '';
+  if (p.type === 'redo_shot') return `Shot ${p.shot}` + (p.prompt ? `\n${p.prompt}` : '');
   return '';
 }
 

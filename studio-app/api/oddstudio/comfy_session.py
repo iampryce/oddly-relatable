@@ -253,6 +253,21 @@ def ssh_endpoint(pod_id: str) -> tuple[str, int] | None:
     return (m.group(1), int(m.group(2))) if m else None
 
 
+# the jobs that use a ComfyUI session (talking shots, reaction poses and animation, set repairs): a job turns the GPU off
+# when it ends unless another of these is queued or running, since they all share the one live session
+JOB_KINDS = ("talking_render", "reaction_poses", "reaction_animate", "room_repair")
+
+
+def others_waiting(db: Session, job_id: int) -> bool:
+    """True while another ComfyUI job is queued or running, or while a running "Make whole episode" autopilot has
+    more GPU work right after this job (it reuses the same session; it turns the GPU off itself when it stops,
+    pauses, waits for the owner or finishes, and the idle sweep is the backstop)."""
+    from .models import Job
+    from . import autopilot
+    return db.query(Job).filter(Job.kind.in_(JOB_KINDS), Job.id != job_id,
+                                Job.status.in_(("queued", "running"))).first() is not None or autopilot.holds_gpu(db)
+
+
 def stop(db: Session, reason: str) -> list[str]:
     """Terminate every live ComfyUI session (the owner's stop button, or the end of a render)."""
     done = []

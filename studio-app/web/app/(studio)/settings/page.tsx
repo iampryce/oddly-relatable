@@ -475,6 +475,30 @@ export default function Settings() {
               </>}
             </div>
           </div>)}</Section>
+        <Section name="quality" title="Quality check and autopilot" value={s.quality}>{(v, set) => (
+          <div className="stack">
+            <p className="muted small">Gemini watches each finished clip and lists problems (changed characters, a nose or teeth, camera moves, a mouth moving while silent). Each check shows its cost first. The autopilot may redo a shot by itself, within your budget, only for problems the check is sure about.</p>
+            <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
+              <input type="checkbox" style={{width: 'auto'}} checked={!!v.qa_paid_tier} onChange={e => set('qa_paid_tier', e.target.checked)} />
+              My Gemini key is on a paid tier (the check then uses the model below).</label>
+            <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
+              <input type="checkbox" style={{width: 'auto'}} checked={!!v.qa_use_free_tier} onChange={e => set('qa_use_free_tier', e.target.checked)} />
+              Otherwise use the free tier. The free tier may let Google use the clips to train its models.</label>
+            <div className="grid cols-2">
+              <div><label htmlFor="qa-model">Check model (paid tier)</label>
+                <input id="qa-model" value={v.qa_model} onChange={e => set('qa_model', e.target.value)} /></div>
+              <div><label htmlFor="qa-free">Check model (free tier)</label>
+                <input id="qa-free" value={v.qa_free_model} onChange={e => set('qa_free_model', e.target.value)} /></div>
+              <div><label htmlFor="qa-in">Input price ($ per million tokens)</label>
+                <input id="qa-in" type="number" min={0} step={0.01} value={v.qa_usd_in} onChange={e => set('qa_usd_in', Number(e.target.value))} /></div>
+              <div><label htmlFor="qa-out">Output price ($ per million tokens)</label>
+                <input id="qa-out" type="number" min={0} step={0.01} value={v.qa_usd_out} onChange={e => set('qa_usd_out', Number(e.target.value))} /></div>
+              <div><label htmlFor="qa-mb">Send the whole clip when it is at most (MB)</label>
+                <input id="qa-mb" type="number" min={0} max={14} step={1} value={v.qa_inline_mb} onChange={e => set('qa_inline_mb', Number(e.target.value))} /></div>
+              <div><label htmlFor="qa-redo">Automatic redos per shot (autopilot)</label>
+                <input id="qa-redo" type="number" min={0} max={3} step={1} value={v.max_redos_per_shot} onChange={e => set('max_redos_per_shot', Number(e.target.value))} /></div>
+            </div>
+          </div>)}</Section>
         <SetsCard />
         <Section name="comfyui" title="ComfyUI server (GPU)" value={s.comfyui}>{(v, set) => (
           <div><label htmlFor="comfyui-url">ComfyUI server URL</label><input id="comfyui-url" value={v.url} onChange={e => set('url', e.target.value)} placeholder="https://…" /></div>)}</Section>

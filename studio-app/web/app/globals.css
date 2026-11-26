@@ -286,3 +286,18 @@ video.wide { aspect-ratio: 16 / 9; } video.tall { max-height: 60vh; }
 .sc-detail { white-space: pre-wrap; max-height: 160px; overflow: auto; margin: 0; }
 .sc-form { margin-top: 6px; gap: 4px; }
 .gd-shot-chat { grid-column: 1 / -1; }
+
+/* "Make whole episode" panel, quality check and final cut (guided page) */
+.ap { margin-bottom: 14px; }
+.ap-now { display: grid; gap: 4px; margin-top: 6px; }
+.ap-bar { height: 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; max-width: 420px; }
+.ap-bar span { display: block; height: 100%; background: var(--accent); }
+.ap-wait { margin-top: 8px; border-left: 3px solid var(--accent); padding: 6px 10px; background: var(--panel-2); border-radius: 0 6px 6px 0; }
+.ap-wait ul { margin: 4px 0 0; padding-left: 18px; }
+.ap-details { margin-top: 10px; }
+.ap-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.ap-table th, .ap-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ap-table th { color: var(--muted); font-weight: 600; }
+.qa-video { width: 280px; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.as-video { width: 100%; max-width: 720px; max-height: 70vh; border-radius: 8px; border: 1px solid var(--line); background: #000; }
+@media (max-width: 720px) { .ap-table { display: block; overflow-x: auto; } }

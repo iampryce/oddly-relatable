@@ -66,6 +66,17 @@ WHAT = {
                 "opens and closes softly with each syllable and closes when the speaking stops; small natural head "
                 "moves and brow lifts from the acting notes; hands keep holding what they hold. The others stay still. "
                 "Static camera; same drawing, line style and colours throughout."),
+    # used by the sets step (room_sets.py), not offered in the step-3 picker
+    "wall": ("a STRAIGHT-ON picture of ONE wall of a room, for an image model. The model cannot move or turn the "
+             "viewpoint around a room, so never ask for another angle or side: describe this wall as if standing in the "
+             "middle of the room facing it squarely, and list every object on and in front of it (furniture, pictures, "
+             "shelves, window or fireplace) with its colours and materials. A reference picture of the same room may "
+             "be given for style, colours and materials only. No people."),
+    "seating": ("a SEATING picture: one side of a room (reference image 1, seen straight-on) with the listed characters "
+                "seated on chairs in front of it, left to right in the given order (each character's approved master "
+                "is the next reference image). Name every character with their image number, say each must be clearly "
+                "visible and separate (never merged into another) and keep the eyeline sentence. Never redesign a "
+                "character or the room."),
 }
 
 SYSTEM = ("You write prompts for image and video generation models for a small studio making 2D stick-figure comedy "

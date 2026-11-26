@@ -761,3 +761,63 @@ read. "About" uses the first GPU type's price; "at most" the most expensive allo
 "at most" (HTTP 409 otherwise), a render that would pass the monthly cap is refused (409), and the job stops before a
 shot that would take the run past the confirmed amount. When a shot would not finish within the maximum session length,
 the session is replaced (a new reservation, a new cap check).
+
+# Part 4: Reactions and close-ups on the same ComfyUI sessions (built 2026-11-26)
+
+## 20. Guided steps 6-8 (`reactions.py`)
+
+The owner-tested acting method of 2026-11-26 (scripts `gpu_acting.py` and `compose_acting.py`), run from the dashboard.
+A reaction shot is any storyboard shot that is not a talking shot and shows at least one character (one person on a
+close or medium shot = close-up; otherwise a group shot). It uses the `comfyui` session kind of §19 unchanged: same
+image, GPU order, cap reservation, sweep and termination. A job turns the GPU off at its end unless another ComfyUI job
+(`talking_render`, `reaction_poses`, `reaction_animate`) is queued or running (`comfy_session.others_waiting`).
+
+| Stage | Where | What |
+|---|---|---|
+| Crop (step 6) | studio server, free | Exact zoom crop of the owner-picked seating master of the shot's side (approved storyboard stills only), 16:9, upscaled to 1280x720 with Lanczos. Suggested from the head found in the master (white round regions matched to the side's seat order); the owner moves and zooms it and approves it. |
+| Poses (step 7) | GPU | One pose per acting beat (pose 0 = the crop as it is; a big snap adds an overshoot pose). Each changed face is a Qwen-Image-Edit-2511 edit masked with `SetLatentNoiseMask` to an oval over the face interior, then pasted back through the same oval (softened inward only), so no pixel outside the oval changes. Group shots: one masked edit per character, one after another. A face whose exact prompt already has a result in the shot is reused (free). Every prompt carries the eyeline (listeners slightly screen-left toward the main speaker, the speaker screen-right, the camera only when the beat says so). |
+| Moves (step 8) | GPU | Wan 2.2 i2v 14B `WanFirstLastFrameToVideo`, 33 frames at 16 fps, 1280x720, high-noise steps 0-2 + low-noise 2-4 with the lightx2v 4-step LoRAs, CFG 1, shift 5. Holds of 0.4 s or more are living holds (same pose first and last, tremble/blink prompt). |
+| Assembly (step 8) | studio server, free | Timeline from the poses; moves eased out (power 2.2), living holds at natural speed (looped), the clip shown only inside a feathered box around the character(s) and the crop's own pixels outside; 25 fps H.264 per shot, plus a review copy with the episode's original audio. |
+
+**Models** (ComfyUI-Manager): `qwen_image_edit_2511_fp8mixed`, `qwen_2.5_vl_7b_fp8_scaled`, `qwen_image_vae` for poses;
+`wan2.2_i2v_high/low_noise_14B_fp8_scaled`, `wan2.2_i2v_lightx2v_4steps_lora_v1_high/low_noise`,
+`umt5_xxl_fp8_e4m3fn_scaled`, `wan_2.1_vae` for moves (URLs in `reactions.QWEN_MODELS` / `WAN_MODELS`).
+
+**Cost.** GPU price per hour x (about 10 min start-up + 60-90 s per masked face edit + about 2.5 min per Wan clip).
+"About" uses the first GPU type and 60 s edits; "at most" the most expensive allowed type, 90 s edits and 25% margin. The
+request must carry "at most" (`confirm_usd`, HTTP 409 otherwise); a run that would pass the monthly cap or the maximum
+session length is refused (409); the job stops before a step that would pass the confirmed amount. Nothing is approved by
+itself: the crop, each pose and each assembled shot wait for the owner's click. The chat under each pose
+(`pose:<shot>:<pose>`) can propose `redo_pose {prompt}`; the chat under a reaction shot's clip (`clip:<shot>`) offers
+`reanimate_shot {move_prompts?}` instead of the stick clip's `rerender_shot`; both go through the same paid routes.
+
+# Part 5: Sets and seating masters (built 2026-11-26)
+
+## 21. Guided step 5 (`room_sets.py`, `cutout_remote.py`)
+
+The owner's Episode 15 lessons, run from the dashboard. The image model cannot move the camera around a room (given the
+wide shot and asked for "the other side" it returns the same view), so every wall is its own straight-on picture.
+
+| Stage | Where | What |
+|---|---|---|
+| Walls | WaveSpeed Nano Banana 2.1 edit, paid per image | One picture per wall, described as seen straight-on with what is on it. The establishing wide shot (owner-chosen, else the first approved wide still) is the only reference, for style, colours and materials. Prompts that ask to move, turn or rotate the camera/view are refused (owner edit: 422; GPT text: the template is kept and labelled). |
+| Seating masters | WaveSpeed, paid per image | One picture per side of the room: the side's approved wall (else its set plate) as image 1, then every character's approved master in seat order. Approved seating masters are offered first (suggested) as reactions' seating masters; "Use for the close-ups" is the owner's click (`reactions.set_master`). |
+| Background repair | rented ComfyUI session (§19), paid | rembg `birefnet-general` (`rembg[gpu]==2.0.67`) on the pod over SSH with the session's throwaway key, like the MediaPipe step: only the picture goes up, only the people's alpha comes back. Mask = the owner's box minus the people grown by 17 px; Qwen-Image-Edit-2511 masked repaint; second pass on the band between the tight outline (alpha > 40, grown 3 px) and the wide outline (grown 21 px) inside the box ("halo"); the original people pasted back through the tight outline (pixel-exact). Nothing outside the box changes. |
+| Face fix | rented ComfyUI session, paid | One oval-masked face edit (`reactions.edit_graph`), pasted back through the oval on the whole picture, with the side's eyeline sentence. |
+| Character check | studio server (free) + Gemini (paid, or the free tier when ticked) | Heads counted with `reactions.find_heads`; Gemini asked which listed characters are visible (one-line descriptions). Missing or merged characters are flagged with "Remake this picture" (one Nano image, the cast spelled out). |
+
+**Eyeline** per side lives in `reactions:<id>` (`eyelines`): default from the main speaker (their side screen-right, the
+others screen-left toward them); it is written into the seating prompt, the reaction face prompts and the talking-shot
+prompt. **Cost**: a background repair is about 10 min start-up + 2 masked edits (60-90 s each) + 4-8 min for the cut-out
+tool; a face fix 10 min + 1 edit. The request must carry "at most" (`confirm_usd`, 409 otherwise) and the monthly cap
+applies. `room_repair` is one of `comfy_session.JOB_KINDS`, so a session shared with talking shots or reactions is only
+turned off when none of them is waiting. Chat threads: `wall:<id>` (`remake_wall {prompt}`), `seating:<side>` and
+`repair:<id>` (`repaint_background {prompt, box?}`), applied through the same paid routes.
+
+## 22. Guided steps 10-11 and "Make whole episode" (`clip_qa.py`, `assembly.py`, `autopilot.py`)
+
+| Part | Where | What |
+|---|---|---|
+| Quality check (step 10) | Gemini, paid (Settings > Quality check: the paid model when "my key is on a paid tier", else the free-tier model only when "use the free tier" is ticked) | Per talking / reaction shot, the approved result (else the newest): up to 8 frames, the whole clip when it is at most `qa_inline_mb`, each on-screen character's approved master and description, the speaker's word times and the acting notes. Answer: issues with time, kind, severity ("clear" / "possible") and a fix in the shot chat's own proposal shapes (`rerender_talking_shot`, `reanimate_shot`), validated by `shot_chat.validate_proposal`. Posted into the shot's thread (`talk:<shot>` / `clip:<shot>`) as an assistant message from "Quality check"; Apply goes through the step's paid route with `confirm_usd`. |
+| Assembly (step 11) | studio server, FFmpeg (free) | Approved talking results (first `trim_start_frames` dropped), approved reaction results, else the approved still ("still, not animated"); a shot with none blocks. Frame-exact: each shot from its start to the next shot's start (the first from 0, the last to the end of the recording), `round(next*25) - round(start*25)` frames, so roundings never drift. Short clips are slowed (at most 1.4x) and their last frame held; long ones cut. 1280x720 (16:9 episodes) or 720x1280 (9:16), the original recording, and the POV banner and dialogue display drawn by `production/animation/overlay.mjs` (same fonts and banner layout as the renderer) and overlaid at each line's time. The cut waits for the owner's "Approve the final cut". Chat thread `final:<episode>`: advice or `redo_shot {shot, prompt?}`, routed to the shot's own step (talking render, reaction animation or a new still). |
+| Autopilot | the worker's sweeper thread (every 30 s) and the owner's Start / Resume | One budget, confirmed (`confirm_usd` = budget). Steps in order: acting analysis, prompts, masters, walls and seating pictures, stills, talking shots, reactions, quality check (+ at most `max_redos_per_shot` redos per shot, only for "clear" problems on results the owner has not approved), the owner's review of the clips, assembly. Each paid action starts only when its "at most" price fits in the budget left and, for GPU work, in the monthly cap; otherwise the run pauses. Real costs reported by jobs replace the estimates; failed jobs keep their "at most" price and pause the run. It waits at every owner gate and never approves anything. While it has GPU work next it holds the ComfyUI session (`comfy_session.others_waiting` -> `autopilot.holds_gpu`); waiting, pausing, stopping or finishing releases it; Stop terminates it at once. |
