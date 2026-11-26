@@ -193,6 +193,8 @@ def get_stick_shots(eid: int, db: Session = Depends(get_db)):
 
 class StillIn(BaseModel):
     confirm_usd: float | None = Field(default=None, ge=0, le=100)
+    # the owner's own prompt (e.g. applied from the chat under the shot); empty = the shot plan in words
+    prompt: str | None = Field(default=None, max_length=4000)
 
 
 @router.post("/episodes/{eid}/shot-frames/{index}/still")
@@ -212,7 +214,8 @@ def make_still(eid: int, index: int, body: StillIn, db: Session = Depends(get_db
         raise HTTPException(409, f"shot {index} is already being made")
     cost = image_cost(1, prov["usd_per_image"])
     require_confirmed(cost["usd"], body.confirm_usd)
-    prompt = still_prompt(s, cx["names"], cx["standing"], cx["speaker"], cx["said"], cx["action"], aspect_ratio(ep))
+    prompt = (body.prompt or "").strip() or still_prompt(s, cx["names"], cx["standing"], cx["speaker"], cx["said"],
+                                                          cx["action"], aspect_ratio(ep))
     job = enqueue(db, "stick_shot_still", episode_id=eid,
                   payload={"index": index, "plan_job_id": v.get("job_id"), "side": s["side"], "people": list(s["people"]),
                            "prompt": prompt, "aspect_ratio": aspect_ratio(ep), "provider": prov["id"],

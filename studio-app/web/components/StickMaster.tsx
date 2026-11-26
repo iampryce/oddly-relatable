@@ -9,6 +9,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox, JobStatus} from '@/components/ui';
 import {confirmText} from '@/lib/stickPipeline';
+import ShotChat from '@/components/ShotChat';
 
 export default function StickMaster({characterId, name, locked}: {characterId: number; name: string; locked: boolean}) {
   const [poll, setPoll] = useState(15000);
@@ -67,5 +68,6 @@ export default function StickMaster({characterId, name, locked}: {characterId: n
       </div>}
       {!st.style_reference?.set && <p className="small muted">Choose the style reference image in <Link href="/settings#studio-style">Settings › Studio style</Link> first.</p>}
       {showPrompt && <pre className="small" style={{whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto'}}>{st.prompt}</pre>}
+      {!locked && <ShotChat step="master" item={characterId} onApplied={reload} />}
     </div>);
 }

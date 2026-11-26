@@ -76,6 +76,9 @@ DEFAULTS: dict[str, dict] = {
     "guide": {"prompt_model": "gpt-5.5", "prompt_usd_in": 5.0, "prompt_usd_out": 30.0, "prompt_max_tokens": 4000,
               "acting_model": "gemini-3.1-pro-preview", "acting_usd_in": 2.0, "acting_usd_out": 12.0,
               "acting_free_models": ["gemini-3.5-flash", "gemini-3-flash-preview"]},
+    # Chat under each shot (shot_chat.py): openai (the model below at its official price per million tokens) or
+    # anthropic (the studio chat's model and price). max_tokens caps the answer, and so what one message can cost.
+    "shot_chat": {"provider": "openai", "model": "gpt-5.5", "usd_in": 5.0, "usd_out": 30.0, "max_tokens": 2000},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -149,6 +152,9 @@ def put_section(db: Session, key: str, value: dict) -> dict:
             raise ValueError("chat.max_tokens must be a whole number between 256 and 16000")
     if key == "guide":
         check_guide(value)
+    if key == "shot_chat":
+        from .shot_chat import check_settings
+        check_settings(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)

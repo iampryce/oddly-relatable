@@ -274,3 +274,15 @@ video.wide { aspect-ratio: 16 / 9; } video.tall { max-height: 60vh; }
   .gd-facts { grid-template-columns: 1fr; }
   .gd-shot { grid-template-columns: 1fr; }
 }
+
+/* chat under each shot (ShotChat): collapsed under its preview, opened on click */
+.sc { margin-top: 6px; }
+.sc-thread { margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); padding: 8px; }
+.sc-messages { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.sc-msg { align-self: flex-start; max-width: 92%; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--panel); }
+.sc-msg.me { align-self: flex-end; background: var(--accent-soft); }
+.sc-text { white-space: pre-wrap; }
+.sc-proposal { margin-top: 6px; border-left: 3px solid var(--accent); padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; background: var(--panel-2); border-radius: 0 6px 6px 0; }
+.sc-detail { white-space: pre-wrap; max-height: 160px; overflow: auto; margin: 0; }
+.sc-form { margin-top: 6px; gap: 4px; }
+.gd-shot-chat { grid-column: 1 / -1; }

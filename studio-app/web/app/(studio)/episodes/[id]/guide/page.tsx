@@ -8,6 +8,7 @@ import {use, useEffect, useState} from 'react';
 import {api, uploadFile} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import ShotChat from '@/components/ShotChat';
 import {costText, currentStep, KIND_LABEL, moveHelp, STATUS_TEXT, STATUS_TONE, statusOf, STEPS, type GuideStep} from '@/lib/guide';
 
 type Act = ReturnType<typeof useAction>;
@@ -162,6 +163,7 @@ function ActingStep({id, onChange}: {id: string; onChange: () => unknown}) {
             {a.frames[String(s.shot)].map((f: any) => <a key={f.t} href={f.url} target="_blank" rel="noreferrer"><img src={f.url} alt={`Reference at ${f.t} s`} loading="lazy" /></a>)}
             <figcaption className="small muted">Reference — private, never sent to an image or video generator</figcaption>
           </figure>}
+          <div className="gd-shot-chat"><ShotChat step="acting" item={s.shot} episodeId={id} onApplied={reload} /></div>
         </div>))}</div>}
     </div>);
 }
@@ -234,6 +236,7 @@ function PromptItem({p, id, act, chars}: {p: any; id: string; act: Act; chars: a
         {(p.status !== 'approved' || text !== p.text) && <button className="btn sm good" disabled={!!act.busy || !text.trim()} onClick={() => save(true)}>Use this prompt</button>}
         <button className="btn sm danger" disabled={!!act.busy} onClick={remove}>Delete</button>
       </div>
+      <ShotChat step="prompt" item={p.id} episodeId={id} onApplied={() => act.run(`c${p.id}`, async () => {})} />
     </div>);
 }
 
