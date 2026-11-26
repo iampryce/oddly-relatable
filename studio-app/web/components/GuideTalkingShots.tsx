@@ -4,7 +4,7 @@
 // status, the prompt (editable; written by GPT, or the labelled template), the shot's own cost and Render / Re-render.
 // "Render all talking shots" shows the total first. Paid buttons ask first and send the "at most" amount they showed
 // (the API refuses anything else with 409). Results wait for the owner's Approve click; nothing approves itself.
-// Under every result video sits <ShotThreadSlot />, the mount point for the per-shot chat thread.
+// Under every result video sits <ShotThreadSlot />: the shot's chat thread (ShotChat, thread "talk:<shot>").
 import Link from 'next/link';
 import {useEffect, useState} from 'react';
 import {api} from '@/lib/api';
@@ -181,6 +181,7 @@ function Result({r, s, id, act}: {r: any; s: any; id: string; act: Act}) {
         {approved ? <><span className="badge good">Approved</span><button className="btn sm" disabled={!!act.busy} onClick={() => setApproved(null)}>Withdraw</button></>
           : <button className="btn sm good" disabled={!!act.busy} onClick={() => setApproved(r.id)}>Approve</button>}
       </div>
-      <ShotThreadSlot item={{episodeId: id, step: 'talking', shot: s.index, renderId: r.id, assetId: r.asset_id ?? null}} />
+      <ShotThreadSlot item={{episodeId: id, step: 'talk', shot: s.index, renderId: r.id, assetId: r.asset_id ?? null}}
+        onApplied={() => act.run(`c${r.id}`, async () => {})} />
     </figure>);
 }

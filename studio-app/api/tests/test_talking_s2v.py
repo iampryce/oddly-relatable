@@ -547,6 +547,92 @@ class SessionTest(ApiBase):
         self.assertEqual(rp.created(), [])
 
 
+class ChatProposalTest(ApiBase):
+    """The chat under each talking shot (shot_chat.py step "talk", thread talk:<shot>): advice only, or a re-render with
+    {prompt?, use_guide?} applied through the render route's own confirm_usd / 409 rules."""
+
+    def test_proposal_fields(self):
+        from oddstudio import shot_chat as SC
+        self.assertEqual(SC.ALLOWED["talk"], ("note_only", "rerender_talking_shot"))
+        ok = SC.validate_proposal("talk", "1", {"type": "rerender_talking_shot", "prompt": "Smaller mouth.", "use_guide": False})
+        self.assertEqual(ok, {"type": "rerender_talking_shot", "prompt": "Smaller mouth.", "use_guide": False})
+        self.assertEqual(SC.validate_proposal("talk", "1", {"type": "rerender_talking_shot"}), {"type": "rerender_talking_shot"})
+        self.assertEqual(SC.validate_proposal("talk", "1", {"type": "note_only"}), {"type": "note_only"})
+        for bad in ({"type": "rerender_talking_shot", "cfg": 6},                       # unknown field
+                    {"type": "rerender_talking_shot", "settings": {"steps": 30}},        # the clip step's shape
+                    {"type": "rerender_talking_shot", "use_guide": "maybe"},             # wrong type
+                    {"type": "rerender_talking_shot", "prompt": ""},                     # empty prompt
+                    {"type": "rerender_shot", "settings": {}},                           # another step's change
+                    {"type": "update_prompt", "prompt": "x"}):
+            with self.assertRaises(ValueError, msg=bad):
+                SC.validate_proposal("talk", "1", bad)
+        with self.assertRaises(ValueError):                                              # not offered on clips
+            SC.validate_proposal("clip", "1", {"type": "rerender_talking_shot"})
+        reply, p, why = SC.parse_reply("talk", "1", json.dumps({"reply": "ok", "proposal": {"type": "rerender_talking_shot",
+                                                                                           "steps": 40}}))
+        self.assertIsNone(p)
+        self.assertIn("not valid", why)
+        self.assertIn("without the movement guide", SC.describe(ok))
+
+    def pending(self, proposal):
+        from oddstudio import shot_chat as SC
+        from oddstudio.db import new_session
+        ref = SC.Ref(episode_id=self.eid, step="talk", item="1")
+        with new_session() as db:
+            SC.add_messages(db, ref, [{"id": "m1", "role": "assistant", "text": "Try a smaller mouth.", "at": 0,
+                                       "proposal": proposal, "proposal_status": "pending"}])
+            db.commit()
+        return {"episode_id": self.eid, "step": "talk", "item": "1", "message_id": "m1"}
+
+    def prompt_text(self):
+        return next(s for s in self.c.get(self.url()).json()["shots"] if s["index"] == 1)["prompt"]["text"]
+
+    def test_apply_goes_through_the_render_rules(self):
+        self.rented()
+        before = self.prompt_text()
+        body = self.pending({"type": "rerender_talking_shot", "prompt": "Mortimer reads, mouth small.", "use_guide": False})
+        t = self.c.get("/api/shot-chat/thread", params={"step": "talk", "item": "1", "episode_id": self.eid}).json()
+        cost = t["messages"][0]["cost"]
+        est = next(s for s in self.c.get(self.url()).json()["shots"] if s["index"] == 1)["estimate"]
+        self.assertEqual(cost["usd"], est["usd_max"])                    # the same price as the shot's Render button
+        r = self.c.post("/api/shot-chat/apply", json=body)               # no confirm_usd
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("confirm", r.json()["detail"])
+        r = self.c.post("/api/shot-chat/apply", json={**body, "confirm_usd": cost["usd"] - 0.01})
+        self.assertEqual(r.status_code, 409)                             # the render route's own check
+        self.assertEqual(self.prompt_text(), before)                     # a refused Apply changes nothing
+        self.c.put("/api/settings/gpu", json={"monthly_cap_usd": 0.1})
+        r = self.c.post("/api/shot-chat/apply", json={**body, "confirm_usd": cost["usd"]})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("monthly GPU cap", r.json()["detail"])
+        self.c.put("/api/settings/gpu", json={"monthly_cap_usd": 50})
+        r = self.c.post("/api/shot-chat/apply", json={**body, "confirm_usd": cost["usd"]})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["result"]["job_id"])
+        t = self.c.get(self.url()).json()
+        r1 = next(s for s in t["shots"] if s["index"] == 1)
+        self.assertEqual(r1["prompt"]["text"], "Mortimer reads, mouth small.")
+        self.assertEqual(r1["guide"]["state"], "off")
+        self.assertEqual(r1["run"]["status"], "queued")
+        self.assertIsNone(r1["approved"])
+        r = self.c.post("/api/shot-chat/apply", json={**body, "confirm_usd": cost["usd"]})
+        self.assertEqual(r.status_code, 409)                             # already applied
+
+    def test_advice_only_and_thread_key(self):
+        from oddstudio import shot_chat as SC
+        ref = SC.Ref(episode_id=self.eid, step="talk", item="1")
+        self.assertEqual(SC.thread_id(ref), "talk:1")
+        self.assertEqual(self.c.get("/api/shot-chat/thread", params={"step": "talk", "item": "x", "episode_id": self.eid}).status_code, 422)
+        t = self.c.get("/api/shot-chat/thread", params={"step": "talk", "item": "1", "episode_id": self.eid}).json()
+        self.assertEqual(t["proposals"], ["note_only", "rerender_talking_shot"])
+        from oddstudio.db import new_session
+        with new_session() as db:
+            cx = SC.build_context(db, ref)
+        self.assertIn("Mortimer says", cx["line"])
+        self.assertIn("settings B", cx["settings"]["model"])
+        self.assertIn("rerender_talking_shot", SC.system_prompt(ref, cx))
+
+
 @unittest.skipUnless(Path("/usr/bin/ffmpeg").exists(), "needs FFmpeg")
 class JobTest(ApiBase):
     ffmpeg = True

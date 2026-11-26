@@ -840,7 +840,6 @@ def render(eid: int, body: RenderIn, db: Session = Depends(get_db), user: str = 
     the most it can cost confirmed, within the monthly GPU cap, and when no render is running."""
     from . import comfy_session as CS
     from . import gpu
-    from . import guided
     ep = _episode(db, eid)
     rows = {r["index"]: r for r in talking_rows(db, ep)}
     want = body.shots or [i for i, r in rows.items() if r["approved_still"] and voice_spans(r["words"], r["t0"], r["t1"])]
@@ -862,12 +861,9 @@ def render(eid: int, body: RenderIn, db: Session = Depends(get_db), user: str = 
         raise HTTPException(409, a["reason"])
     if _active(db, eid).first():
         raise HTTPException(409, "a talking-shot render is already running for this episode")
-    v = stored(db, eid)
     c = config(db)
-    ref = guided.reference_video(db, eid) is not None
     sel = [rows[i] for i in want]
-    poses_needed = needs_poses(v, _poses(db, eid), sel, ref)
-    est = estimate([r["frames"] for r in sel], _prices(db), int(c["max_lifetime_minutes"]), poses_needed)
+    est = render_estimate(db, eid, sel, stored(db, eid))
     if est["too_long"]:
         raise HTTPException(409, "a shot is too long for the maximum GPU session length: raise it in Settings > GPU worker")
     if body.confirm_usd is None or body.confirm_usd + 1e-9 < est["usd_max"]:
@@ -885,6 +881,65 @@ def render(eid: int, body: RenderIn, db: Session = Depends(get_db), user: str = 
     db.add(Event(episode_id=eid, kind="episode", message=f"Talking shots {', '.join(map(str, want))}: render asked by {user} (up to ${est['usd_max']:.2f})"))
     db.commit()
     return S.job(job)
+
+
+def render_estimate(db: Session, eid: int, sel: list[dict], v: dict) -> dict:
+    """What rendering these rows costs with the shot settings in `v` (the render route and the chat's Apply price)."""
+    from . import guided
+    ref = guided.reference_video(db, eid) is not None
+    return estimate([r["frames"] for r in sel], _prices(db), int(config(db)["max_lifetime_minutes"]),
+                    needs_poses(v, _poses(db, eid), sel, ref))
+
+
+# ------------------------------------------------------------------ the chat under each talking shot (shot_chat.py)
+def chat_context(db: Session, ep: Episode, idx: int) -> dict:
+    """What the assistant is told about one talking shot: its line, current prompt and settings (no keys, no pictures)."""
+    r = next((x for x in talking_rows(db, ep) if x["index"] == idx), None)
+    if r is None:
+        raise HTTPException(404, f"shot {idx} is not a talking shot")
+    v = stored(db, ep.id)
+    st = (v.get("shots") or {}).get(str(idx)) or {}
+    p = current_prompt(db, ep, r, st)
+    renders = st.get("renders") or []
+    return {"current_prompt": p["text"], "line": f"{r['name']} says: \"{r['text']}\"",
+            "settings": {"model": "Wan 2.2 Speech-to-Video, settings B (20 steps, CFG 4.5, fixed by the owner)",
+                         "prompt_source": p.get("label"), "negative_prompt": NEG, "frames": r["frames"],
+                         "pieces": pieces(r["frames"]), "movement_guide_on": st.get("guide", True),
+                         "results": len(renders), "approved": bool(st.get("approved")),
+                         "still_approved": r["approved_still"]}}
+
+
+def chat_render_cost(db: Session, eid: int, idx: int, use_guide: bool | None) -> dict:
+    """The price shown on the chat's Apply: "at most" for this one shot, with the proposed guide choice."""
+    ep = _episode(db, eid)
+    r = _row_or_404(db, ep, idx)
+    v = stored(db, eid)
+    if use_guide is not None:
+        _shot_state(v, idx)["guide"] = use_guide
+    e = render_estimate(db, eid, [r], v)
+    return {"usd": e["usd_max"], "label": f"up to ${e['usd_max']:.2f} on a rented GPU ({e['label']})"}
+
+
+def rerender_from_chat(db: Session, eid: int, idx: int, prompt: str | None, use_guide: bool | None,
+                       confirm_usd: float | None, user: str) -> dict:
+    """The chat's Apply: the proposed prompt / guide choice, then the render route with ALL its checks (confirm_usd,
+    the cap, the GPU mode, a render already running). If the render is refused nothing is kept: the edits are rolled
+    back with it, so a refused Apply changes nothing."""
+    ep = _episode(db, eid)
+    r = _row_or_404(db, ep, idx)
+    v = stored(db, eid)
+    st = _shot_state(v, idx)
+    if prompt is not None:
+        old = st.get("prompt") or current_prompt(db, ep, r, st)
+        st["prompt"] = {**old, "text": prompt, "edited": True, "edited_by": f"{user} (from the chat)", "at": time.time()}
+    if use_guide is not None:
+        st["guide"] = use_guide
+    save(db, eid, v)          # not committed: render() commits it together with the job, or it is rolled back
+    try:
+        return render(eid, RenderIn(shots=[idx], confirm_usd=confirm_usd), db, user)
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 @router.post("/episodes/{eid}/talking/stop")

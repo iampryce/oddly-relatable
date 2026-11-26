@@ -2,10 +2,11 @@
 // every proposal and routes Apply to the step's own handler; these only shape what the page shows.
 import {usd4} from './stickPipeline.ts';
 
-export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt';
+export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk';
 
 export const STEP_NOUN: Record<Step, string> = {
   master: 'this master', still: 'this still', clip: 'this clip', acting: 'these acting notes', prompt: 'this prompt',
+  talk: 'this talking shot',
 };
 
 // GET /shot-chat/thread?... (episode_id is left out for a character master: those threads are studio-wide)
@@ -38,12 +39,13 @@ export const PROPOSAL_STATUS: Record<string, {tone: string; text: string}> = {
 export const PROPOSAL_TITLE: Record<string, string> = {
   update_prompt: 'Change the prompt', edit_beat: 'Change an acting beat', redo_still: 'Make a new still',
   redo_master: 'Make new master candidates', rerender_shot: 'Make a new clip', note_only: 'Advice',
+  rerender_talking_shot: 'Render the talking shot again',
 };
 
 // the text shown in the proposal card besides "What will change" (the new prompt, if any)
 export function proposalDetail(p: any): string {
   if (!p) return '';
-  if (p.type === 'update_prompt' || p.type === 'redo_still') return p.prompt || '';
+  if (p.type === 'update_prompt' || p.type === 'redo_still' || p.type === 'rerender_talking_shot') return p.prompt || '';
   if (p.type === 'rerender_shot') return p.settings?.prompt || '';
   return '';
 }

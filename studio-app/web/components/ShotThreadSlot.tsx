@@ -1,16 +1,18 @@
 'use client';
-// Mount point for the per-shot chat thread (built on the feat/shot-chat branch). Every talking-shot result renders
-// <ShotThreadSlot item={...} /> directly under its video; until the chat lands this renders nothing. To connect it,
-// replace the body of this component (or re-export the chat thread component from here); the item says which shot
-// and which result the thread belongs to.
+// The chat thread under a talking-shot result: the studio's ShotChat on the thread "talk:<shot>" (one thread per
+// shot, shared by all its results, so the conversation keeps its history across re-renders). Its proposals are
+// "advice only" or "render the talking shot again" with a new prompt and/or the movement guide on or off; Apply goes
+// through the talking-shot render route with its confirmed price (409 otherwise).
+import ShotChat from '@/components/ShotChat';
+
 export type ShotThreadItem = {
   episodeId: number | string;
-  step: 'talking';          // which guided step the preview belongs to
-  shot: number;             // the storyboard shot index
-  renderId: string;         // the result (take) under discussion
+  step: 'talk';             // the shot-chat step of the talking shots
+  shot: number;             // the storyboard shot index (the thread is talk:<shot>)
+  renderId: string;         // the result shown just above
   assetId: number | null;   // the result's video asset
 };
 
-export default function ShotThreadSlot(_props: {item: ShotThreadItem}) {
-  return null;
+export default function ShotThreadSlot({item, onApplied}: {item: ShotThreadItem; onApplied?: () => unknown}) {
+  return <ShotChat step="talk" item={item.shot} episodeId={item.episodeId} onApplied={onApplied} />;
 }
