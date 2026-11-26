@@ -68,10 +68,10 @@ function Masters({r, id, act}: {r: any; id: string; act: Act}) {
           <div className="row" style={{flexWrap: 'wrap', gap: 8}}>
             {m.candidates.map((c: any) => (
               <button key={c.asset_id} className="btn sm" style={{padding: 2, outline: m.chosen === c.asset_id ? '3px solid var(--good)' : 'none'}}
-                disabled={!!act.busy} title={`Shot ${c.shot}, ${c.framing}, ${c.people} people`}
+                disabled={!!act.busy} title={c.framing === 'seating' ? `Seating picture from step 5, ${c.people} people` : `Shot ${c.shot}, ${c.framing}, ${c.people} people`}
                 onClick={() => act.run(`m${m.side}`, () => api(`/episodes/${id}/reactions/masters`, {method: 'PUT', body: {side: m.side, asset_id: c.asset_id}}))}>
-                {c.url ? <img src={c.url} alt={`Shot ${c.shot} still`} style={{width: 150, display: 'block', borderRadius: 4}} /> : `Shot ${c.shot}`}
-                <span className="small">{m.chosen === c.asset_id ? 'Chosen' : m.suggested === c.asset_id ? 'Suggested' : `Shot ${c.shot}`}</span>
+                {c.url ? <img src={c.url} alt={c.framing === 'seating' ? 'Seating picture' : `Shot ${c.shot} still`} style={{width: 150, display: 'block', borderRadius: 4}} /> : c.framing === 'seating' ? 'Seating picture' : `Shot ${c.shot}`}
+                <span className="small">{m.chosen === c.asset_id ? 'Chosen' : m.suggested === c.asset_id ? (c.framing === 'seating' ? 'Seating picture (suggested)' : 'Suggested') : `Shot ${c.shot}`}</span>
               </button>))}
           </div>
         </div>))}

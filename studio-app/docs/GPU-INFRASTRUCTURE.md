@@ -790,3 +790,26 @@ session length is refused (409); the job stops before a step that would pass the
 itself: the crop, each pose and each assembled shot wait for the owner's click. The chat under each pose
 (`pose:<shot>:<pose>`) can propose `redo_pose {prompt}`; the chat under a reaction shot's clip (`clip:<shot>`) offers
 `reanimate_shot {move_prompts?}` instead of the stick clip's `rerender_shot`; both go through the same paid routes.
+
+# Part 5: Sets and seating masters (built 2026-11-26)
+
+## 21. Guided step 5 (`room_sets.py`, `cutout_remote.py`)
+
+The owner's Episode 15 lessons, run from the dashboard. The image model cannot move the camera around a room (given the
+wide shot and asked for "the other side" it returns the same view), so every wall is its own straight-on picture.
+
+| Stage | Where | What |
+|---|---|---|
+| Walls | WaveSpeed Nano Banana 2.1 edit, paid per image | One picture per wall, described as seen straight-on with what is on it. The establishing wide shot (owner-chosen, else the first approved wide still) is the only reference, for style, colours and materials. Prompts that ask to move, turn or rotate the camera/view are refused (owner edit: 422; GPT text: the template is kept and labelled). |
+| Seating masters | WaveSpeed, paid per image | One picture per side of the room: the side's approved wall (else its set plate) as image 1, then every character's approved master in seat order. Approved seating masters are offered first (suggested) as reactions' seating masters; "Use for the close-ups" is the owner's click (`reactions.set_master`). |
+| Background repair | rented ComfyUI session (§19), paid | rembg `birefnet-general` (`rembg[gpu]==2.0.67`) on the pod over SSH with the session's throwaway key, like the MediaPipe step: only the picture goes up, only the people's alpha comes back. Mask = the owner's box minus the people grown by 17 px; Qwen-Image-Edit-2511 masked repaint; second pass on the band between the tight outline (alpha > 40, grown 3 px) and the wide outline (grown 21 px) inside the box ("halo"); the original people pasted back through the tight outline (pixel-exact). Nothing outside the box changes. |
+| Face fix | rented ComfyUI session, paid | One oval-masked face edit (`reactions.edit_graph`), pasted back through the oval on the whole picture, with the side's eyeline sentence. |
+| Character check | studio server (free) + Gemini (paid, or the free tier when ticked) | Heads counted with `reactions.find_heads`; Gemini asked which listed characters are visible (one-line descriptions). Missing or merged characters are flagged with "Remake this picture" (one Nano image, the cast spelled out). |
+
+**Eyeline** per side lives in `reactions:<id>` (`eyelines`): default from the main speaker (their side screen-right, the
+others screen-left toward them); it is written into the seating prompt, the reaction face prompts and the talking-shot
+prompt. **Cost**: a background repair is about 10 min start-up + 2 masked edits (60-90 s each) + 4-8 min for the cut-out
+tool; a face fix 10 min + 1 edit. The request must carry "at most" (`confirm_usd`, 409 otherwise) and the monthly cap
+applies. `room_repair` is one of `comfy_session.JOB_KINDS`, so a session shared with talking shots or reactions is only
+turned off when none of them is waiting. Chat threads: `wall:<id>` (`remake_wall {prompt}`), `seating:<side>` and
+`repair:<id>` (`repaint_background {prompt, box?}`), applied through the same paid routes.

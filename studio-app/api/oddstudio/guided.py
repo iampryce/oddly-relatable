@@ -192,15 +192,22 @@ def guide(db: Session, ep: Episode) -> dict:
                         "characters": [{"id": c.id, "name": c.name, "master": c.id in masters, "to_review": c.id in review}
                                        for c in chars]}
 
-    # 5. sets and seating (the shot stills on the storyboard)
+    # 5. sets and seating masters (room_sets.py: walls, seating pictures, repairs, character check) and the shot
+    # stills on the storyboard (made from them)
+    from . import room_sets
     shots = SF.migrated(SF.stored(db, ep.id)).get("shots") or []
     stills = [s for s in shots if any(x.get("source") == "still" for x in s.get("versions") or [])]
     ok = [s for s in stills if s.get("approved")]
+    rs = room_sets.summary(db, ep)
     s_busy = _jobs_busy(db, ep.id, ("stick_shot_still",))
-    steps["sets"] = {"status": "running" if s_busy else "done" if shots and len(ok) == len(shots) else
-                     "needs_approval" if len(stills) > len(ok) else "not_started",
-                     "cost": image_cost(1, ip["usd_per_image"]) if ip else None,
-                     "detail": f"{len(ok)} of {len(shots)} shots have an approved still" if shots else "no storyboard yet"}
+    status = rs["status"]
+    if s_busy:
+        status = "running"
+    elif status == "done" and len(stills) > len(ok):
+        status = "needs_approval"
+    steps["sets"] = {"status": status, "cost": rs["cost"] or (image_cost(1, ip["usd_per_image"]) if ip else None),
+                     "detail": "; ".join(x for x in (rs["detail"], f"{len(ok)} of {len(shots)} shots have an approved still"
+                                                     if shots else "no storyboard yet") if x)}
 
     for k in PLACEHOLDERS:
         steps[k] = {"status": "not_started", "cost": None, "detail": "", "available": False}

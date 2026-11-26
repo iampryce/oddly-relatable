@@ -99,6 +99,8 @@ from . import talking_s2v  # noqa: E402  (guided flow step 9: talking shots on a
 app.include_router(talking_s2v.router)
 from . import reactions  # noqa: E402  (guided flow steps 6-8: reactions and close-ups on a rented ComfyUI GPU)
 app.include_router(reactions.router)
+from . import room_sets  # noqa: E402  (guided flow step 5: sets and seating masters)
+app.include_router(room_sets.router)
 from . import system_disk  # noqa: E402
 app.include_router(system_disk.router)
 from . import chat, stick_pipeline, stick_shots  # noqa: E402

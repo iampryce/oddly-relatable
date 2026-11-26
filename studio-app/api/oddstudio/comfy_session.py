@@ -253,9 +253,9 @@ def ssh_endpoint(pod_id: str) -> tuple[str, int] | None:
     return (m.group(1), int(m.group(2))) if m else None
 
 
-# the jobs that use a ComfyUI session (talking shots, reaction poses and reaction animation): a job turns the GPU off
+# the jobs that use a ComfyUI session (talking shots, reaction poses and animation, set repairs): a job turns the GPU off
 # when it ends unless another of these is queued or running, since they all share the one live session
-JOB_KINDS = ("talking_render", "reaction_poses", "reaction_animate")
+JOB_KINDS = ("talking_render", "reaction_poses", "reaction_animate", "room_repair")
 
 
 def others_waiting(db: Session, job_id: int) -> bool:

@@ -36,6 +36,12 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
   pose    note_only | redo_pose {prompt, character?}     (a new picture of one reaction pose: paid, the masked face
           | edit_beat                                     edit of reactions.generate_poses; item "<shot>:<pose>")
   clip    ... | reanimate_shot {move_prompts?}           (a reaction shot animated again: paid, reactions.animate)
+  wall    note_only | remake_wall {prompt}               (a new straight-on picture of one wall: paid, Nano,
+                                                          room_sets.make_wall; a prompt asking to move the camera is
+                                                          refused; thread key wall:<wall id>)
+  seating note_only | repaint_background {prompt, box?}  (the background behind the seated people repainted on the
+  repair  note_only | repaint_background {prompt, box?}   rented GPU: paid, room_sets.start_repair; thread keys
+                                                          seating:<side> and repair:<repair id>)
 """
 from __future__ import annotations
 
@@ -60,11 +66,13 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
-         "talk": "Talking shot", "pose": "Reaction pose (face-only edit)"}
+         "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
+         "seating": "Seating picture", "repair": "Repaired picture"}
 ALLOWED = {"master": ("note_only", "redo_master"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
            "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
-           "pose": ("note_only", "redo_pose", "edit_beat")}
+           "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
+           "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background")}
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
@@ -170,8 +178,26 @@ class ReanimateShot(_Strict):
     move_prompts: dict[str, str] | None = Field(default=None, max_length=40)
 
 
+class RemakeWall(_Strict):
+    type: Literal["remake_wall"]
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
+class Box(_Strict):
+    x: float = Field(ge=0, le=20000)
+    y: float = Field(ge=0, le=20000)
+    w: float = Field(ge=8, le=20000)
+    h: float = Field(ge=8, le=20000)
+
+
+class RepaintBackground(_Strict):
+    type: Literal["repaint_background"]
+    prompt: str = Field(min_length=3, max_length=2000)
+    box: Box | None = None
+
+
 Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
-                           RedoPose, ReanimateShot],
+                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
@@ -194,6 +220,11 @@ def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -
             raise ValueError("the beat edit changes nothing")
     if p["type"] == "rerender_shot" and not p["settings"]:
         p["settings"] = {}
+    if p["type"] == "remake_wall":
+        from .room_sets import straight_on_problem
+        why = straight_on_problem(p["prompt"])
+        if why:
+            raise ValueError(why)
     if p["type"] == "reanimate_shot":
         from .reactions import check_move_prompts
         p["move_prompts"] = check_move_prompts(p.get("move_prompts") or {})
@@ -233,6 +264,13 @@ def describe(p: dict) -> str:
         n = len(p.get("move_prompts") or {})
         return ("This reaction shot is animated again from its approved poses (the earlier results are kept)"
                 + (f", with {n} move prompt(s) changed as below." if n else ", with the current move prompts."))
+    if t == "remake_wall":
+        return ("A new straight-on picture of this wall from the prompt below (the earlier pictures are kept; nothing is "
+                "approved for you).")
+    if t == "repaint_background":
+        where = "inside the box below" if p.get("box") else "above the people (the usual box)"
+        return (f"The background {where} is repainted as the prompt says, on the rented GPU. The people are cut out and "
+                "pasted back exactly as they are. You see before and after and decide; nothing is approved for you.")
     return "Nothing changes: this is advice only."
 
 
@@ -300,7 +338,7 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -405,6 +443,14 @@ def build_context(db: Session, ref: Ref) -> dict:
         cx["settings"] = {"image_model": ip["model"] if ip else "none", "candidates_per_run": int(st.get("master_candidates") or 2),
                           "usd_per_image": ip["usd_per_image"] if ip else None,
                           "has_approved_master": approved_master(db, c.id) is not None}
+    elif ref.step in ("wall", "seating", "repair"):
+        from . import room_sets as RS
+        ep = db.get(Episode, ref.episode_id)
+        cx["episode"] = ep.title
+        cx.update(RS.chat_context(db, ep, ref.step, ref.item))
+        if ref.step == "seating":
+            names = RS.sides_of(db, ep.id).get(ref.item, [])
+            chars = [c for c in db.query(Character).filter(Character.key.in_(names))] if names else []
     else:
         ep = db.get(Episode, ref.episode_id)
         cx["episode"] = ep.title
@@ -540,6 +586,11 @@ SCHEMAS = {
     "rerender_shot": ('{"type": "rerender_shot", "settings": {"prompt": "<the motion prompt>", "seconds": <one of the '
                       'allowed seconds>}}  (add "cfg" or "steps" only if the owner asks for them: they wait for the '
                       'own-GPU step)'),
+    "remake_wall": ('{"type": "remake_wall", "prompt": "<the full new wall prompt: the wall seen straight-on and what is '
+                    'on it; never ask to move, turn or rotate the camera>"}'),
+    "repaint_background": ('{"type": "repaint_background", "prompt": "<what the background should become, e.g. the '
+                           'fireplace wall with the bearded portrait instead of the window>", "box": {"x": <px>, "y": <px>, '
+                           '"w": <px>, "h": <px>}}  (leave "box" out for the usual area above the people)'),
     "rerender_talking_shot": ('{"type": "rerender_talking_shot", "prompt": "<the full new positive prompt, or leave out to '
                               'keep the current one>", "use_guide": <true|false, or leave out to keep the current '
                               'choice>}  (the model and its settings are fixed; only the prompt and the movement guide '
@@ -677,6 +728,9 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
         else:
             est = R.estimate(0, len(R.clips_needed(R.timeline(st.get("poses") or [], row["t1"] - row["t0"]))), R._prices(db))
         return {"usd": est["usd_max"], "label": f"up to ${est['usd_max']:.2f} of GPU time ({est['label']})"}
+    if p["type"] in ("remake_wall", "repaint_background"):
+        from . import room_sets as RS
+        return RS.chat_cost(db, p)
     return None
 
 
@@ -825,6 +879,9 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
         from . import reactions as R
         j = R.animate(ref.episode_id, int(ref.item), R.AnimateIn(move_prompts=p.get("move_prompts"), confirm_usd=confirm_usd), db, user)
         return {"done": "The shot is being animated again.", "job_id": j["id"]}
+    if t in ("remake_wall", "repaint_background"):
+        from . import room_sets as RS
+        return RS.chat_apply(db, db.get(Episode, ref.episode_id), ref.step, ref.item, p, confirm_usd, user)
     raise HTTPException(409, "this proposal has nothing to apply")
 
 

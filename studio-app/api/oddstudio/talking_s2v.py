@@ -138,13 +138,25 @@ def gate_filter(spans: list[tuple[float, float]]) -> str:
     return f"volume=enable='not({gate})':volume=0"
 
 
-def template_prompt(name: str, look: str, acting_beats: list[dict], pron: str = "They") -> str:
-    """The built-in prompt (prep.py's method): BASE + the holding line + "Acting in this shot: ..."."""
+def template_prompt(name: str, look: str, acting_beats: list[dict], pron: str = "They", eyeline: str = "") -> str:
+    """The built-in prompt (prep.py's method): BASE + the holding line + "Acting in this shot: ..." + the side's eyeline
+    (room_sets.eyeline: the speaker looks slightly screen-right toward the listeners unless the owner changed it)."""
     who = f"{name} ({look.strip().rstrip('.')})" if look.strip() else name
     text = BASE.format(who=who, pron=pron, pron_l=pron.lower()) + HOLDS.format(pron=pron)
     act = " Then ".join(", ".join(x for x in (b.get("expression", ""), b.get("eyes_and_gaze", ""), b.get("head_and_body", ""))
                                   if x).strip(", ") for b in acting_beats)
-    return text + (f" Acting in this shot: {act}." if act.strip() else "")
+    return text + (f" Acting in this shot: {act}." if act.strip() else "") + (f" {eyeline.strip()}" if eyeline.strip() else "")
+
+
+def eyeline_of(db: Session, ep: Episode, row: dict) -> str:
+    """The eyeline sentence of the shot's side of the room (step 5 / reactions storage), "" when the side is unknown."""
+    if not row.get("side"):
+        return ""
+    from . import room_sets as RS
+    try:
+        return RS.eyeline(db, ep, row["side"], row.get("speaker") or "")["text"]
+    except Exception:   # noqa: BLE001 -- no storyboard sides yet: no eyeline sentence
+        return ""
 
 
 def build_graph(prompt: str, negative: str, image: str, audio: str, control: str | None, frames: int, seed: int,
@@ -430,7 +442,8 @@ def talking_rows(db: Session, ep: Episode) -> list[dict]:
         out.append({"index": int(s["index"]), "t0": t0, "t1": t1, "frames": frames_for(t1 - t0), "speaker": speaker,
                     "name": c.name if c else (speaker or "the speaker"), "look": (c.visual_description or "") if c else "",
                     "text": " ".join((ln.get("text") or "").strip() for ln in mine).strip(),
-                    "words": words, "still": s.get("chosen"), "approved_still": bool(s.get("approved") and s.get("chosen"))})
+                    "words": words, "still": s.get("chosen"), "approved_still": bool(s.get("approved") and s.get("chosen")),
+                    "side": s.get("side") or ""})
     return out
 
 
@@ -445,7 +458,8 @@ def current_prompt(db: Session, ep: Episode, row: dict, st: dict) -> dict:
     p = st.get("prompt")
     if p and p.get("text"):
         return p
-    text = template_prompt(row["name"], row["look"], acting_beats(db, ep.id, row["index"], row["name"]))
+    text = template_prompt(row["name"], row["look"], acting_beats(db, ep.id, row["index"], row["name"]),
+                           eyeline=eyeline_of(db, ep, row))
     label = TEMPLATE_LABEL if not secret("openai_api_key", db) else "template prompt (not written by GPT yet)"
     return {"text": text, "source": "template", "label": label}
 
@@ -454,7 +468,8 @@ def _prompt_message(db: Session, ep: Episode, row: dict) -> str:
     from . import acting_analysis as AA
     from . import prompt_writer as PW
     notes = (f"{row['name']} says: \"{row['text'][:400]}\". Shot length {row['t1'] - row['t0']:.1f} s. "
-             "Write the positive prompt only (a separate negative prompt already forbids teeth, tongue, lips and a big mouth).")
+             "Write the positive prompt only (a separate negative prompt already forbids teeth, tongue, lips and a big mouth). "
+             f"Eyeline (keep it in the prompt): {eyeline_of(db, ep, row) or 'as in the still'}")
     acting = PW.acting_for_shot(AA.stored(db, ep.id).get("result"), row["index"], row["name"])
     look = f"{row['name']}. {row['look']}".strip()
     return PW.user_message("talking", get_section(db, "stick").get("style_prompt") or "", look, notes, acting)
@@ -758,7 +773,8 @@ def write_prompt(eid: int, idx: int, body: WriteIn, db: Session = Depends(get_db
     est = PW.estimate(cfg, PW.SYSTEM, message)
     v = stored(db, eid)
     st = _shot_state(v, idx)
-    template = {"text": template_prompt(r["name"], r["look"], acting_beats(db, eid, idx, r["name"])), "source": "template",
+    template = {"text": template_prompt(r["name"], r["look"], acting_beats(db, eid, idx, r["name"]), eyeline=eyeline_of(db, ep, r)),
+                "source": "template",
                 "label": TEMPLATE_LABEL, "at": time.time()}
     api_key = secret("openai_api_key", db)
     if not api_key:

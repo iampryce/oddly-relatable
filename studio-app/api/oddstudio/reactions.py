@@ -197,11 +197,12 @@ def oval_mask(o: dict, size: tuple[int, int] = (W, H)):
     return m
 
 
-def paste_mask(o: dict, feather: float = 4.0):
+def paste_mask(o: dict, feather: float = 4.0, size: tuple[int, int] = (W, H)):
     """The paste-back mask: the oval, softened INWARD only (a blurred copy multiplied by the hard oval), so every pixel
-    outside the oval keeps the original exactly."""
+    outside the oval keeps the original exactly. size: the picture's size (the 1280x720 base, or a whole set picture
+    for the sets step's face fix)."""
     from PIL import ImageChops, ImageFilter
-    hard = oval_mask(o)
+    hard = oval_mask(o, size)
     soft = hard.filter(ImageFilter.GaussianBlur(feather)) if feather > 0 else hard
     return ImageChops.multiply(hard, soft)
 
@@ -212,7 +213,7 @@ def paste_back(base, edited, o: dict):
     ed = edited.convert("RGB")
     if ed.size != base.size:
         ed = ed.resize(base.size, Image.LANCZOS)
-    return Image.composite(ed, base.convert("RGB"), paste_mask(o))
+    return Image.composite(ed, base.convert("RGB"), paste_mask(o, size=base.size))
 
 
 def lock_box(ovals: list[dict]) -> tuple[int, int, int, int]:
@@ -583,10 +584,16 @@ def reaction_rows(db: Session, ep: Episode) -> list[dict]:
 
 
 def master_candidates(db: Session, ep: Episode) -> dict[str, list[dict]]:
-    """Per side: the approved storyboard stills on that side (wide shots and the most people first)."""
+    """Per side: the approved seating master of step 5 (room_sets.py) first, then the approved storyboard stills on
+    that side (wide shots and the most people first)."""
+    from . import room_sets as RS
     plan = _plan(db, ep.id)
-    order = {"wide": 0, "medium": 1, "close": 2}
+    order = {"seating": -1, "wide": 0, "medium": 1, "close": 2}
     out: dict[str, list[dict]] = {}
+    # the seating masters the owner approved in step 5 (room_sets.py) come first: they are made for this
+    sides = plan.get("sides") or {}
+    for side, aid in RS.approved_seating(db, ep.id).items():
+        out.setdefault(side, []).append({"asset_id": aid, "shot": 0, "framing": "seating", "people": len(sides.get(side) or [])})
     for s in plan.get("shots") or []:
         if s.get("approved") and s.get("chosen") and s.get("side"):
             out.setdefault(s["side"], []).append({"asset_id": s["chosen"], "shot": int(s["index"]), "framing": s.get("shot"),
