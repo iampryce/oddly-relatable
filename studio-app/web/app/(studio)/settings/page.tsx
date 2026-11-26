@@ -21,7 +21,7 @@ const CREDENTIALS: [string, string][] = [
   ['aws_access_key_id', 'AWS access key ID (S3)'], ['aws_secret_access_key', 'AWS secret access key (S3)'],
   ['youtube_client_id', 'YouTube OAuth client ID'], ['youtube_client_secret', 'YouTube OAuth client secret'],
   ['youtube_refresh_token', 'YouTube refresh token (set by "Connect YouTube")'], ['comfyui_token', 'ComfyUI access token (optional)'],
-  ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (talking shots; stick pipeline images and video)'],
+  ['fal_key', 'fal.ai API key (hosted video models)'], ['wavespeed_api_key', 'WaveSpeed API key (talking shots; stick pipeline images and video)'], ['gemini_api_key', 'Gemini API key (video quality checks; use a billing-enabled project)'],
   ['runpod_api_key', 'RunPod API key (rented GPU sessions; stays on the studio)'], ['gpu_worker_token', 'GPU worker token (our own GPU machine)'],
 ];
 const NEED_LABEL = (n: string) => n === 'tool:codex' ? 'Codex installed and signed in with ChatGPT on the server' : n.startsWith('tool:') ? `${n.slice(5)} installed on the worker` : n.startsWith('setting:') ? `${n.slice(8).replace('.', ' ')} set below` :

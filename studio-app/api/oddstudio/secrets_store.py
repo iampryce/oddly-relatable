@@ -33,6 +33,7 @@ SECRETS = {
     "gpu_worker_token": "GPU_WORKER_TOKEN",      # our own GPU machine's worker token (mode "own")
     "fal_key": "FAL_KEY",
     "wavespeed_api_key": "WAVESPEED_API_KEY",   # hosted talking shots (shot comparison); never logged or returned
+    "gemini_api_key": "GEMINI_API_KEY",         # video quality checks (paid Gemini API tier only); never logged or returned
 }
 _cache: tuple[float, dict] | None = None
 TTL = 5.0
