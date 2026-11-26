@@ -69,6 +69,13 @@ DEFAULTS: dict[str, dict] = {
     # The studio chat (chat.py): auto = Anthropic when its key is saved, else OpenAI. Each message shows its estimated
     # cost first; max_tokens caps the answer (and so the most one message can cost).
     "chat": {"provider": "auto", "max_tokens": 4000},
+    # The guided generation page (guided.py). Prompt writing (prompt_writer.py): the OpenAI model and its price per
+    # million tokens (check openai.com/api/pricing; the estimate uses these), and the longest answer. Acting analysis
+    # (acting_analysis.py): the Gemini model for a paid-tier key and its prices; the free-tier models are tried only
+    # when the owner ticks "use free tier" for a run and the paid model answers 429 or 503.
+    "guide": {"prompt_model": "gpt-5.5", "prompt_usd_in": 5.0, "prompt_usd_out": 30.0, "prompt_max_tokens": 4000,
+              "acting_model": "gemini-3.1-pro-preview", "acting_usd_in": 2.0, "acting_usd_out": 12.0,
+              "acting_free_models": ["gemini-3.5-flash", "gemini-3-flash-preview"]},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -140,6 +147,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         mt = value.get("max_tokens", 4000)
         if not (isinstance(mt, int) and not isinstance(mt, bool) and 256 <= mt <= 16000):
             raise ValueError("chat.max_tokens must be a whole number between 256 and 16000")
+    if key == "guide":
+        check_guide(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
@@ -151,6 +160,24 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         db.add(Setting(key=key, value=merged))
     db.commit()
     return merged
+
+
+def check_guide(v: dict) -> None:
+    """Settings > Guided generation: model names are plain identifiers, prices and limits stay in range."""
+    import re
+    name = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+    for k in ("prompt_model", "acting_model"):
+        if k in v and not (isinstance(v[k], str) and name.match(v[k])):
+            raise ValueError(f"guide.{k} must be a model name (letters, digits, dots, dashes)")
+    for k in ("prompt_usd_in", "prompt_usd_out", "acting_usd_in", "acting_usd_out"):
+        if k in v and not (isinstance(v[k], (int, float)) and not isinstance(v[k], bool) and 0 < v[k] <= 200):
+            raise ValueError(f"guide.{k} must be a price per million tokens above 0 and at most 200")
+    mt = v.get("prompt_max_tokens", 4000)
+    if not (isinstance(mt, int) and not isinstance(mt, bool) and 256 <= mt <= 32000):
+        raise ValueError("guide.prompt_max_tokens must be a whole number between 256 and 32000")
+    free = v.get("acting_free_models", [])
+    if not (isinstance(free, list) and len(free) <= 5 and all(isinstance(m, str) and name.match(m) for m in free)):
+        raise ValueError("guide.acting_free_models must be a list of up to 5 model names")
 
 
 def check_gpu(v: dict) -> None:
