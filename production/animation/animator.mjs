@@ -113,6 +113,13 @@ function limb(ctx, a, j, e, lw) {
   ctx.lineWidth = lw; ctx.strokeStyle = '#121212'; ctx.lineCap = 'round'; ctx.stroke();
 }
 
+// Two straight bones with a rounded joint (a stick figure's knee or elbow), used where a single curve would bow into
+// a loop: seated legs and resting arms.
+function limbStraight(ctx, a, j, e, lw) {
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(j.x, j.y); ctx.lineTo(e.x, e.y);
+  ctx.lineWidth = lw; ctx.strokeStyle = '#121212'; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+}
+
 function hand(ctx, j, e, lw, kind) {
   const ang = Math.atan2(e.y - j.y, e.x - j.x);
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(ang);
@@ -218,6 +225,17 @@ export function drawCharacter(ctx, c, p) {
   for (const [hip, footW, shoe, off, side] of legs) {
     const t = toLocal(footW);
     const pref = p.kneeDir ? {x: side * p.kneeDir.x, y: p.kneeDir.y} : {x: side * 0.8, y: -0.2};
+    if (p.seated) {
+      // seated, seen from the front: the thigh comes toward the camera (foreshortened), so the leg reads as a nearly
+      // straight line from the hip to the foot with the knee a little out to its own side; no curve, so no loop
+      // knees a little apart at the seat's front edge (the short thigh), then the shin straight down to the foot:
+      // the cartoon front view of sitting
+      const knee = {x: hip.x + side * lw * 4.5, y: hip.y + Math.max(lw * 2, (t.y - hip.y) * 0.14)};
+      const foot = {x: knee.x, y: t.y};
+      limbStraight(ctx, hip, knee, foot, lw);
+      ctx.drawImage(shoe, foot.x + off.x, foot.y + off.y);
+      continue;
+    }
     const {joint, end} = ik(hip, t, c.thigh, c.shin, pref);
     limb(ctx, hip, joint, end, lw);
     ctx.drawImage(shoe, end.x + off.x, end.y + off.y);
@@ -241,8 +259,8 @@ export function drawCharacter(ctx, c, p) {
     const sh = body({x: sh0.x, y: sh0.y - (p.shoulderLift || 0)});
     const tgt = add(sh, rot(target, lean));
     // elbows point outward and slightly down
-    const {joint, end} = ik(sh, tgt, c.upper, c.fore, {x: side, y: 0.35});
-    limb(ctx, sh, joint, end, lw);
+    const {joint, end} = ik(sh, tgt, c.upper, c.fore, p.seated && p.armsResting ? {x: side * 0.8, y: 0.6} : {x: side, y: 0.35});
+    (p.seated && p.armsResting ? limbStraight : limb)(ctx, sh, joint, end, lw);
     hand(ctx, joint, end, lw, kind);
   }
   ctx.restore();
