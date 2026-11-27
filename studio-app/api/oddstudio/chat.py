@@ -114,7 +114,7 @@ def studio_context(db: Session) -> str:
     return "\n".join(lines)
 
 
-SYSTEM = ("You are the assistant of Oddly Relatable, a small studio making short comedy cartoons with stick-man "
+SYSTEM = ("You are the assistant of Rivet AI Studio, a small studio whose stick-man comedy channel is Oddly Relatable; it makes short comedy cartoons with stick-man "
           "characters. Answer the owner's questions briefly and concretely, using the studio summary below when it is "
           "relevant. You cannot change anything in the studio: when something needs doing, say which page or button "
           "does it. Paid actions always show their cost and need the owner's click. If the summary does not contain "

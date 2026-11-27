@@ -1,4 +1,4 @@
-"""Oddly Relatable Studio API (FastAPI). Run: uvicorn oddstudio.main:app
+"""Rivet AI Studio API (FastAPI). Run: uvicorn oddstudio.main:app
 
 All /api routes except health, sign-in and signed media require the owner's session. The database schema is managed
 by Alembic (`alembic upgrade head`); tests create it directly."""
@@ -73,7 +73,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Oddly Relatable Studio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Rivet AI Studio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(routes_episodes.router)
 app.include_router(character_admin.router)
 app.include_router(character_looks.router)

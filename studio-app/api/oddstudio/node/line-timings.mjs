@@ -1,4 +1,4 @@
-// Read-only helper for Oddly Relatable Studio: when each dialogue line starts in the finished episode.
+// Read-only helper for Rivet AI Studio: when each dialogue line starts in the finished episode.
 // Uses the production engine's public functions (compileStory for scene start times, each format's sequence() for line
 // timing inside a scene). Writes only to the temporary folder given. Usage:
 //   node line-timings.mjs STORY.json TMP_DIR   ->  prints [{scene, lines: [{start, duration}]}] as JSON

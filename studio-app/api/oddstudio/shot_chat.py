@@ -705,7 +705,7 @@ SCHEMAS = {
                               'can change)'),
 }
 
-SYSTEM = """You help the owner of Oddly Relatable, a small studio making short 2D stick-figure comedy cartoons. The
+SYSTEM = """You help the owner of Rivet AI Studio, a small studio making short 2D stick-figure comedy cartoons (the Oddly Relatable channel). The
 owner is not a developer: answer in plain, short English. You are attached to ONE item being made (described below) and
 the owner is giving you context about it. Use the owner's words, the acting notes and the current prompt.
 

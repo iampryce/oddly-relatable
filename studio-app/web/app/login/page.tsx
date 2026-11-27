@@ -20,7 +20,7 @@ function LoginForm() {
   };
   return (
     <form className="card" onSubmit={submit}>
-      <div className="brand" style={{padding: '0 0 16px'}}><div className="brand-mark">OR</div><div>Oddly Relatable<small>Studio</small></div></div>
+      <div className="brand" style={{padding: '0 0 16px'}}><div className="brand-mark">R</div><div>Rivet AI<small>Studio</small></div></div>
       <h1>Sign in</h1>
       <p className="sub">Production control centre</p>
       {error && <div className="alert bad" role="alert">{error}</div>}
