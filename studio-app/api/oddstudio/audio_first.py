@@ -171,7 +171,10 @@ def state(db: Session, ep: Episode) -> dict:
             # and age are never inferred), and silent characters (named in the transcript, never speaking)
             "voice_traits": tr.get("voice_traits"), "silent_cast": tr.get("silent_cast", []),
             # Stage 1c: line quality (cue phrases, one-level Undo, a cut-off last line)
-            "cues": tr.get("cues", LN.DEFAULT_CUES),
+            "cues": tr.get("cues", list(LN.DEFAULT_CUES)),   # per episode, empty until the owner sets some
+            # the private reference video of the guided steps (guided.py), e.g. kept from the video this episode was
+            # made from: the owner sees it is there; its storage key stays on the server
+            "reference_video": _reference_out(db, ep.id),
             "can_undo": bool(tr.get("lines_previous")),
             "end_at": tr.get("end_at"),
             "fragment": fragment_of(tr),
@@ -179,6 +182,15 @@ def state(db: Session, ep: Episode) -> dict:
                            for c in sorted(keys.values(), key=lambda c: c.id)
                            if (c.scope == "recurring" or c.art_status == "approved" or c.episode_id == ep.id)
                            and c.id not in _binned_characters(db)]}
+
+
+def _reference_out(db: Session, eid: int) -> dict | None:
+    from . import guided
+    ref = guided.reference_video(db, eid)
+    if not ref:
+        return None
+    return {"seconds": ref.get("seconds"), "size": ref.get("size"), "from_episode_upload": bool(ref.get("from_episode_upload")),
+            "window": ref.get("window")}
 
 
 def _binned_characters(db: Session) -> set[int]:
@@ -280,7 +292,9 @@ def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, sec
     sm = {**source, "full_asset_id": a.id, "duration": round(seconds, 3) if seconds else None, "needs_trim": needs_trim}
     ep.audio_transcript = {"source_media": sm}
     ep.last_error = ""
-    what = "the audio of a video (the video file was deleted)" if source.get("type") == "video" else "audio"
+    what = ("audio" if source.get("type") != "video" else
+            "the audio of a video (a private copy of the video is kept for the guided steps)" if source.get("reference_kept") == "kept"
+            else "the audio of a video (the video file was deleted)")
     if needs_trim:
         ep.audio_asset_id = None
         set_stage(ep, "audio_upload")
@@ -292,13 +306,17 @@ def accept_audio(db: Session, ep: Episode, path: Path, ctype: str, ext: str, sec
 
 @router.put("/episodes/{eid}/audio")
 async def upload_audio(eid: int, request: Request, hints: bool = False, start: float | None = None, end: float | None = None,
-                       db: Session = Depends(get_db)):
+                       keep_video: bool = False, db: Session = Depends(get_db), user: str = Depends(current_user)):
     """The audio or video file is the raw request body (Content-Type audio/* or video/*), streamed to disk with a size
     cap after a free-space check. Audio is stored right away. A video is checked here (it must have an audio track) and
-    handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the video.
+    handed to the worker (`audio_media_prepare`), which extracts the audio and deletes the uploaded file.
     `hints` (video only): text-only staging notes from frames of the part the episode uses (video_notes.py); a Short
     longer than 3 min then needs its window (`start`, `end`) with the upload, so only that part is analysed. The frames
-    are deleted as soon as the notes are made."""
+    are deleted as soon as the notes are made.
+    `keep_video` (video only, the owner's choice when creating the episode): a private copy of the video is ALSO kept
+    as the guided steps' reference video, exactly where guided step 1 keeps it (guided.store_reference: under private/,
+    never in the asset list), for the character descriptions and acting notes. Its pictures are never sent to an image
+    or video generator. The audio is extracted as before."""
     ep = audio_episode(db, eid)
     gate(ep, "upload_audio")
     ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -366,8 +384,10 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, start: f
                     raise HTTPException(409, f"the video notes would cost about ${est['usd']:.2f} ({est['frames']} frames), "
                                              f"over the ${est['cap_usd']:.2f} cap: use a shorter part of the video or raise "
                                              "the cap in Settings > Video and visual analysis")
+            kept = keep_reference(db, ep, tmp, ctype, size, info, window, user) if keep_video else None
             ep.audio_asset_id, ep.last_error = None, ""
-            ep.audio_transcript = {"source_media": {"type": "video", "preparing": True, "hints_requested": bool(hints)}}
+            ep.audio_transcript = {"source_media": {"type": "video", "preparing": True, "hints_requested": bool(hints),
+                                                    "reference_kept": kept}}
             set_stage(ep, "audio_preparing")
             db.add(Event(episode_id=ep.id, kind="episode", message=f"Video uploaded ({size / 1048576:.1f} MB): extracting its audio"
                                                                   + (" and sampling frames for the video notes" if hints else "")))
@@ -387,6 +407,27 @@ async def upload_audio(eid: int, request: Request, hints: bool = False, start: f
     if ep.audio_asset_id:
         enqueue(db, "audio_transcribe", episode_id=ep.id, revision=ep.revision, payload={"asset_id": ep.audio_asset_id})
     return state(db, ep)
+
+
+# video types the guided steps' reference video accepts (guided.VIDEO_TYPES); an .m4v is an MP4 file
+KEEP_AS = {"video/mp4": "video/mp4", "video/x-m4v": "video/mp4", "video/quicktime": "video/quicktime", "video/webm": "video/webm"}
+
+
+def keep_reference(db: Session, ep: Episode, path: Path, ctype: str, size: int, info: dict, window: dict | None,
+                   user: str) -> str:
+    """Keep a private copy of the uploaded video as the guided steps' reference video (the same code path as guided
+    step 1). Returns "kept", or why it was not kept (the episode is still made from the video's audio)."""
+    from . import guided
+    if ctype not in KEEP_AS:
+        db.add(Event(episode_id=ep.id, kind="episode", message="The video was not kept for the guided steps: they read "
+                     "MP4, MOV or WebM only (add one in guided step 1)"))
+        return "unsupported type"
+    if info.get("video") is False:
+        return "no picture"
+    guided.store_reference(db, ep, path, KEEP_AS[ctype], size, info.get("duration"),
+                           f"The episode's video kept privately as the reference video for the guided steps by {user}",
+                           extra={"from_episode_upload": True, **({"window": window} if window else {})})
+    return "kept"
 
 
 class TrimIn(BaseModel):
@@ -638,12 +679,21 @@ def normalise(eid: int, body: NormaliseIn, db: Session = Depends(get_db)):
             tr["cues"] = cues
             ep.audio_transcript = tr
             db.commit()
-    cues = tr.get("cues", LN.DEFAULT_CUES)
+    cues = tr.get("cues", list(LN.DEFAULT_CUES))
     current = tr.get("lines", [])
     proposal = LN.propose_lines(current, tr.get("text", ""), cues)
     return {"cues": cues, "current": current, "proposal": proposal,
             "fragment": LN.trailing_fragment(proposal, tr.get("text", ""), tr.get("duration")),
             "changed": [ln["text"] for ln in proposal] != [ln["text"] for ln in current]}
+
+
+@router.post("/episodes/{eid}/audio/cues/suggest")
+def suggest_cues(eid: int, db: Session = Depends(get_db)):
+    """Free and local: up to five cue phrases from THIS episode's own transcript (phrases that often open a sentence,
+    after a full stop or a pause). Nothing is saved: the owner edits the list, then Propose stores it."""
+    ep = audio_episode(db, eid)
+    tr = ep.audio_transcript or {}
+    return {"suggestions": LN.suggest_cues(tr.get("lines", []), tr.get("text", ""))}
 
 
 @router.post("/episodes/{eid}/audio/lines/undo")
@@ -738,6 +788,18 @@ class CastIn(BaseModel):
     speakers: list[SpeakerCastIn] = Field(min_length=1, max_length=12)
 
 
+def apply_cast_mapping(ep: Episode, mapping: dict[str, str]) -> None:
+    """Speaker label -> character key on every line (and remembered in the transcript's cast). Used by the cast below
+    and by the episode page's Characters section (speaker_cast.py). Does not commit."""
+    tr = dict(ep.audio_transcript or {})
+    lines = [dict(x) for x in tr.get("lines", [])]
+    for ln in lines:
+        if ln.get("speaker") in mapping:
+            ln["speaker"] = mapping[ln["speaker"]]
+    tr["lines"], tr["cast"] = lines, {**tr.get("cast", {}), **mapping}
+    ep.audio_transcript = tr
+
+
 @router.post("/episodes/{eid}/audio/cast")
 def set_cast(eid: int, body: CastIn, db: Session = Depends(get_db)):
     """Give each speaker label a character: an existing one, or a new character for this episode (no art yet; its pose
@@ -771,11 +833,7 @@ def set_cast(eid: int, body: CastIn, db: Session = Depends(get_db)):
                          engine_character=f"studio-{n.key}", art_status="none", default_expression="neutral", voice=""))
         created.append(n.key)
         mapping[sp.label] = n.key
-    for ln in lines:
-        if ln.get("speaker") in mapping:
-            ln["speaker"] = mapping[ln["speaker"]]
-    tr["lines"], tr["cast"] = lines, {**tr.get("cast", {}), **mapping}
-    ep.audio_transcript = tr
+    apply_cast_mapping(ep, mapping)
     for key in created:
         db.add(Event(episode_id=ep.id, kind="character", message=f"New character for the audio: {key}"))
     db.add(Event(episode_id=ep.id, kind="episode", message="Audio cast set: " + ", ".join(f"{k} → {v}" for k, v in mapping.items())))
@@ -930,7 +988,8 @@ def audio_media_prepare(ctx: Ctx) -> dict:
             raise media.MediaError("the length of the extracted audio could not be read")
         try:
             msg = accept_audio(db, ep, out, "audio/mp4", ".m4a", seconds,
-                               {"type": "video", "original_deleted": True, "hints_requested": bool(p.get("hints"))})
+                               {"type": "video", "original_deleted": True, "hints_requested": bool(p.get("hints")),
+                                "reference_kept": sm.get("reference_kept")})
         except HTTPException as e:
             raise media.MediaError(str(e.detail)) from None
         db.add(Event(episode_id=ep.id, kind="episode", message=msg))

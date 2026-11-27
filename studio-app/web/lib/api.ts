@@ -32,10 +32,13 @@ const MEDIA_EXT: Record<string, string> = {mp3: 'audio/mpeg', wav: 'audio/wav', 
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp'};
 export const mediaType = (file: File) => file.type || MEDIA_EXT[(file.name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
 export const isVideoFile = (file: File | null) => !!file && mediaType(file).startsWith('video/');
-export async function uploadAudio<T = any>(path: string, file: File, opts: {hints?: boolean; window?: {start: number; end: number} | null} = {}): Promise<T> {
+// keepVideo (a video only): also keep a private copy as the guided steps' reference video (audio_first.keep_reference)
+export async function uploadAudio<T = any>(path: string, file: File, opts: {hints?: boolean; window?: {start: number; end: number} | null;
+  keepVideo?: boolean} = {}): Promise<T> {
   const type = mediaType(file);
   const q = new URLSearchParams();
   if (opts.hints && type.startsWith('video/')) q.set('hints', 'true');
+  if (opts.keepVideo && type.startsWith('video/')) q.set('keep_video', 'true');
   if (opts.window && type.startsWith('video/')) { q.set('start', String(opts.window.start)); q.set('end', String(opts.window.end)); }
   const url = `/api${path}${q.toString() ? `?${q}` : ''}`;
   const res = await fetch(url, {method: 'PUT', body: file, headers: {'Content-Type': type}, credentials: 'same-origin', cache: 'no-store'});

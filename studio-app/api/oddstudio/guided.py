@@ -3,7 +3,9 @@ its status and its live cost. The help text lives in the web page; this module r
 
 It also keeps the episode's reference video for the acting analysis. The video is the owner's own upload, stored under
 private/ (never in the episode's asset list, so nothing else can pick it up as an image or video reference) and only
-ever sent to the acting analysis. The owner can remove it at any time.
+ever sent to the analysers (acting analysis, Cast descriptions, suggested speakers), never to an image or video
+generator. It is uploaded in step 1, or kept when the episode is created from a video and the owner leaves "keep the
+video" ticked (audio_first.keep_reference); both go through store_reference(). The owner can remove it at any time.
 
 Step statuses: not_started | running | needs_approval | done. Step 10 (quality check) is clip_qa.py, step 11 (assembly
 and the owner's review) is assembly.py; the "Make whole episode" autopilot on top of the page is autopilot.py.
@@ -96,20 +98,30 @@ async def upload_reference(eid: int, request: Request, db: Session = Depends(get
             raise HTTPException(422, str(e))
         if info.get("video") is False:
             raise HTTPException(422, "this file has no picture")
-        k = f"private/episodes/{ep.id}/reference-video-{uuid.uuid4().hex[:8]}{ext}"
-        storage().put_file(k, tmp, ctype)
+        store_reference(db, ep, tmp, ctype, size, info.get("duration"), f"Reference video uploaded by {user}")
     finally:
         tmp.unlink(missing_ok=True)
+    return guide(db, ep)
+
+
+def store_reference(db: Session, ep: Episode, src, ctype: str, size: int, seconds: float | None, message: str,
+                    extra: dict | None = None) -> dict:
+    """The ONE place the reference video is stored: a copy of `src` under private/ (never an Asset row, so no other
+    step can pick it up as an image or video reference), recorded in the guide settings; the earlier one is deleted.
+    Used by step 1's upload and by "keep the video" when an episode is created from a video (audio_first.py).
+    `src` is copied, not moved. Commits."""
+    k = f"private/episodes/{ep.id}/reference-video-{uuid.uuid4().hex[:8]}{VIDEO_TYPES[ctype]}"
+    storage().put_file(k, src, ctype)
     v = _stored(db, ep.id)
     old = (v.get("reference_video") or {}).get("key")
     v["reference_video"] = {"key": k, "content_type": ctype, "size": size, "uploaded": time.time(),
-                            "seconds": round(info["duration"], 2) if info.get("duration") else None}
+                            "seconds": round(seconds, 2) if seconds else None, **(extra or {})}
     _save(db, ep.id, v)
-    db.add(Event(episode_id=ep.id, kind="episode", message=f"Reference video uploaded by {user} ({size / 1048576:.1f} MB, private)"))
+    db.add(Event(episode_id=ep.id, kind="episode", message=f"{message} ({size / 1048576:.1f} MB, private)"))
     db.commit()
     if old and old != k:
         storage().delete(old)
-    return guide(db, ep)
+    return v["reference_video"]
 
 
 @router.delete("/episodes/{eid}/guide/reference-video")
@@ -134,7 +146,9 @@ def _ref_out(ref: dict | None) -> dict | None:
     if not ref:
         return None
     return {"content_type": ref["content_type"], "size": ref["size"], "seconds": ref.get("seconds"),
-            "uploaded": ref.get("uploaded"), "url": storage().url(ref["key"])}
+            "uploaded": ref.get("uploaded"), "url": storage().url(ref["key"]),
+            # kept from the video the episode was created from (audio_first.keep_reference), not uploaded in step 1
+            "from_episode_upload": bool(ref.get("from_episode_upload")), "window": ref.get("window")}
 
 
 def guide(db: Session, ep: Episode) -> dict:

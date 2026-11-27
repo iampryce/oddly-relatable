@@ -12,6 +12,8 @@ import {Scene, SceneEditor, SceneView} from '@/components/SceneEditor';
 import SceneSetSelect from '@/components/SceneSetSelect';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import CastPanel from '@/components/CastPanel';
+import NextStepBanner from '@/components/NextStepBanner';
+import EpisodeCharacters from '@/components/EpisodeCharacters';
 import LineExpressions from '@/components/LineExpressions';
 import ReactionSheet from '@/components/ReactionSheet';
 import {hookNote} from '@/lib/hookView';
@@ -87,7 +89,9 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
       case 'plan': return p.plan || <p className="muted small">No video notes, so there is no Reference plan.</p>;
       case 'lines': return <>{p.recording}{p.lines}{p.tidy}</>;
       case 'notes': return p.notes || <p className="muted small">No video notes. Upload a video with "notes" ticked (Lines and speakers) to get them.</p>;
-      case 'cast': return <>{p.cast}{ep.script ? <CastPanel episodeId={ep.id} onChange={reloadAll} />
+      case 'cast': return <>{ep.source === 'audio' && <EpisodeCharacters id={ep.id} onChange={reloadAll} />}
+        {ep.source === 'audio' && p.cast ? <details className="stack"><summary className="small">Map speakers by hand, voices and silent characters (older cast card)</summary>{p.cast}</details> : p.cast}
+        {ep.script ? <CastPanel episodeId={ep.id} onChange={reloadAll} />
         : <p className="muted small">{ep.source === 'audio' ? 'The poses each character needs are listed once the scenes are built.' : 'The cast comes from the script.'}</p>}</>;
       case 'script': return <>{ep.format === 'long' && <OutlineTab ep={ep} can={can} act={act} characters={characters} />}{p.scenes}<ScriptTab {...ctx} /></>;
       case 'storyboard': return <StoryboardTab {...ctx} />;
@@ -115,8 +119,9 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
         <div><h1>{ep.title} <DeleteButton kind="episode" id={ep.id} label={`episode ${ep.id} "${ep.title}"`} onDone={() => { window.location.href = '/bin'; }} /></h1><div className="row"><Stage stage={ep.stage} />{ep.format === 'long' && <span className="badge busy">long episode · 3 acts</span>}<span className="muted">Revision {ep.revision} · {ep.next_step}</span></div></div>
         <DialogueDisplay ep={ep} act={act} /><FrameLayout ep={ep} act={act} /><HookBanner ep={ep} act={act} />
       </div>
+      <NextStepBanner id={ep.id} />
       <Pipeline stage={ep.stage} source={ep.source} />
-      {banner && <div className={`alert ${banner.tone} ws-banner`} role="status">
+      {banner &&<div className={`alert ${banner.tone} ws-banner`} role="status">
         <strong>What is blocking this episode:</strong> {banner.text}
         {' '}<button className="btn sm" onClick={() => goTo(ws.blocker.section)}>Go to {ws.blocker.title}</button></div>}
       {!banner && workingText(ws) && <p className="muted small" role="status">{workingText(ws)}</p>}

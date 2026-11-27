@@ -6,6 +6,7 @@ import {NOTE_CAMERA, NOTE_EMOTIONS, NOTE_FACING, NOTE_FURNITURE, NOTE_POSES, NOT
   forServer, setField, setRoleField, type NoteRange, type RangeKey, type RoleKey} from '@/lib/videoNotes';
 import ReferencePlan from './ReferencePlan';
 import PeoplePanel from './PeoplePanel';
+import SpeakerSuggest from './SpeakerSuggest';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from './ui';
 import {applyEdit, type Line, type LineEdit} from '@/lib/audioLines';
@@ -101,19 +102,21 @@ export default function AudioPanel({episodeId, onChange, render}: {episodeId: nu
                            onTimeUpdate={e => { if (stopAt.current !== null && e.currentTarget.currentTime >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} />
           : <p className="muted">No audio uploaded yet.</p>}
         {st.allowed_actions.includes('upload_audio') && <div className="field">
-          <label htmlFor="audio-file">{st.audio || st.full_audio ? 'Replace the recording (the lines are transcribed again)' : 'Upload the recording'} (audio up to {st.limits?.audio_mb} MB, or a video up to {st.limits?.video_mb} MB: only its sound is used, the video file is deleted)</label>
+          <label htmlFor="audio-file">{st.audio || st.full_audio ? 'Replace the recording (the lines are transcribed again)' : 'Upload the recording'} (audio up to {st.limits?.audio_mb} MB, or a video up to {st.limits?.video_mb} MB: its sound is the voice track; the video itself is only kept, privately, if you tick it below)</label>
           <input id="audio-file" type="file" accept="audio/*,video/*" disabled={!!act.busy} onChange={e => setPending(e.target.files?.[0] || null)} />
           <VideoNotesOptions file={pending} format={st.format} onChange={setNotesChoice} />
           {pending && <div className="row"><button className="btn primary" disabled={!!act.busy || !notesChoice.ready}
-            onClick={() => act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, pending, {hints: notesChoice.notes, window: notesChoice.window}); setPending(null); setDirty(false); setSelected(new Set()); })}>Upload</button></div>}
+            onClick={() => act.run('upload', async () => { await uploadAudio(`/episodes/${episodeId}/audio`, pending, {hints: notesChoice.notes, window: notesChoice.window, keepVideo: notesChoice.keep}); setPending(null); setDirty(false); setSelected(new Set()); })}>Upload</button></div>}
         </div>}
         {!st.transcript && st.audio && st.allowed_actions.includes('transcribe_audio') && st.stage !== 'audio_transcribing' &&
           <p className="small">The audio is ready but not transcribed{st.last_error ? ' (the last attempt failed)' : ''}. <button className="btn sm" disabled={!!act.busy}
             onClick={() => act.run('tr', async () => { await api(`/episodes/${episodeId}/audio/transcribe`, {method: 'POST'}); setDirty(false); setSelected(new Set()); })}>Transcribe</button></p>}
-        {st.stage === 'audio_preparing' && <div className="alert">Extracting the audio from the video (the video file is deleted afterwards)…</div>}
+        {st.stage === 'audio_preparing' && <div className="alert">Extracting the audio from the video{st.reference_video?.from_episode_upload ?' (a private copy of the video is kept for the guided steps)' : ' (the video file is deleted afterwards)'}…</div>}
         {st.stage === 'audio_transcribing' && <div className="alert">Transcribing the audio into timed lines…</div>}
         {st.source_media && !st.source_media.preparing && <p className="muted small">
-          Source: {st.source_media.type === 'video' ? 'the audio track of a video (the video file was deleted; its picture is never used)' : 'an audio file'}
+          Source: {st.source_media.type !== 'video' ? 'an audio file'
+            : st.reference_video?.from_episode_upload ? 'the audio track of a video. A private copy of the video is kept as the reference video of the guided steps (character descriptions, acting notes, suggested speakers); its pictures are never sent to an image or video generator.'
+            : `the audio track of a video (that upload was deleted; its picture is never used).${st.reference_video ? ' The guided steps use the reference video added in step 1.' : ' To use the guided steps, add the video in guided step 1.'}`}
           {st.source_media.duration ? ` · ${round1(st.source_media.duration)} s recorded` : ''}
           {st.trim ? ` · Short window ${round1(st.trim.start)}-${round1(st.trim.end)} s` : ''}</p>}
         {st.source_media?.hints_requested && !st.video_notes && !st.source_media?.preparing && <p className="muted small">Video notes: being made…</p>}
@@ -133,6 +136,8 @@ export default function AudioPanel({episodeId, onChange, render}: {episodeId: nu
             {editable && <button className="btn primary" disabled={!dirty || !!act.busy} onClick={save}>{dirty ? 'Save lines' : 'Saved'}</button>}
           </div></div>
         <p className="muted small">Give each line a speaker (any label, or a character key). Split a line where the speaker changes; merge lines one speaker says together. Timing always comes from the audio.</p>
+        <SpeakerSuggest episodeId={episodeId} editable={editable} dirty={dirty}
+          onApplied={async () => { setDirty(false); setSelected(new Set()); await reload(); await onChange?.(); }} />
         <datalist id="speaker-options">{speakerOptions.map(s => <option key={s} value={s} />)}</datalist>
         {editable && <div className="row" style={{flexWrap: 'wrap'}}>
           <button className="btn sm" onClick={() => setSelected(new Set(lines.map((_, k) => k)))}>Select all</button>
@@ -439,6 +444,13 @@ function LineQuality({st, episodeId, act, dirty, onApplied}: {st: any; episodeId
     const p = await api(`/episodes/${episodeId}/audio/normalise`, {body: {cues: cues.split(',').map(c => c.trim()).filter(Boolean)}});
     setProp(p); setEdit(p.proposal);
   });
+  // free and local: up to five phrases from this episode's own transcript, put in the box for the owner to edit
+  const [suggested, setSuggested] = useState<any[] | null>(null);
+  const suggest = () => act.run('cues', async () => {
+    const r = await api(`/episodes/${episodeId}/audio/cues/suggest`, {method: 'POST'});
+    setSuggested(r.suggestions);
+    if (r.suggestions.length) setCues(r.suggestions.map((s: any) => s.phrase).join(', '));
+  });
   const apply = () => act.run('apply', async () => {
     await api(`/episodes/${episodeId}/audio/lines`, {method: 'PUT', body: {keep_previous: true,
       lines: edit.map(({start, end, text, speaker, words}) => ({start, end, text, speaker, words}))}});
@@ -464,11 +476,15 @@ function LineQuality({st, episodeId, act, dirty, onApplied}: {st: any; episodeId
           <button className="btn sm" disabled={!!act.busy || dirty} onClick={() => fragment('end_before')}>End the episode before this line</button>
           <button className="btn sm" disabled={!!act.busy || dirty} onClick={() => fragment('keep')}>Keep it</button>
         </div></div>}
-      <p className="muted small">Re-splits the lines at natural beats: sentence ends, the cue phrases below, and pauses (0.4 s at punctuation, 1 s anywhere). Nothing changes until you apply the proposal.</p>
+      <p className="muted small">Re-splits the lines at natural beats: sentence ends, pauses (0.4 s at punctuation, 1 s anywhere) and, if you add some, cue phrases: words that start a new line in this episode. Cue phrases belong to this episode only and start empty. Nothing changes until you apply the proposal.</p>
       <div className="row">
-        <input aria-label="Cue phrases" value={cues} onChange={e => setCues(e.target.value)} placeholder="cue phrases, comma separated (e.g. To my, I leave)" />
+        <input aria-label="Cue phrases" value={cues} onChange={e => setCues(e.target.value)} placeholder="cue phrases for this episode, comma separated (optional)" />
+        <button className="btn" disabled={!!act.busy || dirty} onClick={suggest} title="Free: looks for phrases that often start a sentence in this episode">Suggest from this episode</button>
         <button className="btn" disabled={!!act.busy || dirty} onClick={propose}>Propose</button>
       </div>
+      {suggested && (suggested.length
+        ? <p className="muted small">Suggested (free, from this episode's transcript): {suggested.map(s => `"${s.phrase}" starts ${s.starts} sentences`).join('; ')}. Edit the box, then Propose. They are saved for this episode when you press Propose.</p>
+        : <p className="muted small">No phrase starts sentences often enough in this episode to suggest one. You can leave the box empty.</p>)}
       {dirty && <p className="muted small">Save your line edits first: the proposal starts from the saved lines.</p>}
       {prop && <>
         {!prop.changed && <p className="muted">The lines already follow these beats.</p>}

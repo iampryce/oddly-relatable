@@ -30,12 +30,19 @@ RUN /venv/bin/pip install --no-cache-dir piper-tts==1.8.0 && mkdir -p /app/voice
 # Rhubarb Lip Sync (free, MIT): audio-driven mouth shapes. Local transcription: faster-whisper (CPU, int8); its model
 # is downloaded on first use into the data volume (WHISPER_CACHE).
 RUN curl -fsSL -o /tmp/rhubarb.zip https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v1.14.0/Rhubarb-Lip-Sync-1.14.0-Linux.zip     && /venv/bin/python -m zipfile -e /tmp/rhubarb.zip /opt/ && mv /opt/Rhubarb-Lip-Sync-1.14.0-Linux /opt/rhubarb     && chmod +x /opt/rhubarb/rhubarb && rm /tmp/rhubarb.zip     && /venv/bin/pip install --no-cache-dir faster-whisper==1.2.1 kokoro-onnx==0.4.7
+# Character descriptions on this server (free, private; local_describe.py): SmolVLM-256M-Instruct (Apache-2.0) with
+# transformers (Apache-2.0) on the CPU build of torch (BSD-3), both with wheels for this image's Python 3.13. Kept out of
+# requirements.txt so the test image does not pull torch. The model weights are downloaded once on first use into the
+# data volume (LOCAL_VLM_DIR).
+RUN /venv/bin/pip install --no-cache-dir torch==2.15.0+cpu --index-url https://download.pytorch.org/whl/cpu \
+    && /venv/bin/pip install --no-cache-dir transformers==5.23.0
 # Codex CLI (ChatGPT subscription): sign in once on the server, the login is kept in the data volume (CODEX_HOME).
 RUN npm install -g @openai/codex@0.167.0 && npm cache clean --force
 COPY studio-app/api/ studio-app/api/
 ENV PATH=/venv/bin:$PATH PYTHONUNBUFFERED=1 ODD_REPO_ROOT=/app ODD_WORK_DIR=/data/work FFMPEG=/usr/bin/ffmpeg FFPROBE=/usr/bin/ffprobe \
     PIPER_BIN=/venv/bin/piper PIPER_VOICES_DIR=/app/voices CODEX_HOME=/data/codex \
-    RHUBARB_BIN=/opt/rhubarb/rhubarb WHISPER_CACHE=/data/models KOKORO_DIR=/data/models/kokoro
+    RHUBARB_BIN=/opt/rhubarb/rhubarb WHISPER_CACHE=/data/models KOKORO_DIR=/data/models/kokoro LOCAL_VLM_DIR=/data/models/vlm \
+    HF_HUB_DISABLE_TELEMETRY=1
 RUN mkdir -p /data/work /data/codex /data/models && chown -R studio /data
 USER studio
 WORKDIR /app/studio-app/api

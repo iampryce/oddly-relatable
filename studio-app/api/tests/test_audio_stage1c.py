@@ -14,6 +14,8 @@ from oddstudio.audio_first import split_lines
 from oddstudio.line_normaliser import propose_lines, punctuate, trailing_fragment
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "will_transcript.json").read_text())
+# Episode 15's own cue phrases (the will): no longer a default; this episode's owner typed them (cues are per episode)
+WILL_CUES = ["To my", "I leave", "And finally", "Failing", "Thank you"]
 DANGLING = {"and", "or", "but", "the", "a", "an", "to", "of", "my", "in", "on", "at", "for", "with", "that", "who"}
 
 
@@ -30,7 +32,7 @@ class WillTranscriptTest(unittest.TestCase):
 
     def setUp(self):
         self.before = current_lines()
-        self.after = propose_lines(self.before, FIXTURE["text"])
+        self.after = propose_lines(self.before, FIXTURE["text"], WILL_CUES)
 
     def test_the_problems_in_the_first_split(self):
         t = texts(self.before)
@@ -133,7 +135,8 @@ class RulesTest(unittest.TestCase):
     def test_cue_phrases_are_editable(self):
         ws = self.words("I said yes I leave tomorrow morning early")
         text = "I said yes I leave tomorrow morning early"
-        self.assertEqual(len(propose_lines([self.line(1, ws)], text)), 2)                    # default cue "I leave"
+        self.assertEqual(len(propose_lines([self.line(1, ws)], text, cues=WILL_CUES)), 2)    # the cue "I leave"
+        self.assertEqual(len(propose_lines([self.line(1, ws)], text)), 1)                   # no cue phrases by default
         self.assertEqual(len(propose_lines([self.line(1, ws)], text, cues=[])), 1)          # no cues
         self.assertEqual(texts(propose_lines([self.line(1, ws)], text, cues=["tomorrow"])),
                          ["I said yes I leave", "tomorrow morning early"])
@@ -192,7 +195,7 @@ class Stage1cApiTest(unittest.TestCase):
         st = self.st()
         self.assertEqual(len(st["lines"]), 24)
         self.assertEqual(st["fragment"]["text"], "my solicitor Thank you ladies and")
-        r = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={})
+        r = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={"cues": WILL_CUES})
         self.assertEqual(r.status_code, 200, r.text)
         prop = r.json()
         self.assertTrue(prop["changed"])
@@ -215,7 +218,7 @@ class Stage1cApiTest(unittest.TestCase):
         self.assertEqual(self.c.post(f"/api/episodes/{self.eid}/audio/lines/undo").status_code, 409)
 
     def test_an_ordinary_save_clears_undo(self):
-        prop = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={}).json()["proposal"]
+        prop = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={"cues": WILL_CUES}).json()["proposal"]
         self.c.put(f"/api/episodes/{self.eid}/audio/lines", json={"lines": prop, "keep_previous": True})
         lines = self.st()["lines"]
         for ln in lines:
@@ -225,7 +228,7 @@ class Stage1cApiTest(unittest.TestCase):
         self.assertEqual(st["unlabelled_lines"], 0)
 
     def test_cue_phrases_are_stored_per_episode(self):
-        self.assertEqual(self.st()["cues"], ["To my", "I leave", "And finally", "Failing", "Thank you"])
+        self.assertEqual(self.st()["cues"], [], "no cue phrases until the owner sets some (not Episode 15's)")
         prop = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={"cues": ["To my", " ", "To my"]}).json()
         self.assertEqual(prop["cues"], ["To my"])
         self.assertEqual(self.st()["cues"], ["To my"])
@@ -234,7 +237,7 @@ class Stage1cApiTest(unittest.TestCase):
         self.assertTrue(any("to know, I leave my yacht," in t for t in texts(prop["proposal"])))
 
     def test_fragment_end_before_and_undo(self):
-        prop = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={}).json()["proposal"]
+        prop = self.c.post(f"/api/episodes/{self.eid}/audio/normalise", json={"cues": WILL_CUES}).json()["proposal"]
         self.c.put(f"/api/episodes/{self.eid}/audio/lines", json={"lines": prop})
         st = self.st()
         self.assertEqual(st["fragment"]["text"], "Thank you, ladies and")

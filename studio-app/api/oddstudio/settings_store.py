@@ -94,7 +94,8 @@ DEFAULTS: dict[str, dict] = {
     # images each, cast_styles.py), how many master candidates one click draws (the owner changes it per click, 1-4),
     # and the longest answer of the description request. The Gemini model, its prices and the free-tier models are the
     # acting analysis' (Settings > Guided generation): the same tier rules apply.
-    "cast": {"styles": DEFAULT_STYLES, "candidates": 2, "describe_max_tokens": 8000},
+    # describer: who writes the character descriptions: "gemini" (default), "local" (on this server, free) or "manual"
+    "cast": {"styles": DEFAULT_STYLES, "candidates": 2, "describe_max_tokens": 8000, "describer": "gemini"},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")

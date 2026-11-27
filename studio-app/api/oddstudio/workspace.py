@@ -33,12 +33,12 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 # the page's order (owner's list), then review, publishing and history
 ORDER = ("set", "people", "plan", "lines", "notes", "cast", "script", "storyboard", "talking", "production", "review", "publishing")
 TITLES = {"set": "Set", "people": "People / who is who", "plan": "Reference plan", "lines": "Lines and speakers",
-          "notes": "Video notes", "cast": "Cast and poses", "script": "Script", "storyboard": "Storyboard",
+          "notes": "Video notes", "cast": "Characters", "script": "Script", "storyboard": "Storyboard",
           "talking": "Talking shots", "production": "Production", "review": "Review", "publishing": "Publishing"}
 # the order the episode moves through (what blocks first)
 FLOW = ("lines", "notes", "people", "plan", "cast", "script", "storyboard", "set", "production", "review", "publishing")
 SECTION_JOBS = {
-    "lines": ("audio_media_prepare", "audio_transcribe"),
+    "lines": ("audio_media_prepare", "audio_transcribe", "speaker_suggest"),
     "notes": ("audio_video_notes",),
     "cast": ("audio_cast_suggest", "audio_voice_traits", "character_sheet", "character_pose"),
     "script": ("audio_scenes", "generate_script", "generate_act", "regenerate_section", "generate_outline"),
@@ -162,7 +162,8 @@ def section_plan(f: dict) -> dict:
 def section_cast(f: dict) -> dict:
     if f["audio"] and f["speakers_without_character"]:
         return _s("action", f"{len(f['speakers_without_character'])} speaker(s) are not a character yet: "
-                            f"{', '.join(f['speakers_without_character'][:4])}.", "cast")
+                            f"{', '.join(f['speakers_without_character'][:4])}. Make them characters here (free), then "
+                            "approve a master for each.", "cast")
     if not f["cast_rows"]:
         return _s("waiting", "The cast comes from the speakers (audio) or the script.")
     # only a character without any approved art blocks (feat/3d-rig PR 4): an expression without its own pose uses the
@@ -170,9 +171,9 @@ def section_cast(f: dict) -> dict:
     missing = [r for r in f["cast_rows"] if r.get("missing") or (not r.get("locked") and r.get("art_status") != "approved")]
     if missing:
         names = ", ".join(r.get("name") or r["key"] for r in missing[:4])
-        return _s("action" if f["script"] else "todo",
-                  f"Approved poses still needed for {names}: production stays blocked until every character on screen has "
-                  "approved art.", "poses")
+        return _s("action" if f["script"] or f["audio"] else "todo",
+                  f"An approved master (or approved poses) still needed for {names}: production stays blocked until every "
+                  "character on screen has approved art.", "masters" if f["audio"] else "poses")
     subs = [f"{r.get('name') or r['key']}: {', '.join(f'{a} uses {b}' for a, b in r['fallbacks'].items())}"
             for r in f["cast_rows"] if r.get("fallbacks")]
     note = f"{len(f['cast_rows'])} character(s) with approved art."

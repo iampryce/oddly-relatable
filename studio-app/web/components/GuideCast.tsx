@@ -46,6 +46,8 @@ function Describe({v, id, act}: {v: any; id: string; act: Act}) {
     if (!est || !window.confirm(`Describe the characters from the video: ${est.label}. Gemini watches the video and writes words only; no picture of it goes to an image model. Start now? (paid, not retried by itself)`)) return;
     act.run('describe', () => api(`/episodes/${id}/cast-video/describe`, {body: {confirm_usd: est.usd_max, use_free_tier: free}}));
   };
+  // free and private: a small open model on this server's CPU looks at a few frames where each person talks
+  const local = () => act.run('describe-local', () => api(`/episodes/${id}/cast-video/describe-local`, {method: 'POST'}));
   return (
     <div className="card stack" style={{padding: 12}}>
       <strong>1. Characters from the video</strong>
@@ -54,17 +56,41 @@ function Describe({v, id, act}: {v: any; id: string; act: Act}) {
         back; the real people&rsquo;s faces are never described or copied.</p>
       {!d.key_set && <p className="small bad">Add the Gemini key in <Link href="/settings">Settings › Credentials</Link> first.</p>}
       {!d.reference_video && <p className="small muted">Upload the reference video in step 1 first.</p>}
-      <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
-        <input type="checkbox" style={{width: 'auto'}} checked={free} onChange={e => setFree(e.target.checked)} />
-        Use the free tier if the paid model is busy ({(d.free_models || []).join(', ')}). The free tier may let Google use the video to train its models.</label>
-      <div className="row">
-        <button className="btn primary" disabled={!!act.busy || d.busy || !est || !d.key_set} onClick={go}>
-          {d.busy ? 'Describing…' : (v.descriptions || []).length ? 'Describe again' : 'Describe the characters'}{est ? ` · up to ${money(est.usd_max)}` : ''}</button>
-        {d.made && <span className="small muted">Last run: {d.model_used} · {money(d.usd)}</span>}
+      <p className="small muted">{(d.cast_names || []).length
+        ? `People are named from this list: ${d.cast_names.join(', ')} (the episode's characters and the speaker labels on its lines).`
+        : 'No names yet: the people are called Person 1, Person 2. To use names, give the lines their speakers first (Lines and speakers has "Suggest speakers").'}</p>
+      <div className="row small" role="radiogroup" aria-label="Who writes the descriptions">
+        Descriptions by:
+        {DESCRIBERS.map(([k, label]) => (
+          <label key={k} className="check"><input type="radio" name={`describer-${id}`} checked={(d.provider || 'gemini') === k}
+            onChange={() => act.run('describer', () => api('/cast/describer', {method: 'PUT', body: {provider: k}}))} />{label}</label>))}
       </div>
+      {(d.provider || 'gemini') === 'gemini' && <>
+        <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
+          <input type="checkbox" style={{width: 'auto'}} checked={free} onChange={e => setFree(e.target.checked)} />
+          Use the free tier if the paid model is busy ({(d.free_models || []).join(', ')}). The free tier may let Google use the video to train its models.</label>
+        <div className="row">
+          <button className="btn primary" disabled={!!act.busy || d.busy || !est || !d.key_set} onClick={go}>
+            {d.busy ? 'Describing…' : (v.descriptions || []).length ? 'Describe again' : 'Describe the characters'}{est ? ` · up to ${money(est.usd_max)}` : ''}</button>
+        </div></>}
+      {((d.provider || 'gemini') === 'local' || d.local?.offer || !free) && <div className={d.local?.offer ? 'alert info small' : 'row'}>
+        {d.local?.offer && d.local.reason && <div>{d.local.reason[0].toUpperCase() + d.local.reason.slice(1)}.</div>}
+        <button className={`btn ${(d.provider === 'local' || d.local?.offer) ? 'primary' : ''} sm`}
+          disabled={!!act.busy || d.busy || !d.reference_video || !d.local?.installed} onClick={local}>
+          Describe on this server instead ({d.local?.note || 'free, private'})</button>
+        <span className="small muted"> {d.local?.model}. The frames stay on this server and are deleted afterwards.
+          {d.local && !d.local.downloaded ? ' The first run downloads the model once (about 1 GB).' : ''}
+          {d.local && !d.local.installed ? ' Not installed on this server yet: rebuild the API image.' : ''}</span>
+      </div>}
+      {(d.provider || 'gemini') === 'manual' && <div className="row">
+        <button className="btn sm" disabled={!!act.busy || d.busy} onClick={() => act.run('manual', () => api(`/episodes/${id}/cast-video/describe-manual`, {method: 'POST'}))}>
+          Add blank descriptions to type (free)</button></div>}
+      {d.made && <span className="small muted">Last run: {d.made_by === 'Gemini' ? d.model_used : d.made_by} · {money(d.usd || 0)}</span>}
       {d.job?.status === 'failed' && <p className="small bad">The last run failed: {d.job.error}</p>}
     </div>);
 }
+
+const DESCRIBERS: [string, string][] = [['gemini', 'Gemini (paid, or free tier)'], ['local', 'This server (free, private)'], ['manual', 'I type them']];
 
 function Descriptions({v, id, act}: {v: any; id: string; act: Act}) {
   const chars: any[] = v.characters || [];
@@ -106,7 +132,7 @@ function DescriptionCard({d, chars, v, id, act}: {d: any; chars: any[]; v: any; 
     <div className="gd-prompt">
       <div className="spread small">
         <span><strong>{d.name}</strong> <span className="muted">{descriptionSummary(d)}</span>
-          {d.personality_from && <span className="muted"> · personality from the acting analysis</span>}</span>
+          {d.personality_from && <span className="muted"> · personality from the acting analysis</span>}{d.described_by && <span className="muted"> · {d.described_by}</span>}</span>
         <span className="row">
           <select aria-label={`Character for ${d.name}`} value={d.character_id || 0} disabled={!!act.busy} onChange={e => link(e.target.value)}>
             <option value={0}>Not linked</option>

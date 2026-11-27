@@ -1,7 +1,20 @@
 // node --test: the guided steps (order, all available), the help panel's next/back and the cost text.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {costText, currentStep, moveHelp, statusOf, STEPS} from './guide.ts';
+import {costText, currentStep, moveHelp, nextStep, nextStepText, statusOf, STEPS} from './guide.ts';
+
+test('the episode page banner names the next guided step', () => {
+  assert.equal(nextStep(null), null);
+  assert.equal(nextStepText(nextStep({steps: {}})!), 'Next step: 1. Upload your files');
+  const two = nextStep({steps: {upload: {status: 'done'}, acting: {status: 'needs_approval'}}})!;
+  assert.equal(two.key, 'acting');
+  assert.equal(nextStepText(two), 'Next step: 2. Acting analysis (waiting for your approval)');
+  const cast = nextStep({steps: {upload: {status: 'done'}, acting: {status: 'done'}, prompts: {status: 'done'}}})!;
+  assert.equal(nextStepText(cast), 'Next step: 4. Cast');
+  const all = nextStep({steps: Object.fromEntries(STEPS.map(s => [s.key, {status: 'done'}]))})!;
+  assert.ok(all.done);
+  assert.equal(nextStepText(all), 'Every guided step is done');
+});
 
 test('eleven steps in order, all in the dashboard (10 quality check, 11 assembly)', () => {
   assert.deepEqual(STEPS.map(s => s.key), ['upload', 'acting', 'prompts', 'masters', 'sets', 'closeups', 'faces', 'movement', 'talking', 'quality', 'assembly']);

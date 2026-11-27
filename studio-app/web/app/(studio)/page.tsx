@@ -7,7 +7,7 @@ import {useRouter} from 'next/navigation';
 import {api, isVideoFile, uploadAudio} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
-import {videoSeconds} from '@/components/VideoNotesOptions';
+import {KEEP_VIDEO_TEXT, videoSeconds} from '@/components/VideoNotesOptions';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 import {listStatus, money} from '@/lib/dashboard';
 
@@ -56,6 +56,7 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
   const [source, setSource] = useState('');
   const [rights, setRights] = useState(false);
   const [notes, setNotes] = useState(false);
+  const [keep, setKeep] = useState(true);   // keep the video privately for the guided steps: on unless the owner unticks it
   const [duration, setDuration] = useState<number | null>(null);
   const [win, setWin] = useState({start: 0, end: 60});
   const [est, setEst] = useState<any>(null);
@@ -84,7 +85,7 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
     const ep = await api('/audio-episodes', {body: {title: title.trim(), format, rights_confirmed: rights, rights_source: source}});
     // a YouTube long episode is drawn and rendered 16:9 (1920x1080); a Short keeps the full 9:16 frame
     if (format === 'long') await api(`/episodes/${ep.id}/layout`, {method: 'PUT', body: {value: 'landscape'}});
-    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: notes && video, window: needsWindow && !winErr ? win : null});
+    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: notes && video, window: needsWindow && !winErr ? win : null, keepVideo: keep && video});
     router.push(`/episodes/${ep.id}`);
   });
   return (
@@ -111,6 +112,8 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
               <option value="">Choose…</option><option value="own_recording">My own recording</option><option value="licensed">Licensed</option>
               <option value="voice_actor">Recorded for me by a voice actor</option><option value="other">Other</option></select></div>
           <label className="check"><input type="checkbox" checked={rights} onChange={e => setRights(e.target.checked)} />I have the right to use this recording (its audio and any video it came with)</label>
+          {video && <label className="check"><input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} />
+            {KEEP_VIDEO_TEXT}. Free.</label>}
           {video && <label className="check"><input type="checkbox" checked={notes} onChange={e => setNotes(e.target.checked)} />
             Analyse the video for staging notes (paid: {est?.configured ? `about ${money(est.usd)}` : 'cost shown when ticked'})</label>}
         </div>
@@ -124,7 +127,7 @@ function NewEpisode({onCreated}: {onCreated: () => unknown}) {
       {notes && est?.within_cap === false && <p className="small bad">About {money(est.usd)}: over the {money(est.cap_usd)} cap per episode. Use a shorter part, or raise the cap in Settings.</p>}
       {tooLong && <p className="small bad">The recording runs {round1(duration!)} s; a {format === 'long' ? 'long episode' : 'Short'} allows at most {SOURCE_LIMIT[format]} s.</p>}
       <div className="spread" style={{marginTop: 12}}>
-        <span className="muted small">Generate creates the episode, uploads the file and transcribes it. It then stops at each of your decisions; paid steps wait for their own button.</span>
+        <span className="muted small">Generate creates the episode, uploads the file and transcribes it. It then stops at each of your decisions; paid steps wait for their own button. The episode page then shows the next guided step (Cast from video is step 4).</span>
         <button className="btn primary" disabled={!ready || !!busy} onClick={generate}>{busy ? 'Uploading…' : 'Generate'}</button>
       </div>
     </section>);
