@@ -120,6 +120,9 @@ function UploadStep({g, id, act}: {g: any; id: string; act: Act}) {
         {!(it.script && it.voice) && <Link href={`/episodes/${id}`}>Add them on the episode page</Link>}</div>
       <div className="row small">Reference video {tick(!!ref)}
         {ref && <span className="muted">{(ref.size / 1048576).toFixed(1)} MB{ref.seconds ? ` · ${ref.seconds.toFixed(0)} s` : ''} · private</span>}</div>
+      {ref?.from_episode_upload && <p className="small good" style={{margin: 0}}>
+        Already here: kept from the video you made this episode from. You do not need to upload it again.
+        {ref.window ? ` The episode uses ${ref.window.start.toFixed(1)}-${ref.window.end.toFixed(1)} s of it.` : ''}</p>}
       <div className="row">
         <label className="btn sm" style={{margin: 0, color: 'inherit'}}>
           {act.busy === 'ref' ? 'Uploading…' : ref ? 'Replace the reference video' : 'Choose the reference video'}

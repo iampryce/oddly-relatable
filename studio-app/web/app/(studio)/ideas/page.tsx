@@ -72,7 +72,7 @@ function AudioEpisodeForm({onDone}: {onDone: (episodeId?: number) => void}) {
   const {busy, error, run} = useAction();
   const create = () => run('create', async () => {
     const ep = await api('/audio-episodes', {body: {title, format, rights_confirmed: rights, rights_source: source || null}});
-    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: notes.notes, window: notes.window});
+    await uploadAudio(`/episodes/${ep.id}/audio`, file!, {hints: notes.notes, window: notes.window, keepVideo: notes.keep});
     onDone(ep.id);
   });
   return (

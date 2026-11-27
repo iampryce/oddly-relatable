@@ -9,6 +9,8 @@ import {use, useEffect, useRef, useState} from 'react';
 import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
+import NextStepBanner from '@/components/NextStepBanner';
+import EpisodeCharacters from '@/components/EpisodeCharacters';
 import {AnimateAll, StickShotRow} from '@/components/StickShot';
 import {jobLine, showLastError, type Section} from '@/lib/workspace';
 import {episodeCharacters, generatePlan, ICON, money, STEP_TONE, steps, type Step} from '@/lib/dashboard';
@@ -82,6 +84,7 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
           <span className={`small ${plan.kind === 'free' ? '' : 'muted'}`} role="status">{plan.kind === 'free' ? `Next: ${plan.label}` : plan.text}</span>
         </div>
       </div>
+      <NextStepBanner id={ep.id} />
       <ErrorBox error={act.error} />
       {showLastError(ep) && <div className="alert bad small">{ep.last_error}</div>}
       <ol className="steps-list">
@@ -151,8 +154,9 @@ function Characters({c, s}: {c: Ctx; s: Step}) {
             <span className="small">{x.name}</span>
             <span className={`badge ${x.status === 'approved' ? 'good' : x.status === 'missing' ? 'bad' : 'warn'}`}>{x.status === 'missing' ? x.role : x.status}</span>
           </Link>))}</div>}
-      {waiting.some(x => x.status === 'review' || x.status === 'none') && <p className="small">Approve their poses on the <Link href="/characters">Characters</Link> page (your decision; new pose sheets are paid and start from the Advanced view, with their cost).</p>}
-      <Pending s={s} c={c} />
+      {c.ep.source === 'audio' ? <EpisodeCharacters id={c.ep.id} onChange={c.reload} />
+        : waiting.some(x => x.status === 'review' || x.status === 'none') && <p className="small">Approve their poses on the <Link href="/characters">Characters</Link> page (your decision; new pose sheets are paid and start from the Advanced view, with their cost).</p>}
+      <Pending s={s} c={c} skip={c.ep.source === 'audio' ? ['cast'] : []} />
     </div>);
 }
 

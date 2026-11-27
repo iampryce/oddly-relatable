@@ -19,8 +19,9 @@ export const STEPS: GuideStep[] = [
     why: 'Everything after this is built from these files. The recording sets the timing of every shot.',
     before: 'The script, the voice recording (audio) and the reference video (MP4, MOV or WebM, up to 250 MB).',
     help: ['Open the episode page and add the script or the voice recording if they are missing.',
-      'Come back here and choose the reference video with the button below.',
-      'The reference video stays private. Only the acting analysis looks at it.',
+      'If you created the episode from a video and left "keep the video" ticked, the reference video is already here.',
+      'Otherwise come back here and choose the reference video with the button below.',
+      'The reference video stays private. Only the analysis steps look at it (acting notes, character descriptions, suggested speakers); its pictures never go to an image or video generator.',
       'When all three show a green tick, go to step 2.']},
   {key: 'acting', title: 'Acting analysis', available: true,
     what: 'Gemini watches the reference video and writes down how each person acts: faces, eyes, head, hands and timing.',
@@ -162,3 +163,21 @@ export function costText(c: any): string {
 export const KIND_LABEL: Record<string, string> = {
   master: 'Character master', still: 'Shot still', face_edit: 'Face change (face only)', movement: 'Movement',
 };
+
+// The banner on the episode page (simple and advanced views): the next guided step, so the guided flow (with Cast from
+// video, step 4) is found from the episode itself. null until the guide has loaded; done: true when every step is done.
+export type NextStep = {n: number; key: string; title: string; what: string; status: StepStatus; done: boolean};
+
+export function nextStep(api: any): NextStep | null {
+  if (!api?.steps) return null;
+  const i = STEPS.findIndex(s => s.available && statusOf(api, s.key) !== 'done');
+  const k = i < 0 ? STEPS.length - 1 : i;
+  const s = STEPS[k];
+  return {n: k + 1, key: s.key, title: s.title, what: s.what, status: statusOf(api, s.key), done: i < 0};
+}
+
+export function nextStepText(ns: NextStep): string {
+  if (ns.done) return 'Every guided step is done';
+  const state = ns.status === 'needs_approval' ? ' (waiting for your approval)' : ns.status === 'running' ? ' (running)' : '';
+  return `Next step: ${ns.n}. ${ns.title}${state}`;
+}

@@ -9,7 +9,10 @@ import {api, isVideoFile} from '@/lib/api';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 import {setNotesCost} from '@/lib/setView';
 
-export type NotesChoice = {notes: boolean; window: {start: number; end: number} | null; ready: boolean};
+// keep: also keep the video privately for the guided steps (on by default for a video; see KEEP_VIDEO_TEXT)
+export type NotesChoice = {notes: boolean; window: {start: number; end: number} | null; ready: boolean; keep?: boolean};
+
+export const KEEP_VIDEO_TEXT = 'Also keep the video privately for the guided steps (character descriptions and acting notes; its pictures are never sent to an image or video generator)';
 
 export function videoSeconds(file: File): Promise<number | null> {
   return new Promise(resolve => {
@@ -25,6 +28,7 @@ export function videoSeconds(file: File): Promise<number | null> {
 export default function VideoNotesOptions({file, format, onChange}: {file: File | null; format: string; onChange: (c: NotesChoice) => void}) {
   const video = isVideoFile(file);
   const [notes, setNotes] = useState(false);
+  const [keep, setKeep] = useState(true);
   const [duration, setDuration] = useState<number | null>(null);
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(60);
@@ -43,14 +47,18 @@ export default function VideoNotesOptions({file, format, onChange}: {file: File 
     return () => { live = false; };
   }, [notes, video, seconds, format]);
   const ready = !notes || (!!est?.configured && !err);
-  useEffect(() => { onChange({notes: notes && video, window: needsWindow && !err ? {start, end} : null, ready}); },
-            [notes, video, needsWindow, err, start, end, ready]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onChange({notes: notes && video, window: needsWindow && !err ? {start, end} : null, ready, keep: keep && video}); },
+            [notes, video, needsWindow, err, start, end, ready, keep]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (!video) return null;
   return (
     <div className="stack">
       <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
+        <input type="checkbox" style={{width: 'auto'}} checked={keep} onChange={e => setKeep(e.target.checked)} />
+        {KEEP_VIDEO_TEXT}. Free.
+      </label>
+      <label className="row" style={{fontWeight: 400, color: 'inherit'}}>
         <input type="checkbox" style={{width: 'auto'}} checked={notes} onChange={e => setNotes(e.target.checked)} />
-        Use the video as a reference for staging notes (text only: shots, who reacts, where people stand, emotions, the kind of place, camera moves; nobody is named or described). The scene writer may use them as suggestions; your characters, sets and dialogue stay your own. The frames are read once and deleted with the video.
+        Use the video as a reference for staging notes (text only: shots, who reacts, where people stand, emotions, the kind of place, camera moves; nobody is named or described). The scene writer may use them as suggestions; your characters, sets and dialogue stay your own. The frames are read once and deleted right after.
       </label>
       {needsWindow && <div className="row" style={{flexWrap: 'wrap'}}>
         <span className="small">The video runs {round1(duration!)} s. Choose the Short's window (up to 3 minutes) now, so only that part is analysed:</span>

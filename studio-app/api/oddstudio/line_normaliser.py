@@ -6,10 +6,13 @@ next ("…to know I leave", "I leave nothing To my niece Winifred"). This module
 
   1. punctuate()      aligns the words with the punctuated text, so each word knows its trailing punctuation (and
                       hyphenated words such as "bone-idle" or "K-Tel" are rejoined);
-  2. propose_lines()  re-splits each speaker's words at beats: a sentence end, a cue phrase (editable per episode,
-                      e.g. "To my", "I leave"), a pause of PAUSE seconds or more; then tidies: a line never ends on a
+  2. propose_lines()  re-splits each speaker's words at beats: a sentence end, a cue phrase (a per-episode setting,
+                      EMPTY by default: the owner types them or edits suggest_cues()), a pause of PAUSE seconds or
+                      more; then tidies: a line never ends on a
                       dangling word ("and", "the", "my" …), a short fragment joins its neighbour, an over-long line is
                       split at its best comma or pause. Speakers are kept; two speakers are never merged.
+  2b. suggest_cues()  up to 5 phrases from THIS episode's own transcript that often open a sentence (after a full stop
+                      or a pause): free and local, a suggestion the owner edits before using it.
   3. trailing_fragment() flags a last line that looks cut off (ends on a connecting word, no final full stop in the
                       transcript, or audio continuing after the last word).
 
@@ -26,7 +29,11 @@ LONG_PAUSE = 1.0            # a pause this long is a beat anywhere (mid-phrase p
 MAX_SECONDS = 10.0          # a longer line is split at its best comma or pause
 MIN_SECONDS, MIN_WORDS = 0.8, 2   # a shorter line joins its neighbour (same speaker)
 TAIL_SECONDS = 1.5          # audio continuing this long after the last word flags the last line
-DEFAULT_CUES = ["To my", "I leave", "And finally", "Failing", "Thank you"]
+# Cue phrases are per episode and EMPTY by default (2026-11-27: Episode 15's will phrases used to be the default of
+# every episode). An episode only splits at the cue phrases the owner typed, or took from suggest_cues() and edited.
+DEFAULT_CUES: list[str] = []
+MAX_SUGGESTED_CUES = 5
+FILLERS = {"um", "uh", "er", "erm", "hmm", "mm", "ah", "oh", "okay", "ok", "yeah", "yes", "no", "well", "like"}
 DANGLING = {"and", "or", "but", "the", "a", "an", "to", "of", "my", "your", "his", "her", "their", "our", "in", "on",
             "at", "for", "with", "from", "by", "that", "who", "which", "i", "so", "as", "if", "because", "than"}
 HARD_STOP = ".!?…"
@@ -180,6 +187,48 @@ def propose_lines(lines: list[dict], text: str, cues: list[str] | None = None, p
                     "words": [{"start": round(w["start"], 3), "end": round(w["end"], 3), "word": w["word"]} for w in gr],
                     "from": list(dict.fromkeys(w["src"] for w in gr))})
     return out
+
+
+def suggest_cues(lines: list[dict], text: str, n: int = MAX_SUGGESTED_CUES, pause: float = PAUSE) -> list[dict]:
+    """Up to n cue phrases from this episode's own lines: two-word openers that start a sentence (at the start of a
+    line, after a full stop, or after a pause of `pause` s or more) at least twice, and at least as often at a start as
+    in the middle of a sentence. Each: {phrase, starts, after_pause}, best first (a start after a pause counts double:
+    that is where a missing beat hurts most). Pure and free: nothing is saved; the owner edits the list first."""
+    flat = []
+    for ln in lines:
+        ws = ln.get("words") or []
+        if not ws:      # no word timings: the line's own words, the line start the only known start
+            t0 = float(ln.get("start") or 0)
+            ws = [{"word": t, "start": t0, "end": t0} for t in (ln.get("text") or "").split()]
+        for k, w in enumerate(ws):
+            flat.append({**w, "line_start": k == 0})
+    if len(flat) < 2:
+        return []
+    words = punctuate(flat, text)
+    for w, f in zip(words, flat):
+        w["line_start"] = f["line_start"]
+    stats: dict[tuple, dict] = {}
+    for i in range(len(words) - 1):
+        a, b = words[i], words[i + 1]
+        ka, kb = _key(a["word"]), _key(b["word"])
+        if not ka or not kb or a.get("punct") or b["line_start"]:
+            continue     # a phrase never spans a comma, a sentence end or two lines
+        st = stats.setdefault((ka, kb), {"total": 0, "starts": 0, "after_pause": 0, "form": ""})
+        st["total"] += 1
+        prev = words[i - 1] if i > 0 and not a["line_start"] else None
+        paused = prev is not None and float(a["start"]) - float(prev["end"]) >= pause
+        if prev is None or _ends_sentence(prev) or paused:
+            st["starts"] += 1
+            st["after_pause"] += 1 if paused else 0
+            st["form"] = st["form"] or f"{a['word'].strip()} {b['word'].strip()}"
+    out = []
+    for (ka, kb), st in stats.items():
+        if st["starts"] < 2 or st["starts"] * 2 < st["total"] or ka in FILLERS:
+            continue      # too rare, mostly mid-sentence, or a filler ("um so", "okay so")
+        form = re.sub(r"[^\w' -]", "", st["form"]).strip()
+        out.append({"phrase": form[:1].upper() + form[1:], "starts": st["starts"], "after_pause": st["after_pause"]})
+    out.sort(key=lambda x: (-(x["starts"] + x["after_pause"]), -x["starts"], x["phrase"].lower()))
+    return out[:n]
 
 
 def trailing_fragment(lines: list[dict], text: str, duration: float | None) -> dict | None:

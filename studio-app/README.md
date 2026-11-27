@@ -179,6 +179,33 @@ list), `/api/cast/styles`, `/api/cast/library`. Migration `0016` adds the nullab
   -> waits for the master approvals.
 - Tests: `api/tests/test_cast_from_video.py`, `web/lib/cast.test.ts`.
 
+## New episode from a video (2026-11-27)
+
+- **Keep the video** (`?keep_video=true` on `PUT /api/episodes/<id>/audio`, ticked by default in the new-episode form):
+  a private copy becomes the guided steps' reference video through `guided.store_reference()` (the same code path as
+  step 1: `private/`, never an asset). The audio is extracted as before. Its pictures never go to an image or video
+  generator.
+- **Next step banner** on the episode page (simple and advanced): the next guided step and a button to the guide
+  (`components/NextStepBanner.tsx`, `lib/guide.ts nextStep`).
+- **Cue phrases** (Tidy lines) are per episode and empty by default; "Suggest from this episode"
+  (`POST /api/episodes/<id>/audio/cues/suggest`, `line_normaliser.suggest_cues`) is free and saves nothing.
+- **Suggest speakers** (`speaker_suggest.py`, `components/SpeakerSuggest.tsx`): Gemini watches and listens to the
+  reference video (job `speaker_suggest`; paid tier / free tier only when ticked; `confirm_usd`, 409), or, without a
+  video, the text model guesses from the words (confidence capped at 0.5). A reviewable table; nothing is saved until
+  accepted. Cast from video uses the labels as its names.
+- **Characters on the episode page** (`speaker_cast.py`, `components/EpisodeCharacters.tsx`): each speaker label
+  becomes a character (cast library match = free, existing character, or new for the episode), then the Cast step
+  component makes the masters. The "Characters" section (formerly "Cast and poses") clears when every speaking
+  character has approved art; an approved master counts.
+- **Who describes the characters** (`cast.describer`: `gemini` | `local` | `manual`; `local_describe.py`): `local` runs
+  SmolVLM-256M-Instruct (Apache-2.0, pinned revision) with transformers on the CPU inside the worker (job
+  `cast_describe_local`), on frames ffmpeg takes where each speaker talks; the frames stay in the job's work folder and
+  are deleted afterwards; the weights download once into `LOCAL_VLM_DIR` (`/data/models/vlm`). Offered automatically
+  when Gemini answers 429/503 or has no key. A future `gpu` provider (e.g. Qwen-VL on the GPU worker) plugs into
+  `local_describe.runner()`; not built.
+- Tests: `api/tests/test_new_episode_flow.py`, `web/lib/speakerSuggest.test.ts`, `web/lib/speakerCast.test.ts`,
+  `web/lib/guide.test.ts`.
+
 ## Chat under each shot
 
 A small chat box sits under each thing being made: every character master card (Characters page), every shot still

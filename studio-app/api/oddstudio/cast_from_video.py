@@ -59,6 +59,7 @@ from .storage import storage
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 JOB_DESCRIBE, JOB_IMAGES = "cast_describe", "cast_images"
+JOB_DESCRIBE_LOCAL = "cast_describe_local"     # the free describer on this server's CPU (local_describe.py)
 PREVIEW_KIND = "cast-preview"
 MAX_CHARACTERS = 8
 MAX_REFS = 4
@@ -122,6 +123,13 @@ def check_cast_settings(db: Session, v: dict) -> None:
     mt = v.get("describe_max_tokens", 8000)
     if not (isinstance(mt, int) and not isinstance(mt, bool) and 1000 <= mt <= 30000):
         raise ValueError("cast.describe_max_tokens must be a whole number between 1000 and 30000")
+    if v.get("describer", "gemini") not in DESCRIBERS:
+        raise ValueError(f"cast.describer must be one of {', '.join(DESCRIBERS)}")
+
+
+# who writes the character descriptions (Settings > Cast styles, or the Cast step's own choice): see local_describe.py.
+# A future "gpu" provider (a larger open model such as Qwen-VL on the owner's GPU worker) plugs in there.
+DESCRIBERS = ("gemini", "local", "manual")
 
 
 # ================================================================== descriptions (pure)
@@ -499,11 +507,26 @@ def styles_out(db: Session) -> list[dict]:
     return out
 
 
+def cast_names(db: Session, ep: Episode) -> list[str]:
+    """The character list the description maps people to: the episode's cast (acting_analysis.cast_names), then the
+    speaker labels of its lines ("Doctor", "Patient"; speaker_suggest.cast_labels), so an episode made from a video
+    whose cast is not set up yet still gets its people under the owner's own labels."""
+    from . import acting_analysis as AA
+    from .speaker_suggest import cast_labels
+    names, _ = AA.cast_names(db, ep)
+    have = {n.lower() for n in names}
+    for label in cast_labels(db, ep) if ep.source == "audio" else []:
+        if label.lower() not in have:
+            names.append(label)
+            have.add(label.lower())
+    return names
+
+
 def describe_info(db: Session, ep: Episode, v: dict) -> dict:
     from . import acting_analysis as AA
     from . import guided
     ref = guided.reference_video(db, ep.id)
-    cast, _names = AA.cast_names(db, ep)
+    cast = cast_names(db, ep)
     gcfg = get_section(db, "guide")
     mt = int(get_section(db, "cast").get("describe_max_tokens") or 8000)
     secs = float(ref.get("seconds") or 0) if ref else 0.0
@@ -511,16 +534,22 @@ def describe_info(db: Session, ep: Episode, v: dict) -> dict:
         shots, _src = AA.shot_list(db, ep, None)
         secs = max((float(s["end"]) for s in shots), default=0.0)
     est = describe_estimate(secs, cast, gcfg, mt) if ref and secs else None
-    job = db.query(Job).filter_by(kind=JOB_DESCRIBE, episode_id=ep.id).order_by(Job.id.desc()).first()
+    job = (db.query(Job).filter(Job.kind.in_((JOB_DESCRIBE, JOB_DESCRIBE_LOCAL)), Job.episode_id == ep.id)
+           .order_by(Job.id.desc()).first())
     d = v.get("describe") or {}
+    from . import local_describe as LD
     return {"reference_video": bool(ref), "estimate": est, "key_set": bool(secret("gemini_api_key", db)),
             "free_models": list(gcfg.get("acting_free_models") or []), "cast_names": cast,
+            # who describes (Settings: gemini | local | manual), the free describer on this server, and how the
+            # current descriptions were made ("described on this server (free)")
+            "provider": get_section(db, "cast").get("describer") or "gemini", "local": LD.info(db, ep, job),
+            "made_by": LD.made_by(d),
             "busy": _describe_active(db, ep.id), "job": S.job(job) if job else None,
             "made": d.get("made"), "model_used": d.get("model_used"), "usd": d.get("usd"), "partial": d.get("partial")}
 
 
 def _describe_active(db: Session, eid: int) -> bool:
-    return db.query(Job).filter(Job.kind == JOB_DESCRIBE, Job.episode_id == eid,
+    return db.query(Job).filter(Job.kind.in_((JOB_DESCRIBE, JOB_DESCRIBE_LOCAL)), Job.episode_id == eid,
                                 Job.status.in_(("queued", "running"))).first() is not None
 
 
@@ -558,7 +587,7 @@ def view(db: Session, ep: Episode) -> dict:
             previews[s] = _asset_out(db, a, m)
     st = get_section(db, "stick")
     prov = IMAGE_PROVIDERS.get(st.get("image_provider"))
-    jobs = (db.query(Job).filter(Job.kind.in_((JOB_IMAGES, JOB_DESCRIBE)), Job.episode_id == ep.id)
+    jobs = (db.query(Job).filter(Job.kind.in_((JOB_IMAGES, JOB_DESCRIBE, JOB_DESCRIBE_LOCAL)), Job.episode_id == ep.id)
             .order_by(Job.id.desc()).limit(8).all())
     return {"episode_id": ep.id, "style": sid, "styles": styles_out(db), "describe": describe_info(db, ep, v),
             "descriptions": v.get("characters") or [], "characters": chars,
@@ -1177,7 +1206,7 @@ def cast_describe(ctx: Ctx) -> dict:
         raise ValueError("save the Gemini API key under Settings > Credentials first")
     gcfg = get_section(db, "guide")
     mt = int(get_section(db, "cast").get("describe_max_tokens") or 8000)
-    cast, _names = AA.cast_names(db, ep)
+    cast = cast_names(db, ep)
     free = set(gcfg.get("acting_free_models") or [])
     folder = ctx.folder("episodes", ep.id, f"cast-job{job.id}")
     video = storage().get_to_file(ref["key"], folder / f"reference{Path(ref['key']).suffix or '.mp4'}")
@@ -1208,6 +1237,16 @@ def cast_describe(ctx: Ctx) -> dict:
     descs = normalise_descriptions(raw, cast, traits)
     if not descs:
         raise ProviderError("Gemini described no characters; not retried")
+    store_descriptions(db, ep, descs, {"made": time.time(), "model_used": model, "usage": {"input_tokens": tin, "output_tokens": tout},
+                                       "usd": round(usd, 6), "free_tier": model in free, "provider": "gemini"},
+                       f"Characters from the video: {len(descs)} described by {model} (${usd:.4f})")
+    return {"characters": len(descs), "usd": round(usd, 6)}
+
+
+def store_descriptions(db: Session, ep: Episode, descs: list[dict], describe: dict, message: str) -> None:
+    """Save new descriptions (from any describer: Gemini, this server, or blank ones the owner types): each is linked
+    to its character (kept from before, or by name), and a character without an approved master gets the words as its
+    written look (an approved master never changes). Commits."""
     byname = {ch.name.lower(): ch.id for ch in _cast(db, ep)}
     v = stored(db, ep.id)
     old = {d["name"].lower(): d for d in v.get("characters") or []}
@@ -1215,8 +1254,7 @@ def cast_describe(ctx: Ctx) -> dict:
         prev = old.get(d["name"].lower())
         d["character_id"] = (prev or {}).get("character_id") or (byname.get(d["name"].lower()) if d["in_script"] else None)
     v["characters"] = descs
-    v["describe"] = {"made": time.time(), "model_used": model, "usage": {"input_tokens": tin, "output_tokens": tout},
-                     "usd": round(usd, 6), "free_tier": model in free}
+    v["describe"] = describe
     save(db, ep.id, v)
     for d in descs:                        # the written look of characters that have no approved master yet
         if d.get("character_id"):
@@ -1224,9 +1262,8 @@ def cast_describe(ctx: Ctx) -> dict:
             ch = db.get(Character, d["character_id"])
             if ch is not None and not ch.locked and approved_master(db, ch.id) is None:
                 ch.visual_description = description_text(d)[:4000]
-    db.add(Event(episode_id=ep.id, kind="episode", message=f"Characters from the video: {len(descs)} described by {model} (${usd:.4f})"))
+    db.add(Event(episode_id=ep.id, kind="episode", message=message))
     db.commit()
-    return {"characters": len(descs), "usd": round(usd, 6)}
 
 
 @task
