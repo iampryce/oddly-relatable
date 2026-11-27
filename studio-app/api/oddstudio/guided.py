@@ -176,14 +176,18 @@ def guide(db: Session, ep: Episode) -> dict:
                CharacterAsset.kind == "master", CharacterAsset.status == "approved")} if ids else set()
     review = {a.character_id for a in db.query(CharacterAsset).filter(CharacterAsset.character_id.in_(ids),
               CharacterAsset.kind == "master", CharacterAsset.status == "review")} if ids else set()
-    m_busy = db.query(Job).filter(Job.kind == "stick_master", Job.character_id.in_(ids),
+    from . import cast_from_video as CV
+    m_busy = db.query(Job).filter(Job.kind.in_(("stick_master", CV.JOB_IMAGES)), Job.character_id.in_(ids),
                                   Job.status.in_(("queued", "running"))).first() is not None if ids else False
+    m_busy = m_busy or CV._describe_active(db, ep.id)
     st = get_section(db, "stick")
     ip = IMAGE_PROVIDERS.get(st.get("image_provider"))
     steps["masters"] = {"status": "running" if m_busy else "done" if chars and len(masters) == len(chars) else
                         "needs_approval" if review else "not_started",
                         "cost": image_cost(int(st.get("master_candidates") or 2), ip["usd_per_image"]) if ip else None,
-                        "detail": f"{len(masters)} of {len(chars)} characters have an approved master" if chars else "no cast yet",
+                        "detail": (f"{len(masters)} of {len(chars)} characters have an approved master" if chars else "no cast yet")
+                        + (f"; style: {CV.styles(db)[ep.style]['label']}" if ep.style else "; style not chosen yet"),
+                        "style": ep.style, "head_finding": CV.head_finding(db, ep.id),
                         "characters": [{"id": c.id, "name": c.name, "master": c.id in masters, "to_review": c.id in review}
                                        for c in chars]}
 
@@ -230,6 +234,13 @@ def cast(db: Session, ep: Episode) -> list[Character]:
         cast_keys += [k for k in sc.characters or [] if k not in cast_keys]
     chars = [c for c in db.query(Character).filter(Character.key.in_(cast_keys))] if cast_keys else []
     chars += [c for c in db.query(Character).filter_by(scope="episode", episode_id=ep.id) if c.key not in cast_keys]
+    # characters the Cast step added (saved characters from the library, or linked to a description from the video)
+    from .cast_from_video import extra_ids
+    have = {c.id for c in chars}
+    more = [i for i in extra_ids(db, ep.id) if i not in have]
+    if more:
+        found = {c.id: c for c in db.query(Character).filter(Character.id.in_(more))}
+        chars += [found[i] for i in more if i in found]
     return chars
 
 

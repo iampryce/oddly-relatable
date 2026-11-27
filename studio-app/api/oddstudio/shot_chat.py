@@ -23,6 +23,11 @@ typed message stays in the box (nothing is saved on failure).
 
 Proposals: a fixed set per step, validated strictly (unknown types or fields are refused and left out of the reply):
   master  note_only | redo_master                        (new master candidates: paid, generate_master)
+          | edit_description {fields}                     (free: the cast description of this character in this episode,
+                                                          cast_from_video.apply_description_edit; needs episode_id)
+          | new_candidates {prompt?, count}               (paid: master candidates in the episode's style,
+                                                          cast_from_video.make_candidates; for an approved master
+                                                          they are candidates for a NEW version, never approved here)
   still   note_only | redo_still {prompt?}               (a new still take: paid, stick_shots.make_still)
   clip    note_only | rerender_shot {settings}           (a new clip: paid, stick_shots.animate; cfg/steps are not
                                                           offered by the current video provider, so a proposal using
@@ -73,7 +78,7 @@ STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot anim
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
          "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
          "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode"}
-ALLOWED = {"master": ("note_only", "redo_master"), "still": ("note_only", "redo_still"),
+ALLOWED = {"master": ("note_only", "redo_master", "edit_description", "new_candidates"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
            "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
            "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
@@ -155,6 +160,38 @@ class RedoMaster(_Strict):
     type: Literal["redo_master"]
 
 
+class _Hair(_Strict):
+    style: str | None = Field(default=None, max_length=120)
+    colour: str | None = Field(default=None, max_length=60)
+
+
+class _Garment(_Strict):
+    garment: str = Field(min_length=1, max_length=80)
+    colour: str = Field(default="", max_length=60)
+
+
+class DescriptionFields(_Strict):
+    role: str | None = Field(default=None, max_length=300)
+    age: str | None = Field(default=None, max_length=300)
+    build: str | None = Field(default=None, max_length=300)
+    hair: _Hair | None = None
+    clothing: list[_Garment] | None = Field(default=None, max_length=8)
+    accessory: str | None = Field(default=None, max_length=300)
+    personality: str | None = Field(default=None, max_length=300)
+    must_never: list[str] | None = Field(default=None, max_length=6)
+
+
+class EditDescription(_Strict):
+    type: Literal["edit_description"]
+    fields: DescriptionFields
+
+
+class NewCandidates(_Strict):
+    type: Literal["new_candidates"]
+    prompt: str | None = Field(default=None, min_length=20, max_length=8000)
+    count: int = Field(default=2, ge=1, le=4)
+
+
 class RerenderSettings(_Strict):
     prompt: str | None = Field(default=None, min_length=1, max_length=1500)
     seconds: int | None = Field(default=None, ge=1, le=20)
@@ -209,7 +246,8 @@ class RedoShot(_Strict):
 
 
 Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
-                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot],
+                           RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot, EditDescription,
+                           NewCandidates],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
@@ -230,6 +268,8 @@ def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -
             raise ValueError("a beat edit must be for this thread's shot")
         if not p["fields"]:
             raise ValueError("the beat edit changes nothing")
+    if p["type"] == "edit_description" and not p["fields"]:
+        raise ValueError("the description edit changes nothing")
     if p["type"] == "rerender_shot" and not p["settings"]:
         p["settings"] = {}
     if p["type"] == "remake_wall":
@@ -258,6 +298,14 @@ def describe(p: dict) -> str:
                 + (", drawn from the prompt below." if p.get("prompt") else ", drawn from the shot's usual prompt."))
     if t == "redo_master":
         return "New master candidates for this character (they go to review; the approved master stays until you replace it)."
+    if t == "edit_description":
+        bits = ", ".join(f"{k.replace('_', ' ')}: {v if isinstance(v, str) else json.dumps(v)}" for k, v in p["fields"].items())
+        return (f"The written description changes ({bits}). Free. An approved master never changes: only new candidates "
+                "are drawn from the new words.")
+    if t == "new_candidates":
+        return (f"{p.get('count', 2)} new master candidate(s) in the episode's style"
+                + (", from the prompt below" if p.get("prompt") else ", from the character's current master prompt")
+                + ". They wait for your approval; an approved master stays until you approve a new version.")
     if t == "rerender_shot":
         s = p["settings"]
         bits = [f"{k}: {v}" for k, v in s.items() if k != "prompt"]
@@ -461,6 +509,18 @@ def build_context(db: Session, ref: Ref) -> dict:
         cx["settings"] = {"image_model": ip["model"] if ip else "none", "candidates_per_run": int(st.get("master_candidates") or 2),
                           "usd_per_image": ip["usd_per_image"] if ip else None,
                           "has_approved_master": approved_master(db, c.id) is not None}
+        ep = db.get(Episode, ref.episode_id) if ref.episode_id else None
+        if ep is not None:
+            from . import cast_from_video as CV
+            cv = CV.stored(db, ep.id)
+            d = CV._desc_for(cv, c.id)
+            if d:
+                cx["description_from_video"] = {k: d.get(k) for k in ("name", "role", "age", "build", "hair", "clothing",
+                                                                      "accessory", "personality", "must_never")}
+            if ep.style:
+                cx["episode_style"] = CV.styles(db)[ep.style]["label"]
+                cx["house_style"] = CV.style_block(db, ep.style)[0]
+                cx["current_prompt"] = CV.current_prompt(db, ep, cv, c, ep.style)["text"]
     elif ref.step == "final":
         ep = db.get(Episode, ref.episode_id)
         cx["episode"] = ep.title
@@ -620,6 +680,11 @@ SCHEMAS = {
                   'hold_or_move ("hold"|"move"), intensity ("subtle"|"clear"|"big")}}'),
     "redo_still": '{"type": "redo_still", "prompt": "<the full new still prompt, or leave out to reuse the current one>"}',
     "redo_master": '{"type": "redo_master"}',
+    "edit_description": ('{"type": "edit_description", "fields": {only the fields to change, from: role, age, build, '
+                         'hair {"style", "colour"}, clothing [{"garment", "colour"}], accessory (ONE), personality, '
+                         'must_never [..]}}  (free; never changes an approved master)'),
+    "new_candidates": ('{"type": "new_candidates", "count": <1-4>, "prompt": "<the full new master prompt, or leave out to '
+                       'use the current one>"}  (paid; the candidates wait for the owner to approve one)'),
     "redo_pose": ('{"type": "redo_pose", "prompt": "<the full new face prompt, keeping the eyeline sentence>", '
                   '"character": "<the character key, only when the pose changes several faces>"}'),
     "reanimate_shot": ('{"type": "reanimate_shot", "move_prompts": {"<pose number or hold-<pose>>": "<new move prompt>"}}  '
@@ -743,6 +808,9 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
     if p["type"] == "redo_still":
         ip = IMAGE_PROVIDERS.get(st.get("image_provider"))
         return image_cost(1, ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
+    if p["type"] == "new_candidates":
+        ip = IMAGE_PROVIDERS.get(st.get("image_provider"))
+        return image_cost(int(p.get("count") or 2), ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
     if p["type"] == "redo_master":
         ip = IMAGE_PROVIDERS.get(st.get("image_provider"))
         return image_cost(int(st.get("master_candidates") or 2), ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
@@ -923,6 +991,23 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
     if t == "redo_master":
         j = SP.generate_master(int(ref.item), SP.PaidIn(confirm_usd=confirm_usd), db, user)
         return {"done": "New master candidates are being made.", "job_id": j["id"]}
+    if t in ("edit_description", "new_candidates"):
+        from . import cast_from_video as CV
+        ep = db.get(Episode, ref.episode_id) if ref.episode_id else None
+        if ep is None:
+            raise HTTPException(409, "open this chat from the episode's Cast step to change the episode's cast")
+        cid = int(ref.item)
+        if t == "edit_description":
+            d = CV._desc_for(CV.stored(db, ep.id), cid)
+            if d is None:
+                raise HTTPException(409, "this character has no description from the video in this episode yet")
+            CV.apply_description_edit(db, ep, d["id"], dict(p["fields"]), user)
+            return {"done": "The description was updated (the approved master, if any, stays as it is)."}
+        from .stick_pipeline import approved_master
+        j = CV.make_candidates(db, ep, cid, CV.CandidatesIn(count=p.get("count") or 2, confirm_usd=confirm_usd,
+                                                            prompt=p.get("prompt"),
+                                                            new_version=approved_master(db, cid) is not None), user)
+        return {"done": "New master candidates are being made (they wait for your approval).", "job_id": j["id"]}
     if t == "rerender_shot":
         s = p["settings"]
         seconds = int(s.get("seconds") or get_section(db, "stick").get("video_seconds") or 5)

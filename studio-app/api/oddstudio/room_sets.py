@@ -528,21 +528,35 @@ def _load(k: str, folder: Path):
         return im.convert("RGB")
 
 
-def picture_info(v: dict, k: str) -> dict:
-    """{size, heads} of a stored picture, read once and kept (heads: reactions.find_heads, the stick heads)."""
+def picture_info(v: dict, k: str, auto: bool = True, owner: list[dict] | None = None) -> dict:
+    """{size, heads} of a stored picture, read once and kept (heads: reactions.find_heads, the stick heads). For an
+    episode in another style (auto=False) the heads are the owner's clicks (`owner`), or None (not counted) until the
+    owner has clicked them: find_heads only recognises white round stick heads."""
     cache = v.setdefault("info", {})
-    if k in cache:
-        return cache[k]
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        try:
-            im = _load(k, Path(d))
-            info = {"size": list(im.size), "heads": R.find_heads(im)[:16]}
-        except Exception:   # noqa: BLE001 -- unreadable: nothing counted, the owner can still ask Gemini
-            info = {"size": [R.W, R.H], "heads": None}
-    cache[k] = info
-    v["_dirty"] = True
+    if k in cache and (auto or cache[k].get("heads_by") == "owner"):
+        info = cache[k]
+    else:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            try:
+                im = _load(k, Path(d))
+                info = {"size": list(im.size), "heads": R.find_heads(im)[:16] if auto else None}
+            except Exception:   # noqa: BLE001 -- unreadable: nothing counted, the owner can still ask Gemini
+                info = {"size": [R.W, R.H], "heads": None}
+        if not auto:
+            info["heads_by"] = "owner"
+        cache[k] = info
+        v["_dirty"] = True
+    if not auto:
+        info = {**info, "heads": owner[:16] if owner is not None else None}
     return info
+
+
+def _pic_info(db: Session, ep: Episode, v: dict, pic: dict) -> dict:
+    """picture_info with the episode's style: automatic head finding for the stick man, the owner's clicks otherwise."""
+    from . import cast_from_video as CV
+    auto = CV.auto_heads(db, ep.id)
+    return picture_info(v, pic["key"], auto, None if auto else CV.owner_heads(db, ep.id, pic.get("asset_id")))
 
 
 # ================================================================== view
@@ -598,7 +612,7 @@ def view(db: Session, ep: Episode, light: bool = False) -> dict:
     for pic in check_pictures(db, ep, v):
         rec = (v.get("checks") or {}).get(pic["target"]) or {}
         names = [n for n, _ in seating_people(db, pic["people"])]
-        info = picture_info(v, pic["key"]) if not light or pic["key"] in (v.get("info") or {}) else {"heads": None, "size": None}
+        info = _pic_info(db, ep, v, pic) if not light or pic["key"] in (v.get("info") or {}) else {"heads": None, "size": None}
         heads = None if info.get("heads") is None else len(info["heads"])
         gem = rec.get("gemini") if rec.get("asset_id") == pic["asset_id"] else None
         out["checks"].append({**{k: pic[k] for k in ("target", "label", "asset_id", "side", "framing")}, "names": names,
@@ -610,6 +624,8 @@ def view(db: Session, ep: Episode, light: bool = False) -> dict:
         save(db, ep.id, v)
         db.commit()
     out["busy"] = _active(db, ep.id).first() is not None
+    from .cast_from_video import head_finding
+    out["head_finding"] = head_finding(db, ep.id)
     if light:
         return out
     job = db.query(Job).filter(Job.kind.in_((JOB_IMAGE, JOB_REPAIR)), Job.episode_id == ep.id).order_by(Job.id.desc()).first()
@@ -1085,7 +1101,7 @@ def start_repair(eid: int, body: RepairIn, db: Session, user: str) -> dict:
     ep = _episode(db, eid)
     v = stored(db, eid)
     pic = target_picture(db, ep, v, body.target)
-    info = picture_info(v, pic["key"])
+    info = _pic_info(db, ep, v, pic)
     size = tuple(info["size"])
     heads = info.get("heads") or []
     rec = {"target": pic["target"], "label": pic["label"], "tool": body.tool, "want": body.want.strip(),

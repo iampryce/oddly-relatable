@@ -906,4 +906,5 @@ from . import room_sets  # noqa: E402,F401  (guided flow: wall / seating picture
 from . import shot_frames  # noqa: E402,F401  (registers the shot_frames job)
 from . import stick_pipeline, stick_shots  # noqa: E402,F401  (stick pipeline jobs)
 from . import acting_analysis  # noqa: E402,F401  (guided flow: acting analysis job)
+from . import cast_from_video  # noqa: E402,F401  (guided flow: cast descriptions, style previews and master candidates)
 from . import assembly, clip_qa  # noqa: E402,F401  (guided flow: the final cut and the clip quality check)

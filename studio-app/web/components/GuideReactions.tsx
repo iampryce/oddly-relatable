@@ -13,6 +13,8 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import ShotChat from '@/components/ShotChat';
+import HeadClicker from '@/components/HeadClicker';
+import {headNote} from '@/lib/cast';
 import {isActive, progress, usd} from '@/lib/talkingGuide';
 import {clickToPicture, cropStyle, moveKey, ovalStyle, poseBadge, poseButton, poseItem, segmentText, widthToZoom,
   zoomToWidth, BASE_H, BASE_W} from '@/lib/reactionsGuide';
@@ -47,6 +49,8 @@ export default function GuideReactions({id, part, onChange}: {id: string; part: 
           && act.run('stop', () => api(`/episodes/${id}/reactions/stop`, {method: 'POST'}))}>Stop the GPU now</button></>}</p>}
       {r.job?.status === 'failed' && part !== 'closeups' && <p className="small bad">The last GPU run stopped: {r.job.error}</p>}
       {shots.length === 0 && <p className="small muted">No reaction shots yet. They come from the storyboard: every shot where nobody on screen is talking.</p>}
+      {part === 'closeups' && headNote(r.head_finding) && <p className="small warn" role="note">{headNote(r.head_finding)} Here: click each
+        head on the chosen seating picture below; the crops then follow them.</p>}
       {part === 'closeups' && <Masters r={r} id={id} act={act} />}
       {shots.map((s: any) => <ShotCard key={s.index} s={s} id={id} act={act} part={part} r={r} now={now} />)}
     </div>);
@@ -65,6 +69,8 @@ function Masters({r, id, act}: {r: any; id: string; act: Act}) {
                 <option value="right">slightly screen-right (speaker)</option>
               </select></span></div>
           {m.candidates.length === 0 && <span className="small muted">No approved still on this side yet (step 5).</span>}
+          {headNote(r.head_finding) && m.chosen && <HeadClicker episodeId={id} assetId={m.chosen}
+            url={m.candidates.find((c: any) => c.asset_id === m.chosen)?.url} onSaved={() => act.run(`h${m.side}`, async () => {})} />}
           <div className="row" style={{flexWrap: 'wrap', gap: 8}}>
             {m.candidates.map((c: any) => (
               <button key={c.asset_id} className="btn sm" style={{padding: 2, outline: m.chosen === c.asset_id ? '3px solid var(--good)' : 'none'}}

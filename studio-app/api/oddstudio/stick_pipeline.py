@@ -40,7 +40,10 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 # ------------------------------------------------------------------ providers and prices
 IMAGE_PROVIDERS: dict[str, dict] = {
+    # t2i_model: the same model without reference images, used by the cast styles that have no style example yet
+    # (cast_from_video.py); same price per image.
     "wavespeed-nano-banana-2.1": {"label": "WaveSpeed: nano-banana-2.1 (edit)", "model": "google/nano-banana-2.1/edit",
+                                  "t2i_model": "google/nano-banana-2.1/text-to-image",
                                   "usd_per_image": 0.04, "implemented": True},
 }
 VIDEO_PROVIDERS: dict[str, dict] = {

@@ -44,6 +44,7 @@ export const PROPOSAL_TITLE: Record<string, string> = {
   redo_pose: 'Redraw this face', reanimate_shot: 'Animate the shot again',
   remake_wall: 'Draw this wall again', repaint_background: 'Repaint the background behind the people',
   redo_shot: 'Make one shot again',
+  edit_description: 'Change the description', new_candidates: 'Draw new master candidates',
 };
 
 // the text shown in the proposal card besides "What will change" (the new prompt, if any)
@@ -56,6 +57,9 @@ export function proposalDetail(p: any): string {
     .map(([k, v]) => `${k.startsWith('hold-') ? `Hold of pose ${k.slice(5)}` : `Move into pose ${k}`}: ${v}`).join('\n');
   if (p.type === 'rerender_shot') return p.settings?.prompt || '';
   if (p.type === 'redo_shot') return `Shot ${p.shot}` + (p.prompt ? `\n${p.prompt}` : '');
+  if (p.type === 'new_candidates') return p.prompt || '';
+  if (p.type === 'edit_description') return Object.entries(p.fields || {})
+    .map(([k, v]) => `${k.replace('_', ' ')}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n');
   return '';
 }
 

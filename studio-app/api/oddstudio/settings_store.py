@@ -9,6 +9,7 @@ from .config import get_settings
 from .secrets_store import secret
 from .models import Setting
 from .stick_style import STICK_MAN_MASTER_PROMPT
+from .cast_styles import DEFAULT_STYLES
 
 DEFAULTS: dict[str, dict] = {
     # Text generation (scripts, section and scene regeneration).
@@ -89,6 +90,11 @@ DEFAULTS: dict[str, dict] = {
     "quality": {"qa_paid_tier": False, "qa_use_free_tier": False, "qa_model": "gemini-3.1-pro-preview",
                 "qa_usd_in": 2.0, "qa_usd_out": 12.0, "qa_free_model": "gemini-3.5-flash", "qa_inline_mb": 12,
                 "max_redos_per_shot": 1},
+    # Cast from the reference video (cast_from_video.py): the five style presets (text block + optional style reference
+    # images each, cast_styles.py), how many master candidates one click draws (the owner changes it per click, 1-4),
+    # and the longest answer of the description request. The Gemini model, its prices and the free-tier models are the
+    # acting analysis' (Settings > Guided generation): the same tier rules apply.
+    "cast": {"styles": DEFAULT_STYLES, "candidates": 2, "describe_max_tokens": 8000},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -167,6 +173,9 @@ def put_section(db: Session, key: str, value: dict) -> dict:
         check_settings(value)
     if key == "quality":
         check_quality(value)
+    if key == "cast":
+        from .cast_from_video import check_cast_settings
+        check_cast_settings(db, value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)

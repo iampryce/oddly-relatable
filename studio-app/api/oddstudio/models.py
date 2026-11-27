@@ -74,6 +74,9 @@ class Episode(Timestamps, Base):
     scene_set_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     # The proposed set description (migration 0009): {text, source: video notes | writer | edited, updated}
     set_proposal: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    # The episode's drawing style (migration 0016, cast_from_video.STYLES): every character master of the episode is
+    # drawn in it so the cast matches. None = not chosen yet (treated as the house stick-man style downstream).
+    style: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 
