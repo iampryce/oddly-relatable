@@ -36,7 +36,7 @@ export default function Shell({children}: {children: React.ReactNode}) {
   return (
     <div className="app">
       <header className="appbar">
-        <Link href="/" className="brand"><span className="brand-mark" aria-hidden>OR</span><span>Oddly Relatable</span></Link>
+        <Link href="/" className="brand"><span className="brand-mark" aria-hidden>R</span><span>Rivet AI Studio</span></Link>
         <nav className="topnav" aria-label="Main">
           {NAV.map(([href, label]) => <Link key={href} href={href} className={active(path, href) ? 'on' : ''}
             aria-current={active(path, href) ? 'page' : undefined}>{label}</Link>)}
