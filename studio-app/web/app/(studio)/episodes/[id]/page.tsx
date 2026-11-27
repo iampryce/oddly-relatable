@@ -59,6 +59,9 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   }, [auto, plan.kind, plan.kind === 'free' ? plan.path : plan.why, act.busy]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error && !ep) return <ErrorBox error={error} />;
+  // a narrated short is made in its own wizard (narrated_short.py)
+  if (ep?.kind === 'narrated_short') return <section className="card"><h1 style={{marginTop: 0}}>{ep.title}</h1>
+    <p>This is a narrated short. <Link href={`/shorts/${id}`}>Open it in the New short wizard</Link>.</p></section>;
   if (!ep || !ws) return <p className="muted">Loading…</p>;
   const lib = library || [];
   const chars = episodeCharacters(cast || null, au || null, lib);
