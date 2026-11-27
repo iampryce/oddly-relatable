@@ -65,3 +65,15 @@ Reuses: cast library, prompt writer, stills, GPU sessions, assembly, autopilot a
 - **One 30 s short end to end** on the free path: Gemini TTS + code kit (free).
 - The same script on Wan 2.2 (about $0.50 with a small Runpod top-up), to compare engines.
 - Omni Flash later, when Google billing is on.
+
+## 9. Build order and decisions (owner, 2026-11-27)
+1. **Easy path first:** Gemini TTS voice provider + code kit as a motion provider; one 30 s short end to end (free).
+2. **WaveSpeed replaces fal.ai** as the hosted motion provider (Wan 2.2 first; LTX later for comparison). New `wavespeed.py` modelled on `fal.py`
+   (submit, poll about every 2 s, cancel, cost estimate shown before each run, hard spend cap). WaveSpeed's documented prices are inconsistent
+   and may be outdated, so the live price is shown before any paid call. The fal code stays, marked retired, until a WaveSpeed test passes.
+   Open: WaveSpeed key available? models wanted?
+3. **New-short wizard** in the dashboard (section 7); the category is its first step (`categories.py`).
+4. **3D proof of concept (possible fifth category):** Blender, one character, one set, one 10 s clip, in its own folder, outside the studio.
+   Motion from UniMate or MoCap Anything V2 only after their licences are checked (UniMate has a training-data licence concern).
+   Judge the result before committing to a full category. Owner has time and accepts a bigger pipeline if the result is better.
+5. Not planned: OpenToonz, Synfig, Mesh2Motion, Babylon.js.
