@@ -910,3 +910,4 @@ from . import cast_from_video  # noqa: E402,F401  (guided flow: cast description
 from . import speaker_suggest  # noqa: E402,F401  (suggested speaker labels: the speaker_suggest job)
 from . import local_describe  # noqa: E402,F401  (the free describer on this server: cast_describe_local)
 from . import assembly, clip_qa  # noqa: E402,F401  (guided flow: the final cut and the clip quality check)
+from . import narrated_short  # noqa: E402,F401  (the New short wizard: picture, voice, motion, assembly, thumbnail jobs)

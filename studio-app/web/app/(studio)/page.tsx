@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import {useEffect, useRef, useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {api, isVideoFile, uploadAudio} from '@/lib/api';
+import {api, isVideoFile, STAGE_LABEL, stageTone as STAGE_TONE, uploadAudio} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {KEEP_VIDEO_TEXT, videoSeconds} from '@/components/VideoNotesOptions';
@@ -20,6 +20,7 @@ export default function Episodes() {
   return (
     <>
       <div className="spread"><div><h1>Episodes</h1><p className="sub">Drop a video, press Generate, and decide where the studio asks you.</p></div></div>
+      <NewShort />
       <NewEpisode onCreated={reload} />
       <ErrorBox error={error} />
       <section className="card ep-list" aria-label="Episodes">
@@ -33,14 +34,35 @@ export default function Episodes() {
 
 // One line per episode; the workspace says precisely what waits for the owner (read-only, refreshed every minute).
 function EpisodeRow({ep}: {ep: any}) {
-  const live = ep.stage !== 'published';
+  const short = ep.kind === 'narrated_short';
+  const live = ep.stage !== 'published' && !short;
   const {data: ws} = useApi<any>(live ? `/episodes/${ep.id}/workspace` : null, 60000);
-  const st = listStatus(ep, ws || undefined);
+  const st = short ? {tone: STAGE_TONE(ep.stage), icon: '›', text: `Narrated short · ${STAGE_LABEL[ep.stage] || ep.stage}`}
+    : listStatus(ep, ws || undefined);
   return (
-    <Link href={`/episodes/${ep.id}`} className="ep-row">
+    <Link href={short ? `/shorts/${ep.id}` : `/episodes/${ep.id}`} className="ep-row">
       <span className="ep-title">{ep.title}<span className="muted small"> · {ep.format === 'long' ? 'YouTube long' : 'Short'}</span></span>
       <span className={`ep-status ${st.tone}`}><span aria-hidden>{st.icon}</span> {st.text}</span>
     </Link>);
+}
+
+// New short (narrated_short.py): a narrated stick-man short from an idea, no video needed. Free to create; the
+// wizard then shows each step with its price.
+function NewShort() {
+  const router = useRouter();
+  const {busy, error, run} = useAction();
+  const create = () => run('short', async () => {
+    const v = await api('/shorts', {body: {niche: 'what_if', characters: [], format: '9:16', seconds: 30}});
+    router.push(`/shorts/${v.id}`);
+  });
+  return (
+    <section className="card spread" aria-label="New short" style={{padding: 14, marginBottom: 12}}>
+      <div><h2 style={{margin: 0}}>+ New short</h2>
+        <p className="small muted" style={{margin: '4px 0 0'}}>A narrated stick-man short from an idea: your house characters act out
+          each sentence. Pick the niche, characters, frame and length on the next page. Creating it is free.</p>
+        <ErrorBox error={error} /></div>
+      <button className="btn primary" disabled={!!busy} onClick={create}>{busy ? 'Creating…' : 'New short'}</button>
+    </section>);
 }
 
 // The new-episode form: a video (or audio) file, a title, the format and the rights the server requires; Generate

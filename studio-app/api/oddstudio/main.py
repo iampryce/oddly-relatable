@@ -125,6 +125,8 @@ from . import assembly, autopilot, clip_qa  # noqa: E402  (guided steps 10-11 an
 app.include_router(clip_qa.router)
 app.include_router(assembly.router)
 app.include_router(autopilot.router)
+from . import narrated_short  # noqa: E402  (the New short wizard: narrated stick-man shorts)
+app.include_router(narrated_short.router)
 
 
 @app.middleware("http")

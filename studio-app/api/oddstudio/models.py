@@ -77,6 +77,9 @@ class Episode(Timestamps, Base):
     # The episode's drawing style (migration 0016, cast_from_video.STYLES): every character master of the episode is
     # drawn in it so the cast matches. None = not chosen yet (treated as the house stick-man style downstream).
     style: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # The episode type (migration 0017): None = the classic episode (acted sketch from a video, audio or script);
+    # "narrated_short" = a narrated stick-man short made with the New short wizard (narrated_short.py).
+    kind: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 

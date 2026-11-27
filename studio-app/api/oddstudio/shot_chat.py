@@ -51,6 +51,13 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
                                                           again through its own step's redo route: a talking shot
                                                           rendered again, a reaction shot animated again, or a still
                                                           drawn again; paid, with that route's confirm_usd / cap 409s)
+Narrated shorts (narrated_short.py, thread keys short_picture:<scene>, short_clip:<scene>, short_script:<episode id>,
+short_voice:<episode id>):
+  short_picture  note_only | redo_picture {prompt} | rewrite_line {scene, text}  (a new Nano picture of the scene: paid;
+                 rewriting the line is free and makes the script wait for approval again)
+  short_clip     note_only | redo_clip {prompt}            (the scene animated again on the rented GPU: paid)
+  short_script   note_only | rewrite_line {scene, text}    (free; the script waits for approval again)
+  short_voice    note_only | regenerate_voice {voice?, style?}  (a new narration take: Gemini speech, paid or free tier)
 The quality check (clip_qa.py) posts into the talk:/clip: threads as an assistant message from "Quality check".
 """
 from __future__ import annotations
@@ -77,13 +84,18 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
          "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
-         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode"}
+         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode",
+         "short_picture": "Scene picture (narrated short)", "short_clip": "Scene clip (narrated short)",
+         "short_script": "Narration script (narrated short)", "short_voice": "Narration voice (narrated short)"}
 ALLOWED = {"master": ("note_only", "redo_master", "edit_description", "new_candidates"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
            "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
            "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
            "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background"),
-           "final": ("note_only", "redo_shot")}
+           "final": ("note_only", "redo_shot"),
+           "short_picture": ("note_only", "redo_picture", "rewrite_line"), "short_clip": ("note_only", "redo_clip"),
+           "short_script": ("note_only", "rewrite_line"), "short_voice": ("note_only", "regenerate_voice")}
+SHORT_STEPS = ("short_picture", "short_clip", "short_script", "short_voice")
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
@@ -245,9 +257,31 @@ class RedoShot(_Strict):
     prompt: str | None = Field(default=None, min_length=1, max_length=4000)
 
 
+class RedoPicture(_Strict):
+    type: Literal["redo_picture"]
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
+class RedoClip(_Strict):
+    type: Literal["redo_clip"]
+    prompt: str = Field(min_length=1, max_length=1500)
+
+
+class RewriteLine(_Strict):
+    type: Literal["rewrite_line"]
+    scene: int = Field(ge=1, le=999)
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class RegenerateVoice(_Strict):
+    type: Literal["regenerate_voice"]
+    voice: Literal["Charon", "Kore", "Puck", "Fenrir", "Aoede", "Orus", "Leda", "Zephyr"] | None = None
+    style: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
                            RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot, EditDescription,
-                           NewCandidates],
+                           NewCandidates, RedoPicture, RedoClip, RewriteLine, RegenerateVoice],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
@@ -268,6 +302,8 @@ def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -
             raise ValueError("a beat edit must be for this thread's shot")
         if not p["fields"]:
             raise ValueError("the beat edit changes nothing")
+    if p["type"] == "rewrite_line" and step == "short_picture" and str(p["scene"]) != str(item):
+        raise ValueError("a line rewrite from a scene's chat must be for this scene")
     if p["type"] == "edit_description" and not p["fields"]:
         raise ValueError("the description edit changes nothing")
     if p["type"] == "rerender_shot" and not p["settings"]:
@@ -327,6 +363,19 @@ def describe(p: dict) -> str:
     if t == "remake_wall":
         return ("A new straight-on picture of this wall from the prompt below (the earlier pictures are kept; nothing is "
                 "approved for you).")
+    if t == "redo_picture":
+        return ("A new picture of this scene from the prompt below, with the characters' approved masters as the "
+                "reference images (the earlier pictures are kept; it waits for your approval).")
+    if t == "redo_clip":
+        return ("This scene is animated again from its approved picture on the rented GPU, moved as the prompt below "
+                "says (the earlier clips are kept).")
+    if t == "rewrite_line":
+        return (f"Scene {p['scene']}'s narration line becomes the text below. Free. The script then waits for your "
+                "approval again and the narration has to be made again for the new words.")
+    if t == "regenerate_voice":
+        bits = [x for x in (f"voice {p['voice']}" if p.get("voice") else "", f"style \"{p['style']}\"" if p.get("style") else "") if x]
+        return "A new narration take" + (f" with {', '.join(bits)}" if bits else " with the same voice and style") + \
+            " (the earlier takes are kept; it waits for you to listen and approve)."
     if t == "redo_shot":
         return (f"Shot {p['shot']} is made again through its own step (a talking shot is rendered again, a reaction "
                 "shot animated again, a still drawn again); the earlier results are kept and nothing is approved for you"
@@ -402,7 +451,8 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final",
+                  "short_picture", "short_clip", "short_script", "short_voice"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -426,6 +476,18 @@ def check_ref(db: Session, ref: Ref) -> None:
         return
     if ref.episode_id is None or db.get(Episode, ref.episode_id) is None:
         raise HTTPException(404, "episode not found")
+    if ref.step in SHORT_STEPS:
+        ep = db.get(Episode, ref.episode_id)
+        if getattr(ep, "kind", None) != "narrated_short":
+            raise HTTPException(404, "narrated short not found")
+        if ref.step in ("short_script", "short_voice") and ref.item != str(ref.episode_id):
+            raise HTTPException(422, "the item of this thread is the episode id")
+        if ref.step in ("short_picture", "short_clip"):
+            from . import narrated_short as NS
+            if not ref.item.isdigit():
+                raise HTTPException(422, "the item of this step is a scene number")
+            NS.scene_or_404(NS.stored(db, ref.episode_id), int(ref.item))
+        return
     if ref.step == "final" and ref.item != str(ref.episode_id):
         raise HTTPException(422, "the item of the final cut's thread is the episode id")
     if ref.step in ("still", "clip", "acting", "talk") and not ref.item.isdigit():
@@ -501,6 +563,12 @@ def build_context(db: Session, ref: Ref) -> dict:
     cx: dict = {"step": STEPS[ref.step], "house_style": (st.get("style_prompt") or "").strip()}
     chars: list[Character] = []
 
+    if ref.step in SHORT_STEPS:
+        from . import narrated_short as NS
+        cx.update(NS.chat_context(db, ref.step, ref.episode_id, ref.item))
+        t = get_thread(db, ref)
+        cx["history"] = [{"role": m["role"], "content": m["text"]} for m in (t.get("messages") or [])][-HISTORY:]
+        return cx
     if ref.step == "master":
         c = db.get(Character, int(ref.item))
         chars = [c]
@@ -674,6 +742,12 @@ def SF_plan(db: Session, eid: int) -> dict:
 
 SCHEMAS = {
     "note_only": '{"type": "note_only"}',
+    "redo_picture": ('{"type": "redo_picture", "prompt": "<the full new picture prompt: refer to each character only as '
+                     '\'the character in reference image N\'; never describe or redesign their look>"}  (paid; a new picture)'),
+    "redo_clip": '{"type": "redo_clip", "prompt": "<the full new animation prompt: one simple action, static or gentle camera>"}  (paid, rented GPU)',
+    "rewrite_line": '{"type": "rewrite_line", "scene": <the scene number>, "text": "<the new narration line>"}  (free; the script waits for approval again)',
+    "regenerate_voice": ('{"type": "regenerate_voice", "voice": "<one of Charon, Kore, Puck, Fenrir, Aoede, Orus, Leda, Zephyr, '
+                         'or leave out>", "style": "<a short style instruction, e.g. warm, calm narrator, or leave out>"}  (a new take)'),
     "update_prompt": '{"type": "update_prompt", "prompt": "<the full new prompt>"}',
     "edit_beat": ('{"type": "edit_beat", "shot": <this shot>, "beat_index": <n>, "fields": {only the fields to change, '
                   'from: t_start, t_end, on_word, expression, eyes_and_gaze, head_and_body, hands, '
@@ -844,6 +918,9 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
         return RS.chat_cost(db, p)
     if p["type"] == "redo_shot":
         return redo_shot_cost(db, ref.episode_id, p["shot"])
+    if p["type"] in ("redo_picture", "redo_clip", "rewrite_line", "regenerate_voice"):
+        from . import narrated_short as NS
+        return NS.chat_cost(db, ref.episode_id, p)
     return None
 
 
@@ -1043,6 +1120,9 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
         return RS.chat_apply(db, db.get(Episode, ref.episode_id), ref.step, ref.item, p, confirm_usd, user)
     if t == "redo_shot":
         return redo_shot(db, ref.episode_id, p["shot"], p.get("prompt"), confirm_usd, user)
+    if t in ("redo_picture", "redo_clip", "rewrite_line", "regenerate_voice"):
+        from . import narrated_short as NS
+        return NS.chat_apply(db, ref.step, ref.episode_id, ref.item, p, confirm_usd, user)
     raise HTTPException(409, "this proposal has nothing to apply")
 
 

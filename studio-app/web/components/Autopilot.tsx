@@ -10,7 +10,9 @@ import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import {apStatus, budgetPercent, budgetText, controls, parseBudget, providerBadge, startConfirmText} from '@/lib/autopilot';
 
-export default function Autopilot({id, onChange}: {id: string; onChange: () => unknown}) {
+// title / blurb / freeTierText: the words for another episode kind (the narrated short's "Make this short")
+export default function Autopilot({id, onChange, title = 'Make whole episode', blurb, freeTierText}: {id: string;
+  onChange: () => unknown; title?: string; blurb?: string; freeTierText?: string}) {
   const [poll, setPoll] = useState(15000);
   const {data: s, error, reload} = useApi<any>(`/episodes/${id}/autopilot`, poll);
   const act = useAction(async () => { await reload(); await onChange(); });
@@ -40,14 +42,14 @@ export default function Autopilot({id, onChange}: {id: string; onChange: () => u
     act.run('stop', () => api(`/episodes/${id}/autopilot/stop`, {method: 'POST'}));
   };
   return (
-    <section className="card ap" aria-label="Make whole episode">
+    <section className="card ap" aria-label={title}>
       <div className="spread">
-        <h2 className="gd-title">Make whole episode</h2>
+        <h2 className="gd-title">{title}</h2>
         <span className={`badge ${st.tone}`}>{st.text}</span>
       </div>
-      <p className="small muted" style={{margin: '6px 0 10px', maxWidth: 760}}>Set one budget for the whole episode. The autopilot
+      <p className="small muted" style={{margin: '6px 0 10px', maxWidth: 760}}>{blurb || <>Set one budget for the whole episode. The autopilot
         runs the steps below in order, starts paid work only while it fits in the budget and the monthly GPU cap, and
-        stops to wait for you at every approval. It never approves anything for you.</p>
+        stops to wait for you at every approval. It never approves anything for you.</>}</p>
       <ErrorBox error={act.error} />
       {s.status !== 'off' && <div className="ap-now">
         <div className="small"><span className="muted">Now: </span>{s.step_label || '—'}</div>
@@ -67,7 +69,7 @@ export default function Autopilot({id, onChange}: {id: string; onChange: () => u
         <input id="ap-budget" inputMode="decimal" style={{width: 110}} placeholder={s.budget_usd ? s.budget_usd.toFixed(2) : 'e.g. 10'}
           value={budget} onChange={e => setBudget(e.target.value)} />
         {c.start && <button className="btn primary" disabled={!!act.busy || amount == null || s.blockers?.length > 0} onClick={start}>
-          {act.busy === 'start' ? 'Starting…' : amount != null ? `Make whole episode · budget $${amount.toFixed(2)}` : 'Make whole episode'}</button>}
+          {act.busy === 'start' ? 'Starting…' : amount != null ? `${title} · budget $${amount.toFixed(2)}` : title}</button>}
         {c.resume && <button className="btn primary" disabled={!!act.busy} onClick={resume}>
           {amount != null && amount !== s.budget_usd ? `Resume with $${amount.toFixed(2)}` : 'Resume'}</button>}
         {c.pause && <button className="btn" disabled={!!act.busy} onClick={() => act.run('pause', () => api(`/episodes/${id}/autopilot/pause`, {method: 'POST'}))}>Pause</button>}
@@ -75,7 +77,7 @@ export default function Autopilot({id, onChange}: {id: string; onChange: () => u
       </div>
       {c.start && <label className="row small" style={{fontWeight: 400, color: 'inherit', marginTop: 6}}>
         <input type="checkbox" style={{width: 'auto'}} checked={free} onChange={e => setFree(e.target.checked)} />
-        Let the acting analysis use Gemini&rsquo;s free tier when the paid model is busy (Google may use the video to train its models).</label>}
+        {freeTierText || <>Let the acting analysis use Gemini&rsquo;s free tier when the paid model is busy (Google may use the video to train its models).</>}</label>}
       <details className="ap-details" open={open} onToggle={e => setOpen((e.target as HTMLDetailsElement).open)}>
         <summary className="small">Providers, notes and what was started</summary>
         <table className="ap-table small">

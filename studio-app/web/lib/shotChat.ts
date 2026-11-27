@@ -2,12 +2,14 @@
 // every proposal and routes Apply to the step's own handler; these only shape what the page shows.
 import {usd4} from './stickPipeline.ts';
 
-export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk' | 'pose' | 'wall' | 'seating' | 'repair' | 'final';
+export type Step = 'master' | 'still' | 'clip' | 'acting' | 'prompt' | 'talk' | 'pose' | 'wall' | 'seating' | 'repair' | 'final'
+  | 'short_picture' | 'short_clip' | 'short_script' | 'short_voice';
 
 export const STEP_NOUN: Record<Step, string> = {
   master: 'this master', still: 'this still', clip: 'this clip', acting: 'these acting notes', prompt: 'this prompt',
   talk: 'this talking shot', pose: 'this pose', wall: 'this wall', seating: 'this seating picture',
   repair: 'this repair', final: 'the final cut',
+  short_picture: 'this picture', short_clip: 'this clip', short_script: 'the script', short_voice: 'the narration',
 };
 
 // GET /shot-chat/thread?... (episode_id is left out for a character master: those threads are studio-wide)
@@ -45,6 +47,8 @@ export const PROPOSAL_TITLE: Record<string, string> = {
   remake_wall: 'Draw this wall again', repaint_background: 'Repaint the background behind the people',
   redo_shot: 'Make one shot again',
   edit_description: 'Change the description', new_candidates: 'Draw new master candidates',
+  redo_picture: 'Draw this picture again', redo_clip: 'Animate this scene again', rewrite_line: 'Rewrite a line',
+  regenerate_voice: 'Make the narration again',
 };
 
 // the text shown in the proposal card besides "What will change" (the new prompt, if any)
@@ -58,6 +62,9 @@ export function proposalDetail(p: any): string {
   if (p.type === 'rerender_shot') return p.settings?.prompt || '';
   if (p.type === 'redo_shot') return `Shot ${p.shot}` + (p.prompt ? `\n${p.prompt}` : '');
   if (p.type === 'new_candidates') return p.prompt || '';
+  if (p.type === 'redo_picture' || p.type === 'redo_clip') return p.prompt || '';
+  if (p.type === 'rewrite_line') return `Scene ${p.scene}: ${p.text}`;
+  if (p.type === 'regenerate_voice') return [p.voice ? `Voice: ${p.voice}` : '', p.style ? `Style: ${p.style}` : ''].filter(Boolean).join('\n');
   if (p.type === 'edit_description') return Object.entries(p.fields || {})
     .map(([k, v]) => `${k.replace('_', ' ')}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n');
   return '';

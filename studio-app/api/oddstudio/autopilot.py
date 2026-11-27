@@ -55,8 +55,9 @@ LABEL = {"acting": "Acting analysis", "prompts": "Prompts", "masters": "Cast (ch
          "sets": "Walls and seating pictures", "stills": "Shot stills", "talking": "Talking shots",
          "reactions": "Reaction shots", "quality": "Quality check", "approvals": "Your review of the clips",
          "assembly": "Assembly and the final cut"}
-GPU_KINDS = ("talk_render", "poses", "animate", "redo")
-SYNC_PAID = ("talk_prompt", "pose_prompt", "cast_prompt")        # paid calls made inside the request (no job to report the cost)
+GPU_KINDS = ("talk_render", "poses", "animate", "redo", "short_motion")
+# paid calls made inside the request (no job to report the cost)
+SYNC_PAID = ("talk_prompt", "pose_prompt", "cast_prompt", "short_ideas", "short_script", "short_prompts", "short_publish")
 LIVE = ("running", "waiting")
 ACTIVE = ("queued", "running")
 MAX_BUDGET = 500.0
@@ -518,6 +519,22 @@ PLANNERS = {"acting": plan_acting, "prompts": plan_prompts, "masters": plan_mast
 
 
 # ================================================================== running one action: the steps' own functions
+def flow(ep: Episode) -> tuple[tuple, dict, dict]:
+    """(steps, labels, planners) of this episode's kind: the classic episode, or a narrated short
+    (short_autopilot.py: the New short wizard's steps 2-9, same budget, gates and GPU rules)."""
+    if getattr(ep, "kind", None) == "narrated_short":
+        from . import short_autopilot as SA
+        return SA.STEPS, SA.LABEL, SA.PLANNERS
+    return STEPS, LABEL, PLANNERS
+
+
+def runner(kind: str):
+    if kind in RUN:
+        return RUN[kind]
+    from . import short_autopilot as SA
+    return SA.RUN[kind]
+
+
 def _job(j: dict) -> dict:
     return {"job_id": j["id"]}
 
@@ -689,7 +706,7 @@ def execute(db: Session, ep: Episode, v: dict, step: str, actions: list[dict]) -
                              "or wait for next month, then press Resume.")
                 return started
         try:
-            res = RUN[a["kind"]](db, ep, a, _user(v), v) or {}
+            res = runner(a["kind"])(db, ep, a, _user(v), v) or {}
         except Exception as e:   # noqa: BLE001 -- shown to the owner; nothing is retried by itself
             db.rollback()
             refused = isinstance(e, HTTPException) and e.status_code == 409     # a 409 starts nothing and calls nobody
@@ -723,7 +740,8 @@ def tick(db: Session, eid: int) -> dict:
     if failed:
         pause(db, v, f"Paused: {failed}. Look at the step, then press Resume (nothing is retried by itself).")
     elif busy:
-        v["status"], v["message"], v["waiting_for"] = "running", f"Working on: {LABEL.get(v.get('step'), v.get('step') or '')}", []
+        labels = flow(ep)[1]
+        v["status"], v["message"], v["waiting_for"] = "running", f"Working on: {labels.get(v.get('step'), v.get('step') or '')}", []
     else:
         _advance(db, ep, v)
     v["spent_usd"], v["ticked"] = spent(v), time.time()
@@ -734,7 +752,8 @@ def tick(db: Session, eid: int) -> dict:
 
 def _advance(db: Session, ep: Episode, v: dict) -> None:
     notes = []
-    for step in STEPS:
+    steps, LABEL, PLANNERS = flow(ep)      # noqa: N806 -- the episode kind's own steps (shadows the classic ones)
+    for step in steps:
         try:
             plan = PLANNERS[step](db, ep, v)
         except HTTPException as e:
@@ -766,9 +785,11 @@ def _advance(db: Session, ep: Episode, v: dict) -> None:
             v["message"] = f"Waiting for you: {len(plan['waiting'])} thing(s) to approve or do at {LABEL[step]}"
             release_gpu(db, v, "the autopilot is waiting for you")
             return
-    v["step"], v["status"], v["waiting_for"] = "assembly", "finished", []
-    v["message"] = "Finished: the final cut is approved."
-    _log(v, "Finished: the final cut is approved")
+    v["step"], v["status"], v["waiting_for"] = steps[-1], "finished", []
+    done = ("the final video is approved and the publish pack is ready" if getattr(ep, "kind", None) == "narrated_short"
+            else "the final cut is approved")
+    v["message"] = f"Finished: {done}."
+    _log(v, f"Finished: {done}")
     release_gpu(db, v, "the autopilot finished")
 
 
@@ -829,6 +850,9 @@ def needs(db: Session, ep: Episode) -> dict:
 
 def providers(db: Session, ep: Episode) -> list[dict]:
     """Which provider each step uses and whether it is ready: [{step, label, provider, ready, note, essential}]."""
+    if getattr(ep, "kind", None) == "narrated_short":
+        from . import short_autopilot as SA
+        return SA.providers(db, ep)
     from . import clip_qa as Q
     from . import comfy_session as CS
     from . import gpu
@@ -886,15 +910,16 @@ def blockers(items: list[dict]) -> list[str]:
 def view(db: Session, ep: Episode) -> dict:
     v = stored(db, ep.id)
     items = providers(db, ep)
+    steps, labels, _p = flow(ep)
     return {"status": v.get("status", "off"), "budget_usd": float(v.get("budget_usd") or 0.0), "spent_usd": spent(v),
             "remaining_usd": max(0.0, remaining(v)) if v.get("budget_usd") else 0.0, "step": v.get("step"),
-            "step_label": LABEL.get(v.get("step") or "", ""), "message": v.get("message") or "",
+            "step_label": labels.get(v.get("step") or "", ""), "message": v.get("message") or "",
             "waiting_for": v.get("waiting_for") or [], "notes": v.get("notes") or [], "use_free_tier": bool(v.get("use_free_tier")),
             "log": list(reversed((v.get("log") or [])[-30:])),
             "actions": [{k: a.get(k) for k in ("what", "usd_max", "usd", "state", "at", "step")}
                         for a in reversed((v.get("actions") or [])[-40:])],
             "redos": v.get("redos") or {}, "max_redos_per_shot": int(get_section(db, "quality").get("max_redos_per_shot", 1)),
-            "steps": [{"key": s, "label": LABEL[s]} for s in STEPS], "providers": items, "blockers": blockers(items),
+            "steps": [{"key": s, "label": labels[s]} for s in steps], "providers": items, "blockers": blockers(items),
             "started_at": v.get("started_at"), "by": v.get("by")}
 
 

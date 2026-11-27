@@ -5,7 +5,8 @@
 // under the banner with the tail pointing down.
 //
 // Usage: node overlay.mjs spec.json
-//   spec: {width, height, hook, band, mode: "captions" | "bubbles" | "none", banner_font, emoji_font, font,
+//   spec: {width, height, hook, band, mode: "captions" | "bubbles" | "short_captions" | "none", banner_font, emoji_font, font,
+//          caption_font (short_captions only),
 //          lines: [{text}], out: folder}
 // Prints one JSON line: {banner: path | null, lines: [path, ...]}
 import fs from 'node:fs';
@@ -93,10 +94,32 @@ function bubble(text) {
   return c;
 }
 
+// Narrated shorts (narrated_short.py): a few words at a time, bold and high-contrast, in the upper middle of the frame
+// (clear of the platform's buttons at the bottom). The caption font is the banner's heavy condensed face when given.
+let capFace = 'Sub';
+if (spec.caption_font) { try { GlobalFonts.registerFromPath(spec.caption_font, 'Cap'); capFace = 'Cap'; } catch {} }
+function shortCaption(text) {
+  const c = createCanvas(W, H), ctx = c.getContext('2d');
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  let size = Math.round(Math.min(W, H) * 0.11), rows;
+  for (; size >= Math.round(Math.min(W, H) * 0.05); size -= 2) {
+    ctx.font = `800 ${size}px ${capFace}`;
+    rows = wrap(ctx, String(text).toUpperCase(), W * 0.86);
+    if (rows.length <= 2) break;
+  }
+  const lh = Math.round(size * 1.12), y0 = Math.round(H * 0.32) - ((rows.length - 1) * lh) / 2;
+  rows.forEach((r, i) => {
+    const y = y0 + i * lh;
+    ctx.lineWidth = Math.max(6, Math.round(size * 0.18)); ctx.strokeStyle = '#000'; ctx.strokeText(r, W / 2, y);
+    ctx.fillStyle = '#fff'; ctx.fillText(r, W / 2, y);
+  });
+  return c;
+}
+
 const lines = [];
-if (spec.mode === 'captions' || spec.mode === 'bubbles') {
+if (spec.mode === 'captions' || spec.mode === 'bubbles' || spec.mode === 'short_captions') {
   (spec.lines || []).forEach((ln, i) => {
-    const c = spec.mode === 'captions' ? caption(ln.text) : bubble(ln.text);
+    const c = spec.mode === 'short_captions' ? shortCaption(ln.text) : spec.mode === 'captions' ? caption(ln.text) : bubble(ln.text);
     lines.push(save(c, `line-${String(i).padStart(4, '0')}.png`));
   });
 }

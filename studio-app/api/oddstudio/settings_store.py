@@ -96,6 +96,12 @@ DEFAULTS: dict[str, dict] = {
     # acting analysis' (Settings > Guided generation): the same tier rules apply.
     # describer: who writes the character descriptions: "gemini" (default), "local" (on this server, free) or "manual"
     "cast": {"styles": DEFAULT_STYLES, "candidates": 2, "describe_max_tokens": 8000, "describer": "gemini"},
+    # Narrated shorts (narrated_short.py, the New short wizard). The narration voice is Gemini text-to-speech (tts.py):
+    # its model and price per million tokens (text in, audio out); tts_paid_tier: the owner says the Gemini key is on
+    # a paid tier (otherwise the free tier is used only when ticked for a run, with its warning). The default voice and
+    # style instruction; the transcription price per minute (OpenAI) used to show the word-timing cost first.
+    "short": {"tts_model": "gemini-2.5-flash-preview-tts", "tts_usd_in": 0.5, "tts_usd_out": 10.0, "tts_paid_tier": False,
+              "voice": "Charon", "style": "warm, calm narrator", "transcribe_usd_per_minute": 0.006},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -177,6 +183,8 @@ def put_section(db: Session, key: str, value: dict) -> dict:
     if key == "cast":
         from .cast_from_video import check_cast_settings
         check_cast_settings(db, value)
+    if key == "short":
+        check_short(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)
@@ -206,6 +214,27 @@ def check_guide(v: dict) -> None:
     free = v.get("acting_free_models", [])
     if not (isinstance(free, list) and len(free) <= 5 and all(isinstance(m, str) and name.match(m) for m in free)):
         raise ValueError("guide.acting_free_models must be a list of up to 5 model names")
+
+
+def check_short(v: dict) -> None:
+    """Settings > Narrated shorts: a plain model name, prices in range, a known voice."""
+    import re
+    from .tts import VOICES
+    if "tts_model" in v and not (isinstance(v["tts_model"], str) and re.match(r"^[A-Za-z0-9._-]{1,80}$", v["tts_model"])):
+        raise ValueError("short.tts_model must be a model name (letters, digits, dots, dashes)")
+    for k in ("tts_usd_in", "tts_usd_out"):
+        if k in v and not (isinstance(v[k], (int, float)) and not isinstance(v[k], bool) and 0 < v[k] <= 200):
+            raise ValueError(f"short.{k} must be a price per million tokens above 0 and at most 200")
+    if "transcribe_usd_per_minute" in v and not (isinstance(v["transcribe_usd_per_minute"], (int, float))
+                                                 and not isinstance(v["transcribe_usd_per_minute"], bool)
+                                                 and 0 <= v["transcribe_usd_per_minute"] <= 1):
+        raise ValueError("short.transcribe_usd_per_minute must be between 0 and 1")
+    if "tts_paid_tier" in v and not isinstance(v["tts_paid_tier"], bool):
+        raise ValueError("short.tts_paid_tier must be true or false")
+    if "voice" in v and v["voice"] not in VOICES:
+        raise ValueError(f"short.voice must be one of {', '.join(VOICES)}")
+    if "style" in v and not (isinstance(v["style"], str) and len(v["style"]) <= 200):
+        raise ValueError("short.style must be at most 200 characters")
 
 
 def check_quality(v: dict) -> None:
