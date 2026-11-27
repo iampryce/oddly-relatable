@@ -580,13 +580,17 @@ def _asset(ep_or_db, aid: int):
     return db.get(Asset, aid) if aid else None
 
 
-def head_for(db: Session, v: dict, asset_id: int | None) -> dict | None:
-    """The character's head in this still: the owner's click, else detected once and kept."""
+def head_for(db: Session, v: dict, asset_id: int | None, auto: bool = True) -> dict | None:
+    """The character's head in this still: the owner's click, else detected once and kept. detect_head looks for a
+    white round stick head, so for an episode in another style (auto=False) only the owner's click is used; until then
+    the head is {"source": "none", "click_needed": True}."""
     if not asset_id:
         return None
     heads = v.setdefault("heads", {})
-    if str(asset_id) in heads:
+    if str(asset_id) in heads and (auto or heads[str(asset_id)].get("source") == "owner"):
         return heads[str(asset_id)]
+    if not auto:
+        return {"source": "none", "click_needed": True}
     a = db.get(Asset, asset_id)
     if not a:
         return None
@@ -600,6 +604,16 @@ def head_for(db: Session, v: dict, asset_id: int | None) -> dict | None:
     heads[str(asset_id)] = ({**found, "source": "auto"} if found else {"source": "none"})
     v["_dirty"] = True
     return heads[str(asset_id)]
+
+
+def _auto_heads(db: Session, ep: Episode) -> bool:
+    from .cast_from_video import auto_heads
+    return auto_heads(db, ep.id)
+
+
+def _head_finding(db: Session, ep: Episode) -> dict:
+    from .cast_from_video import head_finding
+    return head_finding(db, ep.id)
 
 
 # ================================================================== view
@@ -668,7 +682,7 @@ def view(db: Session, ep: Episode, light: bool = False) -> dict:
             continue
         a = stills.get(r["still"])
         row["still"] = {"asset_id": r["still"], "url": storage().url(a.storage_key) if a else None,
-                        "approved": r["approved_still"], "head": head_for(db, v, r["still"])}
+                        "approved": r["approved_still"], "head": head_for(db, v, r["still"], _auto_heads(db, ep))}
         row["voice_url"] = voice_preview(db, ep, r, v)
         row["prompt"] = current_prompt(db, ep, r, st)
         row["prompt_estimate"] = PW.estimate(pcfg, PW.SYSTEM, _prompt_message(db, ep, r))
@@ -686,6 +700,7 @@ def view(db: Session, ep: Episode, light: bool = False) -> dict:
     return {"shots": out, "total": total, "availability": CS.availability(db) if not light else None,
             "busy": _active(db, ep.id).first() is not None, "job": S.job(job) if job else None,
             "reference_video": ref, "openai_key": bool(secret("openai_api_key", db)),
+            "head_finding": _head_finding(db, ep),
             "settings": {"steps": STEPS, "cfg": CFG, "sampler": SAMPLER, "scheduler": SCHEDULER, "shift": SHIFT,
                          "size": [W, H], "fps": FPS, "piece_frames": PIECE, "trim_start_frames": TRIM_START_FRAMES}}
 
@@ -1137,7 +1152,7 @@ def talking_render(ctx: Ctx) -> dict:
             voice = make_voice(ep, r, d / f"ep{ep.id}-shot{i:02d}-voice.wav", d)
             st = (v.get("shots") or {}).get(str(i)) or {}
             prompt = current_prompt(db, ep, r, st)
-            inputs[i] = {"still": still, "voice": voice, "prompt": prompt, "head": head_for(db, v, r["still"])}
+            inputs[i] = {"still": still, "voice": voice, "prompt": prompt, "head": head_for(db, v, r["still"], _auto_heads(db, ep))}
         if v.pop("_dirty", False):
             save(db, ep.id, v)
             db.commit()

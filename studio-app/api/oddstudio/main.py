@@ -111,6 +111,8 @@ from . import acting_analysis, guided, prompt_writer  # noqa: E402
 app.include_router(guided.router)
 app.include_router(acting_analysis.router)
 app.include_router(prompt_writer.router)
+from . import cast_from_video  # noqa: E402  (guided flow step 4: cast from the reference video, five style presets)
+app.include_router(cast_from_video.router)
 from . import shot_chat  # noqa: E402
 app.include_router(shot_chat.router)
 from . import assembly, autopilot, clip_qa  # noqa: E402  (guided steps 10-11 and "Make whole episode")

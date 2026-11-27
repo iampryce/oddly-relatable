@@ -16,6 +16,8 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import ShotChat from '@/components/ShotChat';
+import {headNote} from '@/lib/cast';
+import HeadClicker from '@/components/HeadClicker';
 import {clickToPicture} from '@/lib/reactionsGuide';
 import {isActive, progress, usd} from '@/lib/talkingGuide';
 import {boxStyle, checkBadge, dragBox, eyelineText, makeLabel, ovalBox, pictureBadge, repairBadge, targetLabel, TOOL_TEXT,
@@ -363,6 +365,7 @@ function CharacterCheck({v, id, act, onRepair}: {v: any; id: string; act: Act; o
   return (
     <div className="stack">
       <p className="small muted">Every approved still and seating picture should show every character listed for it. Heads are counted for free; Gemini can also look (in Episode 15 one character was merged into another in every wide shot).</p>
+      {headNote(v.head_finding) && <p className="small warn" role="note">{headNote(v.head_finding)} Until then, heads are not counted here; Gemini can still look.</p>}
       {!g.key_set && <p className="small muted">Add the Gemini key in <Link href="/settings">Settings › Credentials</Link> to ask Gemini.</p>}
       <label className="row small" style={{fontWeight: 400, color: 'inherit'}}>
         <input type="checkbox" style={{width: 'auto'}} checked={free} onChange={e => setFree(e.target.checked)} />
@@ -377,6 +380,7 @@ function CharacterCheck({v, id, act, onRepair}: {v: any; id: string; act: Act; o
               <div className="small">Should show: {c.names.join(', ')}</div>
               {c.gemini && <div className="small muted">Gemini ({c.gemini.model}{c.gemini.free_tier ? ', free tier' : ''}): sees {c.gemini.visible.join(', ') || 'nobody listed'}{c.gemini.notes ? `. ${c.gemini.notes}` : ''}</div>}
               {(c.flags || []).map((f: string, i: number) => <div key={i} className="small bad" role="alert">⚠ {f}</div>)}
+              {headNote(v.head_finding) && c.asset_id && <HeadClicker episodeId={id} assetId={c.asset_id} url={c.url} onSaved={() => act.run(`h${c.target}`, async () => {})} />}
               <div className="row">
                 <button className="btn sm" disabled={!!act.busy || !g.key_set} onClick={() => ask(c)}>Ask Gemini · up to ${g.estimate?.usd_max?.toFixed(4)}</button>
                 {(c.flags || []).length > 0 && <button className="btn sm primary" disabled={!!act.busy || !v.image_cost} onClick={() => remake(c)}>

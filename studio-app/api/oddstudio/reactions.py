@@ -625,19 +625,30 @@ def _load_master(db: Session, aid: int, folder: Path):
 
 
 def master_info(db: Session, v: dict, aid: int) -> dict:
-    """{size: [w, h], heads: [...]} of a master, read once and kept."""
+    """{size: [w, h], heads: [...]} of a master, read once and kept. find_heads looks for white round stick heads, so
+    for an episode in another style the heads are the ones the owner clicked (cast_from_video.owner_heads), or none
+    (the owner then sets the crop by hand)."""
+    from . import cast_from_video as CV
+    a = db.get(Asset, aid)
+    eid = a.episode_id if a is not None else None
+    auto = CV.auto_heads(db, eid)
     cache = v.setdefault("masters_info", {})
-    if str(aid) in cache:
-        return cache[str(aid)]
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        try:
-            im = _load_master(db, aid, Path(d))
-            info = {"size": list(im.size), "heads": find_heads(im)[:12]}
-        except Exception:   # noqa: BLE001 -- unreadable: the owner sets the crop by hand
-            info = {"size": [W, H], "heads": []}
-    cache[str(aid)] = info
-    v["_dirty"] = True
+    if str(aid) in cache and (auto or cache[str(aid)].get("heads_by") == "owner"):
+        info = cache[str(aid)]
+    else:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            try:
+                im = _load_master(db, aid, Path(d))
+                info = {"size": list(im.size), "heads": find_heads(im)[:12] if auto else []}
+            except Exception:   # noqa: BLE001 -- unreadable: the owner sets the crop by hand
+                info = {"size": [W, H], "heads": []}
+        if not auto:
+            info["heads_by"] = "owner"
+        cache[str(aid)] = info
+        v["_dirty"] = True
+    if not auto:
+        info = {**info, "heads": (CV.owner_heads(db, eid, aid) or [])[:12] if eid else []}
     return info
 
 
@@ -909,8 +920,9 @@ def view(db: Session, ep: Episode, light: bool = False) -> dict:
         save(db, ep.id, v)
         db.commit()
     job = db.query(Job).filter(Job.kind.in_((JOB_POSES, JOB_ANIMATE)), Job.episode_id == ep.id).order_by(Job.id.desc()).first()
+    from .cast_from_video import head_finding
     out = {"shots": shots, "masters": masters, "busy": _active(db, ep.id).first() is not None, "job": S.job(job) if job else None,
-           "openai_key": bool(secret("openai_api_key", db))}
+           "openai_key": bool(secret("openai_api_key", db)), "head_finding": head_finding(db, ep.id)}
     if not light:
         out["availability"] = CS.availability(db)
         out["prompt_estimate"] = PW.estimate(PW.config(db), PW.SYSTEM, "x" * 1600)

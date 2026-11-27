@@ -122,7 +122,7 @@ running, needs your approval, done), and a Help panel that walks through one ins
 | 1 | Upload: script, voice recording, reference video | yes (the reference video is kept under `private/`, never in the asset list) |
 | 2 | Acting analysis (Gemini) | yes: job `acting_analysis` |
 | 3 | Prompt writing (OpenAI) | yes: every generation prompt is written first, then edited and approved by the owner |
-| 4 | Character masters | links to the stick pipeline (Characters page) |
+| 4 | Cast (characters from the video, five styles, masters) | yes: jobs `cast_describe`, `cast_images` (see "Cast from video") |
 | 5 | Sets and seating masters | links to the storyboard stills; each wall is drawn straight-on (the image model cannot rotate a room) |
 | 6-11 | Close-ups, faces, movement, talking shots, quality check, assembly | help text only, "Not in the dashboard yet" |
 
@@ -145,6 +145,39 @@ running, needs your approval, done), and a Help panel that walks through one ins
   about 300 tokens per second of video; OpenAI $5 in / $30 out, check the current price list).
 - Keys come only from the credential store (`gemini_api_key`, `openai_api_key`) and are never logged or returned.
 - Tests: `api/tests/test_guided_generation.py` (HTTP mocked, fake credentials), `web/lib/guide.test.ts`.
+
+## Cast from video (guided step 4)
+
+Code: `api/oddstudio/cast_from_video.py`, `cast_styles.py`; web `components/GuideCast.tsx`, `CastLibrary.tsx`,
+`HeadClicker.tsx`, `lib/cast.ts`. Routes under `/api/episodes/<id>/cast-video` (the older `/cast` is the pose-sheet
+list), `/api/cast/styles`, `/api/cast/library`. Migration `0016` adds the nullable `episodes.style`.
+
+- **Descriptions (paid, Gemini):** one request over the whole reference video at fps 1 returns WORDS only: per
+  character name, role, approximate age, build, hair (style, colour), clothing (garment, colour), ONE signature
+  accessory, personality (taken from the acting analysis' traits when there are some) and "must never" notes. Names
+  are mapped to the script's cast; others can be added as episode-only characters. Same tier rules as the acting
+  analysis. Every field is editable (free). Stored as `cast:<episode>`.
+- **Five styles** (Settings section `cast`, each a text block + up to 4 style reference images): True stick man (the
+  house block from Settings > Studio style), Flat 2D cartoon, 3D animated, Anime, Claymation. No brand names. Each
+  episode picks ONE (`episodes.style`); nothing picks it for the owner.
+- **Previews (paid, $0.04 per style):** one character (default the main speaker) in each ticked style, side by side.
+  Previews are not masters and never choose the style; choosing a style keeps that style's preview as a candidate.
+- **Masters:** the prompt is written by GPT from the description + style block (paid, confirm first) or the labelled
+  template. Nano Banana 2.1 on WaveSpeed draws 1-4 candidates ($0.04 each): the edit model with the style's own
+  reference images, or its text-to-image endpoint when the style has none (`t2i_model`, check the model id on WaveSpeed
+  before the first real run). The owner approves one and chooses "Save to my cast library" or "Use in this episode
+  only". An approved master is locked: new candidates or approving another need `new_version` (409 otherwise).
+- **The reference video's pictures never reach an image model:** image requests carry only text and the studio's own
+  style references; anything stored under `private/` is refused as a reference (`safe_reference_files`).
+- **Cast library** (Characters page): saved characters with their style and locked master; reuse in another episode
+  is free (no picture is drawn); rename; remove (only the library entry goes, masters and episodes keep working).
+- **Downstream:** `cast_from_video.auto_heads()` — automatic head finding (white round stick heads) runs only for the
+  stick-man style; for other styles reactions, sets and talking shots use the heads the owner clicks once
+  (`/api/episodes/<id>/owner-heads/<asset>`).
+- **Chat** under each character (`master:<id>` thread, opened with the episode): `edit_description` (free) and
+  `new_candidates` (paid). **Autopilot:** describe -> waits for the owner's style -> GPT prompt (if key) -> candidates
+  -> waits for the master approvals.
+- Tests: `api/tests/test_cast_from_video.py`, `web/lib/cast.test.ts`.
 
 ## Chat under each shot
 

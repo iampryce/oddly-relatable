@@ -2,11 +2,13 @@
 it (confirm_usd = that budget); the autopilot then runs the guided steps in order by calling each step's EXISTING
 function (the same checks, estimates and 409s as the step's own buttons; no logic is duplicated here):
 
-  acting analysis -> prompts (talking shots and reaction faces, GPT) -> character masters -> walls and seating
+  acting analysis -> prompts (talking shots and reaction faces, GPT) -> cast (characters described from the reference
+  video, master prompts, master candidates in the episode's style; cast_from_video.py) -> walls and seating
   pictures -> shot stills -> talking shots -> reactions (poses, animation) -> quality check (+ automatic redos)
   -> clip approvals -> assembly -> the final cut
 
-Owner gates (it STOPS and WAITS, and never approves anything itself, memory "no-self-approvals"): character masters,
+Owner gates (it STOPS and WAITS, and never approves anything itself, memory "no-self-approvals"): the episode's style
+(never chosen for the owner), character masters,
 walls and seating pictures, the seating picture each side's close-ups are cut from, crops and poses, shot stills,
 every talking / reaction result, and the final cut. While it waits, the list says what to approve and where.
 
@@ -49,12 +51,12 @@ from .settings_store import get_section
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 STEPS = ("acting", "prompts", "masters", "sets", "stills", "talking", "reactions", "quality", "approvals", "assembly")
-LABEL = {"acting": "Acting analysis", "prompts": "Prompts", "masters": "Character masters",
+LABEL = {"acting": "Acting analysis", "prompts": "Prompts", "masters": "Cast (characters and their masters)",
          "sets": "Walls and seating pictures", "stills": "Shot stills", "talking": "Talking shots",
          "reactions": "Reaction shots", "quality": "Quality check", "approvals": "Your review of the clips",
          "assembly": "Assembly and the final cut"}
 GPU_KINDS = ("talk_render", "poses", "animate", "redo")
-SYNC_PAID = ("talk_prompt", "pose_prompt")        # paid calls made inside the request (no job to report the cost)
+SYNC_PAID = ("talk_prompt", "pose_prompt", "cast_prompt")        # paid calls made inside the request (no job to report the cost)
 LIVE = ("running", "waiting")
 ACTIVE = ("queued", "running")
 MAX_BUDGET = 500.0
@@ -219,10 +221,34 @@ def plan_prompts(db: Session, ep: Episode, v: dict) -> dict:
 
 
 def plan_masters(db: Session, ep: Episode, v: dict) -> dict:
+    """The cast step: (1) the characters described from the reference video (Gemini, words only), (2) the episode's
+    style, which only the owner chooses, (3) per character without an approved master: its master prompt (GPT, when
+    the key and credit are there; otherwise the template) and its candidates in that style, then (4) the owner's
+    approval. An episode without descriptions and without a chosen style keeps the earlier stick-man path."""
+    from . import cast_from_video as CV
     from . import guided
     from . import stick_pipeline as SP
     out = _plan()
-    for c in guided.cast(db, ep):
+    cast = guided.cast(db, ep)
+    missing = [c for c in cast if SP.approved_master(db, c.id) is None]
+    if not missing:
+        return out
+    cv = CV.stored(db, ep.id)
+    if not cv.get("characters"):
+        if CV._describe_active(db, ep.id):
+            out["busy"] = "the characters are being described from the reference video"
+            return out
+        info = CV.describe_info(db, ep, cv)
+        if info["reference_video"] and info["key_set"] and info["estimate"]:
+            out["actions"].append(_act("cast_describe", "Describe the characters from the reference video",
+                                       info["estimate"]["usd_max"]))
+            return out
+    if ep.style:
+        return _plan_cast(db, ep, v, cv, missing, out)
+    if cv.get("characters"):
+        out["waiting"].append(_wait("Choose the episode's style (you can make a preview of each style first)", "Guided steps, step 4: Cast"))
+        return out
+    for c in missing:
         if SP.approved_master(db, c.id) is not None:
             continue
         review = db.query(CharacterAsset).filter_by(character_id=c.id, kind=SP.MASTER_KIND, status="review").first()
@@ -241,6 +267,36 @@ def plan_masters(db: Session, ep: Episode, v: dict) -> dict:
                 return out
             n = int(get_section(db, "stick").get("master_candidates") or 2)
             out["actions"].append(_act("master", f"Master candidates for {c.name}", _image_usd(db, n), character=c.id))
+    return out
+
+
+def _plan_cast(db: Session, ep: Episode, v: dict, cv: dict, missing: list, out: dict) -> dict:
+    from . import cast_from_video as CV
+    from . import prompt_writer as PW
+    gpt = bool(secret("openai_api_key", db)) and not v.get("openai_no_credit")
+    n = int(get_section(db, "cast").get("candidates") or 2)
+    for c in missing:
+        review = db.query(CharacterAsset).filter_by(character_id=c.id, kind="master", status="review").first()
+        if CV._busy(db, c.id):
+            out["busy"] = f"{c.name}'s pictures are being drawn"
+        elif review is not None:
+            out["waiting"].append(_wait(f"Approve a master for {c.name}", "Guided steps, step 4: Cast"))
+        elif c.locked:
+            out["waiting"].append(_wait(f"{c.name} uses repository artwork: approve its master", "Characters page"))
+        elif CV._desc_for(cv, c.id) is None and not (c.visual_description or "").strip():
+            out["waiting"].append(_wait(f"Link or write {c.name}'s description", "Guided steps, step 4: Cast"))
+        else:
+            ok, why = pictures_ready(db)
+            if not ok:
+                out["blocked"] = why
+                return out
+            p = (cv.get("prompts") or {}).get(str(c.id)) or {}
+            k = f"cast:{c.id}:{ep.style}"
+            if gpt and p.get("style") != ep.style and k not in (v.get("prompted") or []):
+                usd = PW.estimate(PW.config(db), CV.PROMPT_SYSTEM, CV.prompt_message(db, cv, c, ep.style))["usd_max"]
+                out["actions"].append(_act("cast_prompt", f"Master prompt for {c.name} (GPT)", usd, character=c.id))
+            out["actions"].append(_act("cast_candidates", f"Master candidates for {c.name}", _image_usd(db, n),
+                                       character=c.id, count=n))
     return out
 
 
@@ -501,6 +557,26 @@ def run_master(db, ep, a, user, v):
     return _job(SP.generate_master(a["args"]["character"], SP.PaidIn(confirm_usd=a["usd"]), db, user))
 
 
+def run_cast_describe(db, ep, a, user, v):
+    from . import cast_from_video as CV
+    return _job(CV.describe(ep.id, CV.DescribeIn(confirm_usd=a["usd"], use_free_tier=bool(v.get("use_free_tier"))), db, user))
+
+
+def run_cast_prompt(db, ep, a, user, v):
+    from . import cast_from_video as CV
+    cid = a["args"]["character"]
+    v.setdefault("prompted", []).append(f"cast:{cid}:{ep.style}")
+    CV.write_prompt(ep.id, cid, CV.PromptWriteIn(confirm_usd=a["usd"]), db, user)
+    p = (CV.stored(db, ep.id).get("prompts") or {}).get(str(cid)) or {}
+    return {"usd": float(p.get("usd") or 0.0)}
+
+
+def run_cast_candidates(db, ep, a, user, v):
+    from . import cast_from_video as CV
+    return _job(CV.make_candidates(db, ep, a["args"]["character"],
+                                   CV.CandidatesIn(count=a["args"]["count"], confirm_usd=a["usd"]), user))
+
+
 def run_wall(db, ep, a, user, v):
     from . import room_sets as RS
     return _job(RS.make_wall(ep.id, a["args"]["wall"], RS.MakeIn(confirm_usd=a["usd"]), db, user))
@@ -556,6 +632,7 @@ def run_assemble(db, ep, a, user, v):
 
 
 RUN = {"acting": run_acting, "talk_prompt": run_talk_prompt, "pose_prompt": run_pose_prompt, "master": run_master,
+       "cast_describe": run_cast_describe, "cast_prompt": run_cast_prompt, "cast_candidates": run_cast_candidates,
        "wall": run_wall, "seating": run_seating, "still": run_still, "talk_render": run_talk_render, "poses": run_poses,
        "animate": run_animate, "qa": run_qa, "redo": run_redo, "assemble": run_assemble}
 

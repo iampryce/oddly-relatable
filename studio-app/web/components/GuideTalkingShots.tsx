@@ -11,6 +11,7 @@ import {api} from '@/lib/api';
 import {useAction, useApi} from '@/lib/hooks';
 import {ErrorBox} from '@/components/ui';
 import ShotThreadSlot from '@/components/ShotThreadSlot';
+import {headNote} from '@/lib/cast';
 import {clickToStill, guideBadge, isActive, piecesText, progress, renderCost, usd} from '@/lib/talkingGuide';
 
 type Act = ReturnType<typeof useAction>;
@@ -39,6 +40,7 @@ export default function GuideTalkingShots({id, onChange}: {id: string; onChange:
   return (
     <div className="stack">
       <ErrorBox error={act.error} />
+      {headNote(t.head_finding) && <p className="small warn" role="note">{headNote(t.head_finding)} Click the speaker&rsquo;s head on each still below.</p>}
       <div className="small" style={{maxWidth: 760}}>
         <p style={{margin: '0 0 6px'}}>Each talking shot is made by Wan 2.2 Speech-to-Video on a rented GPU. It starts from the
           approved still and moves the mouth to a voice-only copy of your line: everything except the speaker&rsquo;s own

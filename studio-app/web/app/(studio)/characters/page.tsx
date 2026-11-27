@@ -5,6 +5,7 @@ import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
 import HeadAngles from '@/components/HeadAngles';
 import StickMaster from '@/components/StickMaster';
+import CastLibrary from '@/components/CastLibrary';
 import {Empty, ErrorBox} from '@/components/ui';
 import {groupCharacters, imageCost, isCandidate, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
@@ -284,6 +285,7 @@ export default function Characters() {
           {!creating && <button className="btn primary" onClick={() => setCreating(true)}>New character</button>}</div></div>
       {checkNote && <p className="small muted">{checkNote}</p>}
       <ErrorBox error={error || act.error} />
+      <div style={{marginBottom: 16}}><CastLibrary /></div>
       {creating && <div style={{marginBottom: 16}}><CharacterForm initial={{}} onDone={() => { setCreating(false); reload(); }} /></div>}
       <div className="row" style={{gap: 8, marginBottom: 12, flexWrap: 'wrap'}}>
         <input type="search" placeholder="Search name or key" aria-label="Search characters" value={search} onChange={e => setSearch(e.target.value)} style={{flex: 1, minWidth: 180}} />

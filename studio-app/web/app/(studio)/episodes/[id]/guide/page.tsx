@@ -16,6 +16,7 @@ import GuideTalkingShots from '@/components/GuideTalkingShots';
 import Autopilot from '@/components/Autopilot';
 import GuideAssembly from '@/components/GuideAssembly';
 import GuideQuality from '@/components/GuideQuality';
+import GuideCast from '@/components/GuideCast';
 import {costText, currentStep, KIND_LABEL, moveHelp, STATUS_TEXT, STATUS_TONE, statusOf, STEPS, type GuideStep} from '@/lib/guide';
 
 type Act = ReturnType<typeof useAction>;
@@ -95,7 +96,7 @@ function StepCard({n, s, g, id, act, reload, current, onHelp}: {n: number; s: Gu
         {s.key === 'upload' && <UploadStep g={g} id={id} act={act} />}
         {s.key === 'acting' && <ActingStep id={id} onChange={reload} />}
         {s.key === 'prompts' && <PromptStep g={g} id={id} onChange={reload} />}
-        {s.key === 'masters' && <MastersStep info={info} />}
+        {s.key === 'masters' && <GuideCast id={id} onChange={reload} />}
         {s.key === 'sets' && <><GuideSets id={id} onChange={reload} />
           <p className="small"><Link className="btn sm" href={`/episodes/${id}`}>Open the storyboard</Link>
           {' '}for the shot stills made from these pictures. Each still shows its price on its own button.</p></>}
@@ -253,14 +254,3 @@ function PromptItem({p, id, act, chars}: {p: any; id: string; act: Act; chars: a
     </div>);
 }
 
-function MastersStep({info}: {info: any}) {
-  const chars: any[] = info.characters || [];
-  return (
-    <div className="stack">
-      {chars.length > 0 && <div className="row small">{chars.map(c => (
-        <span key={c.id} className={`badge ${c.master ? 'good' : c.to_review ? 'warn' : ''}`}>
-          {c.name}: {c.master ? 'master approved' : c.to_review ? 'candidates to check' : 'no master'}</span>))}</div>}
-      <p className="small"><Link className="btn sm primary" href="/characters">Open Characters</Link>{' '}Each character card has a
-        {' '}&ldquo;Generate master&rdquo; button with its price.</p>
-    </div>);
-}
