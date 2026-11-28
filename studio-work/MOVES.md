@@ -16,3 +16,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/stick-cast/build | studio-work/_archive/stick-cast-experiments/build | experiment |
 | 2026-11-28 | studio-work/stick-cast/build-final | studio-work/_archive/stick-cast-experiments/build-final | experiment |
 | 2026-11-28 | studio-work/stick-cast/talk-run | studio-work/_archive/stick-cast-experiments/talk-run | experiment |
+| 2026-11-28 | studio-work/stick-cast/pose-test | studio-work/_archive/stick-cast-experiments/pose-test | experiment |
