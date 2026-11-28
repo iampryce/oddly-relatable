@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="2000"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c = document.getElementById('c'), g = c.getContext('2d');
+g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+const img = (src) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = src; });
+const label = (t, x, y, sz = 22) => { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#333'; g.font = `600 ${sz}px Helvetica, Arial`; g.fillText(t, x, y); g.restore(); };
+// draw a character: design box (bx0,by0,bw,bh) -> screen rect (x,y,w,h)
+const cell = (x, y, w, h, who, opts, box = [0, 0, 600, 1000]) => {
+  g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+  const s = Math.min(w / box[2], h / box[3]);
+  g.setTransform(s, 0, 0, s, x + (w - box[2] * s) / 2 - box[0] * s, y + (h - box[3] * s) / 2 - box[1] * s);
+  const p = new T.Pen(g); T.stickFront(p, who, opts); g.restore();
+  g.strokeStyle = '#ddd'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, w - 1, h - 1);
+};
+const [mm, sm] = await Promise.all([img('ref/mortimer-master.png'), img('ref/sidney-master.png')]);
+// row 1: masters vs puppets
+const H1 = 640, w1 = mm.width * H1 / mm.height;
+g.drawImage(mm, 10, 40, w1, H1); label('Mortimer approved master', 20, 30);
+cell(20 + w1, 40, 440, H1, 'mortimer', { expr: 'neutral', facing: 0.75, look: [0.45, -0.25], exprB: 'smirk', exprT: 0.35 }); label('code puppet', 30 + w1, 30);
+const x2 = 40 + w1 + 440;
+g.drawImage(sm, x2, 40, w1, H1); label('Sidney approved master', x2 + 10, 30);
+cell(x2 + w1 + 10, 40, 440, H1, 'sidney', { expr: 'smug', facing: 0.75, look: [0.75, 0.15] }); label('code puppet', x2 + w1 + 20, 30);
+// head rows: expressions
+const HB = [70, 0, 460, 480];
+const rows = [
+  ['mortimer', [['neutral / reading', { expr: 'reading', look: [0, 0.75], pitch: 0.5 }], ['stern over glasses', { expr: 'stern', look: [0, -0.8], pitch: 0.8 }], ['knowing smirk', { expr: 'smirk', look: [0.85, -0.1], facing: 0.35 }],
+    ['skeptical', { expr: 'skeptical', look: [-0.6, 0] }], ['shocked', { expr: 'shocked', look: [0, 0] }], ['indignant glare', { expr: 'indignant', look: [-0.85, 0], facing: -0.25 }], ['neutral', { expr: 'neutral', look: [0, 0] }]]],
+  ['sidney', [['neutral / reading', { expr: 'reading', look: [0, 0.75], pitch: 0.5 }], ['stern', { expr: 'stern', look: [0, -0.5], pitch: 0.5 }], ['smirk / smug', { expr: 'smug', look: [0.8, 0], facing: 0.35 }],
+    ['skeptical', { expr: 'skeptical', look: [-0.7, 0], facing: -0.2 }], ['shocked', { expr: 'shocked', look: [0, 0] }], ['indignant glare', { expr: 'indignant', look: [-0.85, 0], facing: -0.25 }], ['neutral', { expr: 'neutral', look: [0, 0] }]]],
+];
+let y = 40 + H1 + 40;
+for (const [who, list] of rows) {
+  list.forEach(([t, o], i) => { cell(10 + i * 340, y, 330, 330, who, { seated: false, ...o }, HB); label(t, 16 + i * 340, y - 6, 19); });
+  y += 370;
+}
+// mouths + gaze
+const mouthL = ['closed', 'small', 'mid', 'round', 'wide'];
+const gaze = [['look left', [-0.9, 0]], ['look right', [0.9, 0]], ['look down', [0, 0.9]], ['at camera', [0, 0]], ['blink', [0, 0], 1]];
+for (const who of ['mortimer', 'sidney']) {
+  mouthL.forEach((m, i) => { cell(10 + i * 236, y, 228, 228, who, { expr: 'neutral', mouth: m }, HB); label('mouth: ' + m, 16 + i * 236, y - 6, 17); });
+  gaze.forEach(([t, l, bl], i) => { cell(10 + (i + 5) * 236, y, 228, 228, who, { expr: 'neutral', look: l, blink: bl || 0 }, HB); label(t, 16 + (i + 5) * 236, y - 6, 17); });
+  y += 262;
+}
+cell(1880, 40, 250, H1, 'mortimer', { seated: true, pose: 'read', expr: 'reading', look: [0, 0.8], pitch: 0.4 }); label('reading pose', 1890, 30, 18);
+cell(2140, 40, 250, H1, 'sidney', { seated: true, pose: 'recoil', expr: 'shocked', headDY: -10, headDX: -6 }); label('seated recoil', 2150, 30, 18);
+window.ready = true;
+</script></body></html>

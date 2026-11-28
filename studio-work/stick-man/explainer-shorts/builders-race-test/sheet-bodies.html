@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1500"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const BOX=[0,-70,600,1090];
+const cell=(x,y,w,h,who,o,box=BOX)=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);const p=new T.Pen(g);T.stickFront(p,who,o);g.restore();g.strokeStyle='#ddd';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const opts=[['A','current: slim, tall'],['B','chunky'],['C','round belly'],['D','lanky'],['E','big head, small body'],['F','sturdy, bold limbs']];
+opts.forEach(([k,t],i)=>{const x=10+i*396,w='body'+k;label('Body '+k+': '+t,x+4,30,20);
+ cell(x,44,386,640,w,{pose:'hang',expr:'neutral'});
+ cell(x,696,190,330,w,{pose:'recoil',expr:'shocked'});cell(x+196,696,190,330,w,{pose:'cross',expr:'smirk'});
+ cell(x,1032,190,330,w,{seated:true,pose:'lap',expr:'neutral'});cell(x+196,1032,190,330,w,{pose:'hang',expr:'smug',facing:0.75,look:[0.5,0]});});
+window.ready=true;
+</script></body></html>

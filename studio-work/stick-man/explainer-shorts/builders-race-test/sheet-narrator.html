@@ -1,0 +1,28 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1500"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c = document.getElementById('c'), g = c.getContext('2d');
+g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+const label = (t, x, y, sz = 20) => { g.save(); g.setTransform(1,0,0,1,0,0); g.fillStyle = '#333'; g.font = `600 ${sz}px Helvetica, Arial`; g.fillText(t, x, y); g.restore(); };
+const cell = (x, y, w, h, opts, box = [0,0,600,1000]) => {
+  g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip();
+  const s = Math.min(w / box[2], h / box[3]);
+  g.setTransform(s,0,0,s, x + (w - box[2]*s)/2 - box[0]*s, y + (h - box[3]*s)/2 - box[1]*s);
+  const p = new T.Pen(g); T.stickFront(p, 'narrator', opts); g.restore();
+  g.strokeStyle = '#ddd'; g.strokeRect(x + .5, y + .5, w - 1, h - 1);
+};
+label('NARRATOR (draft for approval): body poses', 10, 24, 24);
+const poses = [['hang',{pose:'hang',expr:'neutral'}],['cross',{pose:'cross',expr:'smirk'}],['recoil (shocked)',{pose:'recoil',expr:'shocked'}],['reading',{pose:'read',expr:'reading',look:[0,0.8],seated:true}],['seated',{pose:'lap',expr:'neutral',seated:true}],['3/4 turn',{pose:'hang',expr:'smug',facing:0.75,look:[0.5,0]}]];
+poses.forEach(([t,o],i)=>{ cell(10+i*396, 40, 386, 640, o); label(t, 16+i*396, 700, 18); });
+const HB=[70,0,460,480];
+label('expressions', 10, 740, 22);
+const ex=['neutral','reading','stern','smirk','smug','skeptical','shocked','indignant'];
+ex.forEach((e,i)=>{ cell(10+i*296, 756, 288, 288, {expr:e}, HB); label(e, 16+i*296, 1060, 17); });
+label('mouths and gaze', 10, 1100, 22);
+const m=['closed','small','mid','round','wide'];
+m.forEach((k,i)=>{ cell(10+i*236, 1116, 228, 228, {expr:'neutral',mouth:k}, HB); label(k, 16+i*236, 1360, 16); });
+[['look left',{look:[-0.9,0]}],['look right',{look:[0.9,0]}],['look down',{look:[0,0.9]}],['blink',{blink:1}]].forEach(([t,o],i)=>{ cell(10+(i+5)*236, 1116, 228, 228, {expr:'neutral',...o}, HB); label(t, 16+(i+5)*236, 1360, 16); });
+window.ready = true;
+</script></body></html>

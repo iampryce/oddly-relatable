@@ -1,0 +1,109 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1500"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as THREE from './lib/three.module.js';
+import * as T from './toon.js';
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias: true, preserveDrawingBuffer: true});
+renderer.setSize(2400, 1500, false); renderer.setScissorTest(true); renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// ---- look: 3-step toon shading + inverted-hull ink ----
+const grad = new THREE.DataTexture(new Uint8Array([110, 190, 255]), 3, 1, THREE.RedFormat); grad.minFilter = grad.magFilter = THREE.NearestFilter; grad.needsUpdate = true;
+const toon = (color) => new THREE.MeshToonMaterial({color, gradientMap: grad});
+const black = () => new THREE.MeshToonMaterial({color: 0x151515, gradientMap: grad});
+const inkMat = (w) => new THREE.ShaderMaterial({side: THREE.BackSide, uniforms: {w: {value: w}},
+  vertexShader: 'uniform float w; void main(){ gl_Position = projectionMatrix*modelViewMatrix*vec4(position + normal*w,1.0); }',
+  fragmentShader: 'void main(){ gl_FragColor = vec4(0.07,0.07,0.07,1.0); }'});
+const part = (geo, mat, ink = 0.012) => { const g = new THREE.Group(); g.add(new THREE.Mesh(geo, mat)); if (ink) g.add(new THREE.Mesh(geo, inkMat(ink))); return g; };
+
+// ---- face: the kit's own 2D face drawing, painted on a curved patch of the head sphere ----
+const faceTex = (expr, o = {}) => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 1024; const g = cv.getContext('2d');
+  const R = 165, s = 1024 / (R * 2 * 1.22);
+  g.setTransform(s, 0, 0, s, 512 - 300 * s, 512 - 300 * s);
+  T.stickHead(new T.Pen(g), {browStyle: 'dark'}, 300, 300, R, {E: typeof expr === 'string' ? T.EXPR[expr] : expr, faceOnly: true, ...o});
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+};
+
+// ---- Sam, in 3D ----
+const HR = 0.30, LIMB = 0.03;
+const limb = (len, r) => { const g = new THREE.Group(); const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 6, 12), black()); m.position.y = -len / 2; g.add(m); return g; };
+const makeSam = (expr = 'neutral', fo = {}) => {
+  const root = new THREE.Group(), J = {};
+  const hipY = 0.86, torsoH = 0.40, torsoR = 0.125, topY = hipY + torsoH + 0.02;
+  const torso = part(new THREE.CapsuleGeometry(torsoR, torsoH, 8, 18), toon(0xfdfdfd), 0.013); torso.position.y = hipY + torsoH / 2 + torsoR * 0.55; torso.scale.z = 0.8; root.add(torso);
+  // tie: knot + blade stuck to the torso front
+  const knot = part(new THREE.SphereGeometry(0.03, 14, 10), toon(0xc23b3b), 0.006); knot.position.set(0, topY + 0.09, torsoR * 0.8 - 0.005); root.add(knot);
+  const blade = part(new THREE.ConeGeometry(0.036, 0.3, 4), toon(0xc23b3b), 0.006); blade.rotation.x = Math.PI; blade.scale.z = 0.25; blade.position.set(0, topY - 0.07, torsoR * 0.8 + 0.005); root.add(blade);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.1, 10), black()); neck.position.y = topY + 0.26; root.add(neck);
+  const head = new THREE.Group(); head.position.y = topY + 0.30 + HR; root.add(head); J.head = head;
+  head.add(part(new THREE.SphereGeometry(HR, 56, 40), toon(0xffffff), 0.012));
+  const patch = new THREE.Mesh(new THREE.SphereGeometry(HR * 1.004, 48, 40, Math.PI / 2 - 1.05, 2.1, Math.PI / 2 - 1.05, 2.1), new THREE.MeshBasicMaterial({map: faceTex(expr, fo), transparent: true, polygonOffset: true, polygonOffsetFactor: -2}));
+  head.add(patch);
+  // hair: a cap over the top of the head, side-swept fringe above the brows
+  const hair = part(new THREE.SphereGeometry(HR * 1.045, 48, 24, 0, Math.PI * 2, 0, 0.95), toon(0x5a3b26), 0.011); hair.position.y = HR * 0.06; hair.rotation.x = -0.12; head.add(hair);
+  const fringe = part(new THREE.SphereGeometry(HR * 0.34, 20, 14), toon(0x5a3b26), 0.008); fringe.scale.set(1.9, 0.55, 0.9); fringe.position.set(HR * 0.28, HR * 0.66, HR * 0.78); fringe.rotation.z = -0.35; head.add(fringe);
+  // arms: shoulder just outside the torso, upper arm, elbow, forearm, mitten hand
+  const arm = (sd) => {
+    const sh = new THREE.Group(); sh.position.set(sd * (torsoR + 0.018), topY + 0.06, 0); root.add(sh);
+    sh.add(limb(0.27, LIMB));
+    const el = new THREE.Group(); el.position.y = -0.29; sh.add(el); el.add(limb(0.25, LIMB));
+    const hand = new THREE.Group(); hand.position.y = -0.27; el.add(hand);
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.058, 20, 16), black()); palm.scale.set(0.95, 1.25, 0.8); palm.position.y = -0.05; hand.add(palm);
+    const th = new THREE.Mesh(new THREE.SphereGeometry(0.026, 12, 10), black()); th.position.set(-sd * 0.045, -0.025, 0.012); hand.add(th);
+    return {sh, el};
+  };
+  J.armL = arm(-1); J.armR = arm(1);
+  const leg = (sd) => {
+    const hp = new THREE.Group(); hp.position.set(sd * 0.065, hipY + 0.02, 0); root.add(hp); hp.add(limb(0.40, LIMB));
+    const kn = new THREE.Group(); kn.position.y = -0.42; hp.add(kn); kn.add(limb(0.40, LIMB));
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 14), black()); foot.scale.set(0.9, 0.5, 1.8); foot.position.set(0, -0.41, 0.06); kn.add(foot);
+    return {hp, kn};
+  };
+  J.legL = leg(-1); J.legR = leg(1);
+  root.userData.J = J; return root;
+};
+const pose = (r, P = {}) => {
+  const J = r.userData.J;
+  J.armL.sh.rotation.z = P.aL ?? 0.14; J.armR.sh.rotation.z = P.aR ?? -0.14; J.armL.el.rotation.z = P.eL ?? 0.1; J.armR.el.rotation.z = P.eR ?? -0.1;
+  J.armL.sh.rotation.x = P.xL ?? 0; J.armR.sh.rotation.x = P.xR ?? 0; J.armL.el.rotation.x = P.exL ?? 0; J.armR.el.rotation.x = P.exR ?? 0;
+  J.legL.hp.rotation.z = P.lL ?? 0.04; J.legR.hp.rotation.z = P.lR ?? -0.04; J.legL.hp.rotation.x = P.fL ?? 0; J.legR.hp.rotation.x = P.fR ?? 0;
+  J.legL.kn.rotation.x = P.kL ?? 0; J.legR.kn.rotation.x = P.kR ?? 0;
+  r.rotation.y = P.yaw ?? 0; J.head.rotation.y = P.hy ?? 0; J.head.rotation.x = P.hx ?? 0; J.head.rotation.z = P.hz ?? 0; r.position.y = P.y ?? 0;
+};
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0xaab0c4, 2.0)); const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(2.5, 4, 3); scene.add(sun);
+const floorMat = new THREE.MeshBasicMaterial({color: 0xdadde6});
+const floor = new THREE.Mesh(new THREE.CircleGeometry(1.0, 48), floorMat); floor.rotation.x = -Math.PI / 2; floor.position.y = -0.004;
+const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+const draw = (x, y, w, h, bg, build, camPos, look, fov = 30) => {
+  renderer.setViewport(x, y, w, h); renderer.setScissor(x, y, w, h); renderer.setClearColor(bg);
+  cam.fov = fov; cam.aspect = w / h; cam.position.set(...camPos); cam.lookAt(...look); cam.updateProjectionMatrix();
+  const grp = build(); scene.add(grp); renderer.render(scene, cam); scene.remove(grp);
+};
+const sam = (expr, P) => () => { const g = new THREE.Group(); g.add(floor.clone()); const r = makeSam(expr); pose(r, P); g.add(r); return g; };
+// row 1: turnaround (5 views), row 2: poses
+const W = 480, H = 620, bg = 0xeef0f4;
+const views = [{yaw: 0}, {yaw: 0.7, hy: -0.2}, {yaw: 1.5708}, {yaw: 2.5}, {yaw: 3.1416}];
+views.forEach((P, i) => draw(i * W, 1500 - H, W, H, bg, sam('neutral', P), [0, 1.18, 6.6], [0, 1.1, 0]));
+const poses = [['shocked', {expr: 'shocked'}, {aL: 2.6, aR: -2.6, eL: 0.3, eR: -0.3}], ['crossed, smirk', {expr: 'smirk'}, {aL: 0.9, aR: -0.9, eL: -2.2, eR: 2.2, yaw: 0.35, hy: -0.2}],
+  ['pointing', {expr: 'smug'}, {aR: -1.5, eR: -0.05, yaw: 0.5, hy: -0.2}], ['walking', {expr: 'neutral'}, {yaw: 0.9, xL: 0.7, xR: -0.7, fL: -0.55, fR: 0.55, kL: 0.6, kR: 0.05, aL: 0.1, aR: -0.1}], ['worried', {expr: 'worried'}, {aR: -1.9, eR: -2.0, aL: 0.15, hz: 0.12}]];
+poses.forEach(([n, o, P], i) => draw(i * W, 1500 - 2 * H, W, H, bg, sam(o.expr, P), [0, 1.18, 6.6], [0, 1.1, 0]));
+// row 3: a small scene: shrunken Sam beside a giant mug on a desk (camera close, depth shows the 3D)
+const scenePanel = (x, w, camPos, look, fov, expr, P) => draw(x, 0, w, 1500 - 2 * H, 0xf0e2c8, () => {
+  const g = new THREE.Group();
+  const desk = part(new THREE.BoxGeometry(6, 0.2, 3), toon(0x8a5a36), 0.012); desk.position.set(0, -0.1, 0); g.add(desk);
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(8, 3), toon(0x3f6a4a)); wall.position.set(0, 1.4, -1.4); g.add(wall);
+  const mug = part(new THREE.CylinderGeometry(0.55, 0.5, 0.8, 40, 1, false), toon(0xe6e6ea), 0.02); mug.position.set(0.9, 0.4, -0.2); g.add(mug);
+  const handle = part(new THREE.TorusGeometry(0.28, 0.07, 12, 24), toon(0xe6e6ea), 0.015); handle.position.set(1.5, 0.42, -0.2); g.add(handle);
+  const tea = new THREE.Mesh(new THREE.CircleGeometry(0.48, 32), new THREE.MeshBasicMaterial({color: 0x9a5a2a})); tea.rotation.x = -Math.PI / 2; tea.position.set(0.9, 0.78, -0.2); g.add(tea);
+  const r = makeSam(expr); pose(r, P); r.scale.setScalar(0.34); r.position.set(-0.1, 0, 0.1); g.add(r);
+  return g;
+}, camPos, look, fov);
+const SH = 1500 - 2 * H;
+scenePanel(0, 1200, [-0.2, 0.55, 2.2], [0.3, 0.45, 0], 38, 'worried', {yaw: 0.35, aL: 0.2, aR: -0.2, hy: -0.25});
+scenePanel(1200, 1200, [1.5, 0.45, 1.6], [0.6, 0.4, 0], 40, 'shocked', {yaw: -0.5, aL: 2.4, aR: -2.4, eL: 0.2, eR: -0.2});
+window.ready = true;
+</script></body></html>
