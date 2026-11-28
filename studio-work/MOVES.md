@@ -5,3 +5,4 @@ and one commit per move.
 
 | Date | From | To | Note |
 |---|---|---|---|
+| 2026-11-28 | studio-work/episode-15 | studio-work/_archive/legacy-ep15-style/episode-15 | LEGACY style: Codex-drawn storyboard and character stage |
