@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import {usePathname, useRouter} from 'next/navigation';
 import {api} from '@/lib/api';
+import StudioSwitcher from '@/components/StudioSwitcher';
 
 const NAV = [['/', 'Episodes'], ['/characters', 'Characters'], ['/chat', 'Chat'], ['/settings', 'Settings']] as const;
 
@@ -37,6 +38,7 @@ export default function Shell({children}: {children: React.ReactNode}) {
     <div className="app">
       <header className="appbar">
         <Link href="/" className="brand"><span className="brand-mark" aria-hidden>R</span><span>Rivet AI Studio</span></Link>
+        <StudioSwitcher />
         <nav className="topnav" aria-label="Main">
           {NAV.map(([href, label]) => <Link key={href} href={href} className={active(path, href) ? 'on' : ''}
             aria-current={active(path, href) ? 'page' : undefined}>{label}</Link>)}

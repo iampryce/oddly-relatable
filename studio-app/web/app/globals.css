@@ -39,6 +39,7 @@ h3 { font-size: 14px; margin: 0 0 8px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); white-space: nowrap; }
 .brand:hover { text-decoration: none; }
 .brand-mark { width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 800; font-size: 12px; }
+.studio-switch { margin-left: 4px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-weight: 600; }
 .topnav { display: flex; gap: 2px; margin-left: auto; }
 .topnav a { padding: 7px 12px; border-radius: 8px; color: var(--muted); font-weight: 600; }
 .topnav a:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
