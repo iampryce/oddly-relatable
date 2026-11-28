@@ -22,3 +22,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/gemini-tts-test.wav | studio-work/_archive/gemini-tts-test.wav | TTS test clip |
 | 2026-11-28 | studio-work/kit-proof/frames | studio-work/_archive/kit-proof-output/frames | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
 | 2026-11-28 | studio-work/kit-proof/frames-v2 | studio-work/_archive/kit-proof-output/frames-v2 | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
+| 2026-11-28 | studio-work/kit-proof/frames-lie | studio-work/_archive/kit-proof-output/frames-lie | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
