@@ -125,6 +125,8 @@ from . import assembly, autopilot, clip_qa  # noqa: E402  (guided steps 10-11 an
 app.include_router(clip_qa.router)
 app.include_router(assembly.router)
 app.include_router(autopilot.router)
+from . import cinematic  # noqa: E402  (the cinematic mode: realistic invented actors, side by side with the cartoon mode)
+app.include_router(cinematic.router)
 
 
 @app.middleware("http")

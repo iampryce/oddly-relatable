@@ -77,6 +77,9 @@ class Episode(Timestamps, Base):
     # The episode's drawing style (migration 0016, cast_from_video.STYLES): every character master of the episode is
     # drawn in it so the cast matches. None = not chosen yet (treated as the house stick-man style downstream).
     style: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # The production mode (migration 0017): "cartoon" (today's guided flow, unchanged) or "cinematic" (realistic
+    # invented actors, cinematic.py). Existing episodes were filled with "cartoon"; None is read as "cartoon".
+    mode: Mapped[str | None] = mapped_column(String(12), nullable=True, default="cartoon")
 
     scenes: Mapped[list["StoryboardScene"]] = relationship(back_populates="episode", order_by="StoryboardScene.position", cascade="all, delete-orphan")
 

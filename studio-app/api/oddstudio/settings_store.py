@@ -96,6 +96,12 @@ DEFAULTS: dict[str, dict] = {
     # acting analysis' (Settings > Guided generation): the same tier rules apply.
     # describer: who writes the character descriptions: "gemini" (default), "local" (on this server, free) or "manual"
     "cast": {"styles": DEFAULT_STYLES, "candidates": 2, "describe_max_tokens": 8000, "describer": "gemini"},
+    # Cinematic episodes (cinematic.py): shot stills by "nano" (Nano Banana on WaveSpeed, per picture) or "qwen"
+    # (Qwen-Image-Edit-2511 on the rented GPU); voices by "tts" (Kokoro on this server, free) or "upload" (the owner's
+    # recordings); voice_engine: only commercially licensed free engines (cinematic_tts.py); the music under the voices
+    # (0-1) and captions on the final cut. Each episode can change still_provider, voice_source, captions, music_volume.
+    "cinematic": {"still_provider": "nano", "voice_source": "tts", "voice_engine": "kokoro", "music_volume": 0.25,
+                  "captions": False},
 }
 
 TEXT_PROVIDERS = ("none", "codex-cli", "openai", "anthropic")
@@ -177,6 +183,9 @@ def put_section(db: Session, key: str, value: dict) -> dict:
     if key == "cast":
         from .cast_from_video import check_cast_settings
         check_cast_settings(db, value)
+    if key == "cinematic":
+        from .cinematic import check_settings as check_cinematic
+        check_cinematic(value)
     if key == "youtube" and value.get("default_privacy", "private") not in ("private", "unlisted", "public"):
         raise ValueError("youtube.default_privacy must be private, unlisted or public")
     merged = get_section(db, key)

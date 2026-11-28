@@ -53,7 +53,7 @@ TOKENS_PER_VIDEO_SECOND = 300
 CHARS_PER_TOKEN = 3.5
 MAX_OUT = 4000
 AUTHOR = "Quality check"
-KINDS = ("identity", "missing", "merged", "extra", "style", "camera", "mouth", "other")
+KINDS = ("identity", "missing", "merged", "extra", "style", "camera", "mouth", "anatomy", "face", "vfx", "other")
 FREE_NOTE = "free tier: Google may use the clips to improve its models"
 
 
@@ -108,13 +108,39 @@ def sum_estimates(ests: list[dict], prov: dict) -> dict:
     return {"usd_typical": typ, "usd_max": mx, "clips": len(ests), "label": label, "model": prov.get("model")}
 
 
+REALISTIC_CHECKS = """Check (this is REALISTIC live-action-style footage of invented actors):
+1. Identity consistency: is each person the same as their approved master (face, hair, build, costume) for the whole
+   clip? Does a face drift into someone else?
+2. Anatomy: extra or missing fingers, extra limbs, merged or duplicated bodies, broken hands.
+3. Face warping: melting, morphing or flickering faces, eyes or teeth.
+4. VFX glitches: smears, flicker, effects that appear or vanish unnaturally, effects that cover a face.
+5. Camera jumps: sudden jumps, warps or cuts inside the clip (a planned slow camera move is fine).
+6. Lip sync: for a talking clip, does the mouth follow the speech, and is it closed when silent?
+
+For each problem give the time in seconds, the kind (identity, anatomy, face, vfx, camera, mouth, missing, extra or
+other), the severity"""
+
+
 def prompt_for(people: list[tuple[str, str]], seconds: float, speaking: str, acting: list[str], frames: list[float],
-               whole: bool, schemas: list[str]) -> str:
+               whole: bool, schemas: list[str], realistic: bool = False) -> str:
     who = "\n".join(f"- {n}: {d.strip().rstrip('.') or 'no description'}" for n, d in people) or "- (nobody: the room only)"
     shapes = "\n".join(f"  {s}" for s in schemas)
     shown = (("The whole clip is attached, and " if whole else "") +
              f"{len(frames)} frames of it at {', '.join(f'{t:.2f}' for t in frames)} s.")
     act = ("\nWhat should happen (acting notes):\n" + "\n".join(f"- {a}" for a in acting)) if acting else ""
+    if realistic:
+        return f"""You check one clip ({seconds:.2f} s) of a realistic short film made with AI video models, before it goes
+into the episode. The approved master picture of each person on screen comes first, in this order:
+{who}
+{shown}
+Sound: {speaking}{act}
+
+{REALISTIC_CHECKS} ("clear" when you are sure, "possible" otherwise), one short sentence, and a fix in one of these
+shapes (or null when no change of the clip would help):
+{shapes}
+
+Reply with JSON only: {{"issues": [{{"t": <seconds>, "kind": "<kind>", "severity": "clear|possible", "what": "<sentence>",
+"fix": <one shape or null>}}], "summary": "<one short sentence for the owner>"}}. No problems: an empty list."""
     return f"""You check one animated clip ({seconds:.2f} s) of a 2D stick-figure cartoon for problems before it goes into the
 episode. The approved master picture of each character on screen comes first, in this order:
 {who}
@@ -217,6 +243,9 @@ def clips(db: Session, ep: Episode) -> list[dict]:
     asset_id, seconds, people, approved, speaker, words, t0}] (step: the chat thread's step, talk | clip)."""
     from . import reactions as R
     from . import talking_s2v as T
+    from . import cinematic as CIN
+    if CIN.is_cinematic(ep):
+        return cinematic_clips(db, ep)
     out = []
     tv = T.stored(db, ep.id)
     for r in T.talking_rows(db, ep):
@@ -243,12 +272,38 @@ def clips(db: Session, ep: Episode) -> list[dict]:
     return sorted(out, key=lambda c: c["shot"])
 
 
+def cinematic_clips(db: Session, ep: Episode) -> list[dict]:
+    """A cinematic episode's shots with a result (cinematic.py): the approved result, else the newest (step cine_shot)."""
+    from . import cinematic as CIN
+    v = CIN.stored(db, ep.id)
+    chars = CIN._chars(db, v)
+    out = []
+    for s in CIN.shots_of(CIN.screenplay(v)):
+        st = (v.get("shots") or {}).get(str(s["n"])) or {}
+        renders = st.get("renders") or []
+        if not renders:
+            continue
+        rec = next((x for x in renders if x["id"] == st.get("approved_render")), None) or renders[0]
+        out.append({"shot": s["n"], "step": "cine_shot", "kind": "talking" if rec.get("kind") == "talk" else "motion",
+                    "clip_id": rec["id"], "asset_id": rec.get("asset_id"), "seconds": round(int(rec.get("frames") or 0) / 16, 2),
+                    "people": [chars[n].key for n in s.get("characters") or [] if n in chars],
+                    "approved": st.get("approved_render") == rec["id"], "speaker": (s.get("line") or {}).get("speaker", ""),
+                    "words": [], "t0": 0.0, "t1": 0.0, "realistic": True, "line_text": (s.get("line") or {}).get("text", ""),
+                    "action": s.get("action") or "", "vfx": s.get("vfx") or "", "camera": s.get("camera") or "static"})
+    return out
+
+
 def check_key(c: dict) -> str:
     return f"{c['step']}:{c['shot']}:{c['clip_id']}"
 
 
 def speaking_text(c: dict) -> str:
     from .talking_s2v import voice_spans
+    if c.get("realistic"):
+        if c["kind"] == "talking":
+            return f"{c['speaker']} speaks for most of the clip: \"{c.get('line_text', '')}\"; the others listen."
+        return ("nobody speaks in this clip. Planned: " + (c.get("action") or "the action of the shot") +
+                (f"; visual effect: {c['vfx']}" if c.get("vfx") else "") + f"; camera: {c.get('camera')}.")
     if c["kind"] != "talking":
         return "nobody on screen speaks in this shot: mouths stay closed unless the acting notes say otherwise."
     spans = voice_spans(c["words"], c["t0"], c["t1"])
@@ -276,14 +331,14 @@ def people_of(db: Session, keys: list[str]) -> list[Character]:
 
 def allowed_for(db: Session, ep: Episode, c: dict) -> tuple:
     from .shot_chat import ALLOWED, Ref, allowed_for as chat_allowed
-    if c["step"] == "talk":
-        return ALLOWED["talk"]
+    if c["step"] in ("talk", "cine_shot"):
+        return ALLOWED[c["step"]]
     return chat_allowed(db, Ref(episode_id=ep.id, step="clip", item=str(c["shot"])))
 
 
-def schemas_for(allowed: tuple) -> list[str]:
-    from .shot_chat import SCHEMAS
-    return [SCHEMAS[t] for t in allowed if t != "note_only"]
+def schemas_for(allowed: tuple, step: str = "") -> list[str]:
+    from .shot_chat import schema_for
+    return [schema_for(step, t) for t in allowed if t != "note_only"]
 
 
 def clip_estimate(db: Session, ep: Episode, c: dict, prov: dict, inline_mb: float) -> dict:
@@ -293,7 +348,8 @@ def clip_estimate(db: Session, ep: Episode, c: dict, prov: dict, inline_mb: floa
     people = people_of(db, c["people"])
     frames = frame_times(c["seconds"])
     prompt = prompt_for([(p.name, p.visual_description or "") for p in people], c["seconds"], speaking_text(c),
-                        acting_notes(db, ep.id, c["shot"]), frames, whole, schemas_for(allowed_for(db, ep, c)))
+                        acting_notes(db, ep.id, c["shot"]), frames, whole, schemas_for(allowed_for(db, ep, c), c["step"]),
+                        bool(c.get("realistic")))
     return estimate(prov, len(people) + len(frames), c["seconds"] if whole else 0.0, prompt)
 
 
@@ -439,7 +495,8 @@ def request_for(db: Session, ep: Episode, c: dict, video: Path, folder: Path, in
     if not whole and not frames:
         raise ValueError("the clip is too large to send whole and FFmpeg is not configured to take frames from it")
     prompt = prompt_for([(p.name, p.visual_description or "") for p in people], c["seconds"], speaking_text(c),
-                        acting_notes(db, ep.id, c["shot"]), [t for t, _ in frames], whole, schemas_for(allowed_for(db, ep, c)))
+                        acting_notes(db, ep.id, c["shot"]), [t for t, _ in frames], whole,
+                        schemas_for(allowed_for(db, ep, c), c["step"]), bool(c.get("realistic")))
     parts.append({"text": prompt})
     body = {"contents": [{"parts": parts}],
             "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2, "maxOutputTokens": MAX_OUT}}

@@ -55,8 +55,8 @@ LABEL = {"acting": "Acting analysis", "prompts": "Prompts", "masters": "Cast (ch
          "sets": "Walls and seating pictures", "stills": "Shot stills", "talking": "Talking shots",
          "reactions": "Reaction shots", "quality": "Quality check", "approvals": "Your review of the clips",
          "assembly": "Assembly and the final cut"}
-GPU_KINDS = ("talk_render", "poses", "animate", "redo")
-SYNC_PAID = ("talk_prompt", "pose_prompt", "cast_prompt")        # paid calls made inside the request (no job to report the cost)
+GPU_KINDS = ("talk_render", "poses", "animate", "redo", "cine_still_gpu", "cine_render")
+SYNC_PAID = ("talk_prompt", "pose_prompt", "cast_prompt", "screenplay")        # paid calls made inside the request (no job to report the cost)
 LIVE = ("running", "waiting")
 ACTIVE = ("queued", "running")
 MAX_BUDGET = 500.0
@@ -637,6 +637,265 @@ RUN = {"acting": run_acting, "talk_prompt": run_talk_prompt, "pose_prompt": run_
        "animate": run_animate, "qa": run_qa, "redo": run_redo, "assemble": run_assemble}
 
 
+# ================================================================== the cinematic order (cinematic.py)
+# screenplay -> cast (waits for approvals) -> locations -> stills (waits) -> voices (waits) -> motion + dialogue shots
+# -> quality check -> clip approvals -> assembly (waits). Same budget, GPU cap and never-self-approve rules.
+CINE_STEPS = ("screenplay", "cast", "locations", "stills_c", "voices", "shots", "quality", "approvals_c", "assembly_c")
+LABEL.update({"screenplay": "Screenplay", "cast": "Cast (realistic characters and their voices)", "locations": "Locations",
+              "stills_c": "Shot stills", "voices": "Voices (dialogue lines)", "shots": "Motion and dialogue shots",
+              "approvals_c": "Your review of the shots", "assembly_c": "Assembly and the final cut"})
+
+
+def plan_c_screenplay(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    cv = C.stored(db, ep.id)
+    if not cv.get("story"):
+        return _plan(waiting=[_wait("Write the story input (an idea, a Bible passage or your script)", "Cinematic steps, step 1")])
+    if not C.screenplay(cv):
+        gpt = bool(secret("openai_api_key", db)) and not v.get("openai_no_credit")
+        usd = C.screenplay_estimate(db, cv)["usd_max"] if gpt else 0.0
+        return _plan(actions=[_act("screenplay", "Write the screenplay" + (" (GPT)" if gpt else " (template, free)"), usd,
+                                   template=not gpt)])
+    if not C.screenplay_approved(cv):
+        return _plan(waiting=[_wait("Read, edit and approve the screenplay", "Cinematic steps, step 2")])
+    return _plan()
+
+
+def plan_c_cast(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cast_from_video as CV
+    from . import cinematic as C
+    from . import stick_pipeline as SP
+    cv = C.stored(db, ep.id)
+    sp = C.screenplay(cv)
+    chars = C._chars(db, cv)
+    if any(d["name"] not in chars for d in sp["characters"]):
+        return _plan(actions=[_act("cine_cast", "Make the cast from the screenplay (free)", 0.0)])
+    out = _plan()
+    missing = [c for c in chars.values() if SP.approved_master(db, c.id) is None]
+    if missing:
+        _plan_cast(db, ep, v, CV.stored(db, ep.id), missing, out)
+    if C.config(db, cv)["voice_source"] == "tts":
+        for name, c in chars.items():
+            if C.TTS.voice_id(c.voice) is None and any(ln["speaker"] == name for ln in C.lines_of(sp)):
+                out["waiting"].append(_wait(f"Choose a voice for {name} (a suggestion is shown)", "Cinematic steps, step 3"))
+    return out
+
+
+def plan_c_locations(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    from . import room_sets as RS
+    cv = C.stored(db, ep.id)
+    sp = C.screenplay(cv)
+    have = cv.get("locations") or {}
+    walls = RS.stored(db, ep.id).get("walls") or {}
+    if any(have.get(loc["name"]) not in walls for loc in sp["locations"]):
+        return _plan(actions=[_act("cine_locations", "Make the locations from the screenplay (free)", 0.0)])
+    out = _plan()
+    for name, wid in have.items():
+        w = walls.get(wid)
+        if not w:
+            continue
+        if RS._busy(db, ep.id, "wall", wid):
+            out["busy"] = f"the location \"{name}\" is being drawn"
+        elif not w.get("takes"):
+            out["actions"].append(_act("wall", f"Picture of the location \"{name}\"", _image_usd(db), wall=wid))
+        elif not w.get("approved"):
+            out["waiting"].append(_wait(f"Approve a picture of the location \"{name}\"", "Cinematic steps, step 4"))
+    if out["actions"]:
+        ok, why = pictures_ready(db)
+        if not ok:
+            out["blocked"] = why
+    return out
+
+
+def plan_c_stills(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    cv = C.stored(db, ep.id)
+    prov = C.config(db, cv)["still_provider"]
+    out = _plan()
+    gpu_shots = []
+    for s in C.shots_of(C.screenplay(cv)):
+        n = s["n"]
+        st = (cv.get("shots") or {}).get(str(n)) or {}
+        if C.approved_still(cv, n):
+            continue
+        if C._still_busy(db, ep.id, n) or ((st.get("run") or {}).get("status") in ACTIVE and (st.get("run") or {}).get("kind") == "still"):
+            out["busy"] = f"the still of shot {n} is being made"
+        elif st.get("stills"):
+            out["waiting"].append(_wait(f"Approve a still for shot {n}", "Cinematic steps, step 5"))
+        else:
+            inp = C.still_inputs(db, ep, cv, s, prov)
+            if inp["missing"]:
+                out["waiting"].append(_wait(f"Shot {n}: " + "; ".join(inp["missing"]), "Cinematic steps, steps 3-4"))
+            elif prov == "qwen":
+                gpu_shots.append(n)
+            else:
+                out["actions"].append(_act("cine_still", f"Still for shot {n}", C.still_cost(db, ep, n)["usd"], shot=n))
+    if gpu_shots:
+        tasks, _ = C.gpu_still_tasks(db, ep, cv, gpu_shots)
+        ok, why = _gpu_ok(db)
+        if not ok:
+            out["blocked"] = f"Stills on the GPU need the rented GPU: {why}"
+            return out
+        out["actions"].append(_act("cine_still_gpu", f"Stills for shot(s) {', '.join(map(str, gpu_shots))} (Qwen on the GPU)",
+                                   C.gpu_estimate(db, tasks)["usd_max"], shots=gpu_shots))
+    elif out["actions"]:
+        ok, why = pictures_ready(db)
+        if not ok:
+            out["blocked"] = why
+    return out
+
+
+def plan_c_voices(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    cv = C.stored(db, ep.id)
+    src = C.config(db, cv)["voice_source"]
+    out = _plan()
+    if C._busy(db, ep.id, (C.JOB_VOICE,)):
+        return _plan(busy="the lines are being spoken")
+    todo = []
+    for ln in C.lines_of(C.screenplay(cv)):
+        st = (cv.get("lines") or {}).get(ln["id"]) or {}
+        if st.get("approved"):
+            continue
+        if st.get("takes"):
+            out["waiting"].append(_wait(f"Listen to line {ln['id']} ({ln['speaker']}) and approve a take", "Cinematic steps, step 6"))
+        elif src == "upload":
+            out["waiting"].append(_wait(f"Upload your recording of line {ln['id']} ({ln['speaker']})", "Cinematic steps, step 6"))
+        else:
+            todo.append(ln["id"])
+    if todo:
+        out["actions"].append(_act("cine_voices", f"Speak {len(todo)} line(s) with Kokoro (free)", 0.0, lines=todo))
+    return out
+
+
+def plan_c_shots(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    if C._busy(db, ep.id, (C.JOB_GPU,)):
+        return _plan(busy="shots are being made on the GPU")
+    cv = C.stored(db, ep.id)
+    out = _plan()
+    todo = []
+    for s in C.shots_of(C.screenplay(cv)):
+        st = (cv.get("shots") or {}).get(str(s["n"])) or {}
+        if st.get("renders"):
+            continue
+        t, why = C.render_task(db, ep, cv, s)
+        if t is None:
+            out["notes"].append(f"Shot {s['n']}: {why}.")
+        else:
+            todo.append(t)
+    if todo:
+        ok, why = _gpu_ok(db)
+        if not ok:
+            out["blocked"] = f"Motion and dialogue shots need the rented GPU: {why}"
+            return out
+        shots = [t["shot"] for t in todo]
+        out["actions"].append(_act("cine_render", f"Make shot(s) {', '.join(map(str, shots))} on the GPU",
+                                   C.gpu_estimate(db, todo)["usd_max"], shots=shots))
+    return out
+
+
+def plan_c_approvals(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    cv = C.stored(db, ep.id)
+    out = _plan()
+    for s in C.shots_of(C.screenplay(cv)):
+        st = (cv.get("shots") or {}).get(str(s["n"])) or {}
+        if st.get("renders") and not st.get("approved_render"):
+            out["waiting"].append(_wait(f"Watch shot {s['n']} and approve the result you want", "Cinematic steps, step 7"))
+    return out
+
+
+def plan_c_assembly(db: Session, ep: Episode, v: dict) -> dict:
+    from . import cinematic as C
+    from .config import get_settings
+    p = C.plan_rows(db, ep)
+    if p["missing"]:
+        return _plan(waiting=[_wait("Approve a still or a clip for shot(s) " + ", ".join(map(str, p["missing"])), "Cinematic steps")])
+    if C._busy(db, ep.id, (C.JOB_ASSEMBLY,)):
+        return _plan(busy="the episode is being put together")
+    cv = C.stored(db, ep.id)
+    cut = next((c for c in cv.get("cuts") or [] if c.get("hash") == p["hash"]), None)
+    if cut is None:
+        if not get_settings().ffmpeg:
+            return _plan(blocked="FFmpeg is not configured on the studio server: the episode cannot be put together")
+        return _plan(actions=[_act("cine_assemble", "Put the episode together (free)", 0.0)])
+    if cv.get("approved_cut") != cut["id"]:
+        return _plan(waiting=[_wait("Watch the final cut, tick the YouTube synthetic-content notice and approve it",
+                                    "Cinematic steps, step 9")])
+    return _plan()
+
+
+CINE_PLANNERS = {"screenplay": plan_c_screenplay, "cast": plan_c_cast, "locations": plan_c_locations,
+                 "stills_c": plan_c_stills, "voices": plan_c_voices, "shots": plan_c_shots, "quality": None,
+                 "approvals_c": plan_c_approvals, "assembly_c": plan_c_assembly}
+
+
+def is_cine(ep: Episode | None) -> bool:
+    return (getattr(ep, "mode", None) or "cartoon") == "cinematic"
+
+
+def steps_for(ep: Episode) -> tuple:
+    return CINE_STEPS if is_cine(ep) else STEPS
+
+
+def planner(ep: Episode, step: str):
+    if is_cine(ep):
+        return CINE_PLANNERS[step] or PLANNERS[step]
+    return PLANNERS[step]
+
+
+def run_screenplay(db, ep, a, user, v):
+    from . import cinematic as C
+    r = C.write_screenplay(db, ep, a["usd"] if not a["args"].get("template") else None, user, bool(a["args"].get("template")))
+    if r["source"] != "gpt" and not a["args"].get("template"):
+        v["openai_no_credit"] = time.time()
+    return {"usd": float(r["usd"] or 0.0)}
+
+
+def run_cine_cast(db, ep, a, user, v):
+    from . import cinematic as C
+    C.cast_from_screenplay(db, ep, user)
+    return {"usd": 0.0}
+
+
+def run_cine_locations(db, ep, a, user, v):
+    from . import cinematic as C
+    C.locations_from_screenplay(db, ep, user)
+    return {"usd": 0.0}
+
+
+def run_cine_still(db, ep, a, user, v):
+    from . import cinematic as C
+    return _job(C.make_still(db, ep, a["args"]["shot"], C.StillIn(confirm_usd=a["usd"]), user))
+
+
+def run_cine_still_gpu(db, ep, a, user, v):
+    from . import cinematic as C
+    return _job(C.make_stills_gpu(db, ep, a["args"]["shots"], a["usd"], user))
+
+
+def run_cine_voices(db, ep, a, user, v):
+    from . import cinematic as C
+    return _job(C.generate_lines(db, ep, a["args"]["lines"], user))
+
+
+def run_cine_render(db, ep, a, user, v):
+    from . import cinematic as C
+    return _job(C.render(db, ep, a["args"]["shots"], a["usd"], user))
+
+
+def run_cine_assemble(db, ep, a, user, v):
+    from . import cinematic as C
+    return _job(C.assemble(db, ep, user))
+
+
+RUN.update({"screenplay": run_screenplay, "cine_cast": run_cine_cast, "cine_locations": run_cine_locations,
+            "cine_still": run_cine_still, "cine_still_gpu": run_cine_still_gpu, "cine_voices": run_cine_voices,
+            "cine_render": run_cine_render, "cine_assemble": run_cine_assemble})
+
+
 # ================================================================== the loop
 def reconcile(db: Session, v: dict) -> tuple[bool, str]:
     """(work still in flight, the error of a job that failed). Finished jobs replace their "at most" price with the
@@ -734,9 +993,9 @@ def tick(db: Session, eid: int) -> dict:
 
 def _advance(db: Session, ep: Episode, v: dict) -> None:
     notes = []
-    for step in STEPS:
+    for step in steps_for(ep):
         try:
-            plan = PLANNERS[step](db, ep, v)
+            plan = planner(ep, step)(db, ep, v)
         except HTTPException as e:
             db.rollback()
             pause(db, v, f"Paused at {LABEL[step]}: {e.detail}")
@@ -766,7 +1025,7 @@ def _advance(db: Session, ep: Episode, v: dict) -> None:
             v["message"] = f"Waiting for you: {len(plan['waiting'])} thing(s) to approve or do at {LABEL[step]}"
             release_gpu(db, v, "the autopilot is waiting for you")
             return
-    v["step"], v["status"], v["waiting_for"] = "assembly", "finished", []
+    v["step"], v["status"], v["waiting_for"] = steps_for(ep)[-1], "finished", []
     v["message"] = "Finished: the final cut is approved."
     _log(v, "Finished: the final cut is approved")
     release_gpu(db, v, "the autopilot finished")
@@ -827,8 +1086,60 @@ def needs(db: Session, ep: Episode) -> dict:
     return {"pictures": pics, "gpu": g}
 
 
+def cine_providers(db: Session, ep: Episode) -> list[dict]:
+    """The cinematic order's providers: GPT for the screenplay, WaveSpeed for masters / locations / Nano stills, the
+    rented GPU for Qwen stills and the shots, Kokoro for the voices, Gemini for the check, FFmpeg for the cut."""
+    from . import cinematic as C
+    from . import clip_qa as Q
+    from . import comfy_session as CS
+    from . import gpu
+    from . import stick_pipeline as SP
+    from .config import get_settings
+    v = stored(db, ep.id)
+    cv = C.stored(db, ep.id)
+    cfg = C.config(db, cv)
+    sp = C.screenplay(cv)
+    shots = C.shots_of(sp)
+    gcfg = get_section(db, "guide")
+    out = []
+    has_oa = bool(secret("openai_api_key", db))
+    out.append({"step": "screenplay", "label": "Screenplay", "provider": f"OpenAI {gcfg['prompt_model']}",
+                "ready": has_oa and not v.get("openai_no_credit"), "essential": False,
+                "note": "" if has_oa and not v.get("openai_no_credit") else "OpenAI not available: a template screenplay is made (labelled)"})
+    chars = C._chars(db, cv)
+    pics = (not chars) or any(SP.approved_master(db, c.id) is None for c in chars.values()) or not cv.get("locations")
+    pics = pics or (cfg["still_provider"] == "nano" and any(not C.approved_still(cv, s["n"]) for s in shots))
+    ok, why = pictures_ready(db)
+    out.append({"step": "pictures", "label": "Masters, locations" + (" and stills" if cfg["still_provider"] == "nano" else ""),
+                "provider": "WaveSpeed: Nano Banana 2.1", "ready": ok, "essential": bool(pics and sp),
+                "note": why if not ok else ("" if pics else "nothing new to draw")})
+    g = (cfg["still_provider"] == "qwen" and any(not C.approved_still(cv, s["n"]) for s in shots)) or \
+        any(not ((cv.get("shots") or {}).get(str(s["n"])) or {}).get("approved_render") for s in shots)
+    a = CS.availability(db)
+    cap = float(gpu.cfg(db)["monthly_cap_usd"])
+    left = round(cap - gpu.month_figures(db)["committed_usd"], 2)
+    out.append({"step": "gpu", "label": "Motion and dialogue shots" + (" and Qwen stills" if cfg["still_provider"] == "qwen" else ""),
+                "provider": "RunPod rented GPU (" + ", ".join(x["id"] for x in a["gpus"]) + ")", "ready": a["ok"],
+                "essential": bool(g and sp), "note": a["reason"] if not a["ok"] else f"${left:.2f} left of the ${cap:.2f} monthly GPU cap"})
+    need_tts = cfg["voice_source"] == "tts" and any(not ((cv.get("lines") or {}).get(ln["id"]) or {}).get("takes")
+                                                    for ln in C.lines_of(sp))
+    kok = C._kokoro_installed()
+    out.append({"step": "voices", "label": "Voices", "provider": C.VOICE_SOURCES[cfg["voice_source"]],
+                "ready": kok or cfg["voice_source"] == "upload", "essential": bool(need_tts),
+                "note": "" if kok or cfg["voice_source"] == "upload" else "Kokoro is not installed on the studio server"})
+    qp = Q.provider(db)
+    out.append({"step": "quality", "label": "Quality check", "provider": qp["label"] if qp["ready"] else "Gemini",
+                "ready": qp["ready"], "essential": False, "note": qp["note"]})
+    s = get_settings()
+    out.append({"step": "assembly", "label": "Assembly", "provider": "FFmpeg on the studio server (free)",
+                "ready": bool(s.ffmpeg), "essential": True, "note": "" if s.ffmpeg else "FFmpeg is not configured on the studio server"})
+    return out
+
+
 def providers(db: Session, ep: Episode) -> list[dict]:
     """Which provider each step uses and whether it is ready: [{step, label, provider, ready, note, essential}]."""
+    if is_cine(ep):
+        return cine_providers(db, ep)
     from . import clip_qa as Q
     from . import comfy_session as CS
     from . import gpu
@@ -894,7 +1205,7 @@ def view(db: Session, ep: Episode) -> dict:
             "actions": [{k: a.get(k) for k in ("what", "usd_max", "usd", "state", "at", "step")}
                         for a in reversed((v.get("actions") or [])[-40:])],
             "redos": v.get("redos") or {}, "max_redos_per_shot": int(get_section(db, "quality").get("max_redos_per_shot", 1)),
-            "steps": [{"key": s, "label": LABEL[s]} for s in STEPS], "providers": items, "blockers": blockers(items),
+            "steps": [{"key": s, "label": LABEL[s]} for s in steps_for(ep)], "providers": items, "mode": "cinematic" if is_cine(ep) else "cartoon", "blockers": blockers(items),
             "started_at": v.get("started_at"), "by": v.get("by")}
 
 

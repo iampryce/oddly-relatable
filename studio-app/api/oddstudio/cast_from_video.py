@@ -47,7 +47,7 @@ from sqlalchemy.orm import Session
 
 from . import serialize as S
 from .auth import current_user
-from .cast_styles import DEFAULT_STYLES, STYLE_IDS
+from .cast_styles import CARTOON_STYLE_IDS, CINEMATIC_STYLE, DEFAULT_STYLES, STYLE_IDS
 from .db import get_db
 from .models import Asset, Character, CharacterAsset, Episode, Event, Job, Setting
 from .providers import ProviderError
@@ -464,10 +464,11 @@ def current_prompt(db: Session, ep: Episode, v: dict, c: Character, sid: str) ->
 
 
 # ================================================================== GPT master prompt
-PROMPT_SYSTEM = ("You write prompts for an image model for a small animation studio. Write ONE prompt, ready to paste, in "
-                 "plain English, at most 200 words, for a CHARACTER MASTER: one original character, neutral standing "
-                 "pose, full body, plain background. Keep the style block's rules exactly and keep its style. Describe "
-                 "the character only from the written description. Never name a real person, actor, brand or studio. "
+PROMPT_SYSTEM = ("You write prompts for an image model for a small animation and film studio. Write ONE prompt, ready to "
+                 "paste, in plain English, at most 200 words, for a CHARACTER MASTER: one original character, neutral "
+                 "standing pose, full body, plain background. Keep the style block's rules exactly and keep its style. "
+                 "Describe the character only from the written description. Never name a real person, actor, brand or "
+                 "studio; a photorealistic character is an invented person who must not resemble any real person. "
                  "No text, captions, logos or watermarks. Reply with the prompt only: no title, no explanation.")
 
 
@@ -491,10 +492,21 @@ def _lib_entry_for(db: Session, cid: int) -> dict | None:
     return next((e for e in (library(db).get("entries") or {}).values() if e.get("character_id") == cid), None)
 
 
-def styles_out(db: Session) -> list[dict]:
+def mode_styles(ep: Episode | None) -> tuple[str, ...]:
+    """The presets an episode may use: the five cartoon styles, or only "Cinematic realistic" for a cinematic episode
+    (the two modes never mix). No episode (Settings): all six."""
+    if ep is None:
+        return STYLE_IDS
+    return (CINEMATIC_STYLE,) if (getattr(ep, "mode", None) or "cartoon") == "cinematic" else CARTOON_STYLE_IDS
+
+
+def styles_out(db: Session, ep: Episode | None = None) -> list[dict]:
     from .stick_pipeline import reference_image
     out = []
+    allowed = mode_styles(ep)
     for sid, p in styles(db).items():
+        if sid not in allowed:
+            continue
         text, refs = style_block(db, sid)
         urls = []
         for r in refs:
@@ -589,7 +601,8 @@ def view(db: Session, ep: Episode) -> dict:
     prov = IMAGE_PROVIDERS.get(st.get("image_provider"))
     jobs = (db.query(Job).filter(Job.kind.in_((JOB_IMAGES, JOB_DESCRIBE, JOB_DESCRIBE_LOCAL)), Job.episode_id == ep.id)
             .order_by(Job.id.desc()).limit(8).all())
-    return {"episode_id": ep.id, "style": sid, "styles": styles_out(db), "describe": describe_info(db, ep, v),
+    return {"episode_id": ep.id, "style": sid, "styles": styles_out(db, ep), "mode": getattr(ep, "mode", None) or "cartoon",
+            "describe": describe_info(db, ep, v),
             "descriptions": v.get("characters") or [], "characters": chars,
             "previews": {"character_id": pv.get("character_id"), "items": previews},
             "preview_character": pv.get("character_id") or _main_speaker(db, ep, v),
@@ -784,7 +797,7 @@ def create_character(eid: int, did: str, db: Session = Depends(get_db), user: st
 
 
 class StyleIn(BaseModel):
-    style: Literal["stick", "flat2d", "3d", "anime", "clay"]
+    style: Literal["stick", "flat2d", "3d", "anime", "clay", "cinematic"]
     allow_mixed: bool = False
 
 
@@ -795,6 +808,9 @@ def choose_style(eid: int, body: StyleIn, db: Session = Depends(get_db), user: s
     the change is refused unless the owner accepts a mixed cast (allow_mixed)."""
     from .stick_pipeline import approved_master
     ep = _episode(db, eid)
+    if body.style not in mode_styles(ep):
+        raise HTTPException(409, "a cinematic episode uses the \"Cinematic realistic\" style only" if body.style != CINEMATIC_STYLE
+                            else "\"Cinematic realistic\" is for cinematic episodes only; this is a cartoon episode")
     if ep.style == body.style:
         return view(db, ep)
     other = [c.name for c in _cast(db, ep) if (m := approved_master(db, c.id)) is not None and master_style(db, m) != body.style]
@@ -822,7 +838,7 @@ def choose_style(eid: int, body: StyleIn, db: Session = Depends(get_db), user: s
 
 class PreviewIn(BaseModel):
     character_id: int | None = None
-    styles: list[Literal["stick", "flat2d", "3d", "anime", "clay"]] | None = Field(default=None, min_length=1, max_length=5)
+    styles: list[Literal["stick", "flat2d", "3d", "anime", "clay", "cinematic"]] | None = Field(default=None, min_length=1, max_length=6)
     confirm_usd: float | None = Field(default=None, ge=0, le=10)
 
 
@@ -855,7 +871,9 @@ def make_previews(eid: int, body: PreviewIn, db: Session = Depends(get_db), user
     if _busy(db, c.id):
         raise HTTPException(409, f"{c.name}: pictures are already being made")
     prov = _provider(db)
-    sids = list(dict.fromkeys(body.styles or STYLE_IDS))
+    sids = list(dict.fromkeys(body.styles or mode_styles(ep)))
+    if set(sids) - set(mode_styles(ep)):
+        raise HTTPException(409, "cartoon and cinematic styles never mix: preview the styles of this episode's mode only")
     cost = preview_cost(db, len(sids))
     _confirm(cost["usd"], body.confirm_usd, f"{len(sids)} style preview(s)")
     items = [{**_item(db, ep, v, c, s), "kind": "preview"} for s in sids]

@@ -51,7 +51,14 @@ Proposals: a fixed set per step, validated strictly (unknown types or fields are
                                                           again through its own step's redo route: a talking shot
                                                           rendered again, a reaction shot animated again, or a still
                                                           drawn again; paid, with that route's confirm_usd / cap 409s)
-The quality check (clip_qa.py) posts into the talk:/clip: threads as an assistant message from "Quality check".
+  cine_still note_only | redo_still {prompt?}           (cinematic episodes: a new still take of a shot, paid: Nano per
+                                                          picture or Qwen GPU time, cinematic.make_still)
+  cine_shot  note_only | rerender_shot {prompt, camera?} (cinematic: the motion / dialogue shot made again on the rented
+                                                          GPU, paid, cinematic.rerender_from_chat; camera one of the
+                                                          screenplay camera moves)
+  cine_line  note_only | regenerate_line {text?, voice?} (cinematic: the line spoken again by Kokoro, free; a new take
+                                                          that waits for approval)
+The quality check (clip_qa.py) posts into the talk:/clip:/cine_shot: threads as an assistant message from "Quality check".
 """
 from __future__ import annotations
 
@@ -77,13 +84,17 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 STEPS = {"master": "Character master", "still": "Shot still", "clip": "Shot animation",
          "acting": "Acting notes (from the reference video)", "prompt": "Prompt writer draft",
          "talk": "Talking shot", "pose": "Reaction pose (face-only edit)", "wall": "Wall picture (straight-on)",
-         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode"}
+         "seating": "Seating picture", "repair": "Repaired picture", "final": "Final cut of the episode",
+         "cine_still": "Cinematic shot still", "cine_shot": "Cinematic shot (motion or dialogue)",
+         "cine_line": "Dialogue line (voice)"}
 ALLOWED = {"master": ("note_only", "redo_master", "edit_description", "new_candidates"), "still": ("note_only", "redo_still"),
            "clip": ("note_only", "rerender_shot", "reanimate_shot"), "acting": ("note_only", "edit_beat"),
            "prompt": ("note_only", "update_prompt"), "talk": ("note_only", "rerender_talking_shot"),
            "pose": ("note_only", "redo_pose", "edit_beat"), "wall": ("note_only", "remake_wall"),
            "seating": ("note_only", "repaint_background"), "repair": ("note_only", "repaint_background"),
-           "final": ("note_only", "redo_shot")}
+           "final": ("note_only", "redo_shot"),
+           "cine_still": ("note_only", "redo_still"), "cine_shot": ("note_only", "rerender_shot"),
+           "cine_line": ("note_only", "regenerate_line")}
 HISTORY = 10                    # messages of the thread sent with each new one
 CHARS_PER_TOKEN = 3.5
 TYPICAL_OUTPUT = 500
@@ -239,6 +250,20 @@ class RepaintBackground(_Strict):
     box: Box | None = None
 
 
+class CineRerender(_Strict):
+    """rerender_shot of a CINEMATIC shot (thread cine_shot:<n>): the new motion prompt, optionally a camera move."""
+    type: Literal["rerender_shot"]
+    prompt: str = Field(min_length=3, max_length=4000)
+    camera: Literal["static", "push in", "pull out", "pan left", "pan right", "tilt up", "tilt down", "tracking", "orbit",
+                    "crane up", "crane down", "handheld"] | None = None
+
+
+class RegenerateLine(_Strict):
+    type: Literal["regenerate_line"]
+    text: str | None = Field(default=None, min_length=1, max_length=300)
+    voice: str | None = Field(default=None, min_length=2, max_length=60)
+
+
 class RedoShot(_Strict):
     type: Literal["redo_shot"]
     shot: int = Field(ge=1, le=999)
@@ -247,7 +272,7 @@ class RedoShot(_Strict):
 
 Proposal = Annotated[Union[NoteOnly, UpdatePrompt, EditBeat, RedoStill, RedoMaster, RerenderShot, RerenderTalkingShot,
                            RedoPose, ReanimateShot, RemakeWall, RepaintBackground, RedoShot, EditDescription,
-                           NewCandidates],
+                           NewCandidates, RegenerateLine],
                      Field(discriminator="type")]
 _proposal = TypeAdapter(Proposal)
 
@@ -259,6 +284,11 @@ def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -
         raise ValueError("the proposal is not an object")
     if raw.get("type") not in (allowed or ALLOWED[step]):
         raise ValueError(f"\"{raw.get('type')}\" is not a change this step can make")
+    if step == "cine_shot" and raw.get("type") == "rerender_shot":
+        try:
+            return CineRerender.model_validate(raw).model_dump(exclude_none=True)
+        except ValidationError as e:
+            raise ValueError(f"the proposal is not valid ({e.error_count()} problem(s))")
     try:
         p = _proposal.validate_python(raw).model_dump(exclude_none=True)
     except ValidationError as e:
@@ -277,6 +307,12 @@ def validate_proposal(step: str, item: str, raw, allowed: tuple | None = None) -
         why = straight_on_problem(p["prompt"])
         if why:
             raise ValueError(why)
+    if p["type"] == "regenerate_line":
+        if p.get("voice"):
+            from .cinematic_tts import voice_id
+            if voice_id(p["voice"]) is None:
+                raise ValueError(f"\"{p['voice']}\" is not one of the free Kokoro voices")
+            p["voice"] = voice_id(p["voice"])
     if p["type"] == "reanimate_shot":
         from .reactions import check_move_prompts
         p["move_prompts"] = check_move_prompts(p.get("move_prompts") or {})
@@ -306,6 +342,13 @@ def describe(p: dict) -> str:
         return (f"{p.get('count', 2)} new master candidate(s) in the episode's style"
                 + (", from the prompt below" if p.get("prompt") else ", from the character's current master prompt")
                 + ". They wait for your approval; an approved master stays until you approve a new version.")
+    if t == "rerender_shot" and "settings" not in p:
+        return ("A new render of this cinematic shot on the rented GPU (the earlier results are kept; nothing is approved "
+                "for you), from the prompt below" + (f", camera: {p['camera']}." if p.get("camera") else "."))
+    if t == "regenerate_line":
+        bits = [x for x in (f"new words: \"{p['text']}\"" if p.get("text") else "", f"voice {p['voice']}" if p.get("voice") else "") if x]
+        return ("This line is spoken again by Kokoro on the studio server (free)" + (f" with {', '.join(bits)}" if bits else "")
+                + ". The new take waits for you to listen and approve it.")
     if t == "rerender_shot":
         s = p["settings"]
         bits = [f"{k}: {v}" for k, v in s.items() if k != "prompt"]
@@ -340,7 +383,7 @@ def describe(p: dict) -> str:
 
 def queued_reason(p: dict) -> str | None:
     """Why a proposal waits for a step that is not built yet (None when it can be applied now)."""
-    if p["type"] == "rerender_shot" and ({"cfg", "steps"} & set(p["settings"])):
+    if p["type"] == "rerender_shot" and ({"cfg", "steps"} & set(p.get("settings") or {})):
         return ("Queued for when the own-GPU animation step exists: the current video service has no cfg or steps "
                 "settings, so this cannot be applied yet.")
     return None
@@ -402,7 +445,8 @@ def estimate(a: dict, system: str, messages: list[dict]) -> dict:
 # ------------------------------------------------------------------ threads (storage)
 class Ref(BaseModel):
     episode_id: int | None = Field(default=None, ge=1)
-    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final"]
+    step: Literal["master", "still", "clip", "acting", "prompt", "talk", "pose", "wall", "seating", "repair", "final",
+                  "cine_still", "cine_shot", "cine_line"]
     item: str = Field(min_length=1, max_length=40)
 
 
@@ -428,7 +472,7 @@ def check_ref(db: Session, ref: Ref) -> None:
         raise HTTPException(404, "episode not found")
     if ref.step == "final" and ref.item != str(ref.episode_id):
         raise HTTPException(422, "the item of the final cut's thread is the episode id")
-    if ref.step in ("still", "clip", "acting", "talk") and not ref.item.isdigit():
+    if ref.step in ("still", "clip", "acting", "talk", "cine_still", "cine_shot") and not ref.item.isdigit():
         raise HTTPException(422, "the item of this step is a shot number")
 
 
@@ -525,6 +569,14 @@ def build_context(db: Session, ref: Ref) -> dict:
         ep = db.get(Episode, ref.episode_id)
         cx["episode"] = ep.title
         cx.update(final_context(db, ep))
+    elif ref.step in ("cine_still", "cine_shot", "cine_line"):
+        from . import cinematic as CIN
+        ep = CIN._episode(db, ref.episode_id)
+        cx["episode"] = ep.title
+        cx["house_style"] = "Photorealistic live-action film with invented actors. " + CIN.INVENTED_PEOPLE_RULE
+        cx.update(CIN.chat_context(db, ep, ref.step, ref.item))
+        v = CIN.stored(db, ep.id)
+        chars = list(CIN._chars(db, v).values())
     elif ref.step in ("wall", "seating", "repair"):
         from . import room_sets as RS
         ep = db.get(Episode, ref.episode_id)
@@ -699,6 +751,11 @@ SCHEMAS = {
                            '"w": <px>, "h": <px>}}  (leave "box" out for the usual area above the people)'),
     "redo_shot": ('{"type": "redo_shot", "shot": <the shot number>, "prompt": "<a new prompt for that shot, or leave out to '
                   'keep its current one>"}  (the shot is made again through its own step and comes back for approval)'),
+    "cine_shot:rerender_shot": ('{"type": "rerender_shot", "prompt": "<the full new motion prompt: action, acting, VFX>", '
+                                '"camera": "<static|push in|pull out|pan left|pan right|tilt up|tilt down|tracking|orbit|'
+                                'crane up|crane down|handheld, or leave out to keep it>"}  (paid: GPU time)'),
+    "regenerate_line": ('{"type": "regenerate_line", "text": "<new words for the line, or leave out>", "voice": "<a Kokoro '
+                        'voice id from the settings, or leave out>"}  (free; the new take waits for approval)'),
     "rerender_talking_shot": ('{"type": "rerender_talking_shot", "prompt": "<the full new positive prompt, or leave out to '
                               'keep the current one>", "use_guide": <true|false, or leave out to keep the current '
                               'choice>}  (the model and its settings are fixed; only the prompt and the movement guide '
@@ -720,9 +777,14 @@ Rules:
 Reply with JSON only: {{"reply": "<your answer to the owner>", "proposal": <one of the shapes above, or null>}}"""
 
 
+def schema_for(step: str, t: str) -> str:
+    """The proposal shape shown to the assistant (a cinematic step may shape a type differently)."""
+    return SCHEMAS.get(f"{step}:{t}") or SCHEMAS[t]
+
+
 def system_prompt(ref: Ref, cx: dict, allowed: tuple | None = None) -> str:
     body = {k: v for k, v in cx.items() if k != "history"}
-    schemas = "\n".join(f"  {SCHEMAS[t]}" for t in (allowed or ALLOWED[ref.step]))
+    schemas = "\n".join(f"  {schema_for(ref.step, t)}" for t in (allowed or ALLOWED[ref.step]))
     return SYSTEM.format(schemas=schemas) + "\n\nTHE ITEM (read-only, from the studio):\n" + json.dumps(body, indent=1, default=str)
 
 
@@ -805,6 +867,14 @@ def proposal_cost(db: Session, ref: Ref, p: dict) -> dict | None:
     """The price shown on Apply (and sent back as confirm_usd); None for free changes."""
     from .stick_pipeline import IMAGE_PROVIDERS, VIDEO_PROVIDERS, image_cost, video_cost
     st = get_section(db, "stick")
+    if ref.step in ("cine_still", "cine_shot", "cine_line"):
+        from . import cinematic as CIN
+        ep = CIN._episode(db, ref.episode_id)
+        if p["type"] == "redo_still":
+            return CIN.still_cost(db, ep, int(ref.item))
+        if p["type"] == "rerender_shot":
+            return CIN.render_cost(db, ep, int(ref.item))
+        return None
     if p["type"] == "redo_still":
         ip = IMAGE_PROVIDERS.get(st.get("image_provider"))
         return image_cost(1, ip["usd_per_image"]) if ip else {"usd": None, "label": "no image service chosen"}
@@ -979,6 +1049,19 @@ def route(db: Session, ref: Ref, p: dict, confirm_usd: float | None, user: str) 
     from . import stick_pipeline as SP
     from . import stick_shots as SS
     t = p["type"]
+    if ref.step in ("cine_still", "cine_shot", "cine_line"):
+        from . import cinematic as CIN
+        ep = CIN._episode(db, ref.episode_id)
+        if t == "redo_still":
+            j = CIN.make_still(db, ep, int(ref.item), CIN.StillIn(confirm_usd=confirm_usd, prompt=p.get("prompt")), user)
+            return {"done": "A new still is being made (it waits for your approval).", "job_id": j["id"]}
+        if t == "rerender_shot":
+            j = CIN.rerender_from_chat(db, ep, int(ref.item), p["prompt"], p.get("camera"), confirm_usd, user)
+            return {"done": "The shot is being made again on the rented GPU.", "job_id": j["id"]}
+        if t == "regenerate_line":
+            j = CIN.regenerate_line(db, ep, ref.item, p.get("text"), p.get("voice"), user)
+            return {"done": "The line is being spoken again (free); listen and approve the new take.", "job_id": j["id"]}
+        raise HTTPException(409, "this proposal has nothing to apply")
     if t == "update_prompt":
         item = PW.edit(ref.episode_id, ref.item, PW.EditIn(text=p["prompt"], approve=False), db, user)
         return {"done": "The draft prompt was updated.", "prompt_id": item["id"]}

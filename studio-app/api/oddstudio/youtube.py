@@ -39,12 +39,15 @@ def access_token() -> str:
 
 
 def upload_video(path: Path, *, title: str, description: str, tags: list[str], category_id: str, privacy: str,
-                 made_for_kids: bool, thumbnail: Path | None, log: Callable[[str], None]) -> str:
+                 made_for_kids: bool, thumbnail: Path | None, log: Callable[[str], None],
+                 synthetic: bool = False) -> str:
     if not title.strip():
         raise ValueError("a YouTube title is required")
     token = access_token()
     meta = {"snippet": {"title": title[:100], "description": description[:5000], "tags": tags[:30], "categoryId": category_id},
             "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": made_for_kids}}
+    if synthetic:   # cinematic episodes: realistic AI-generated people ("altered or synthetic content")
+        meta["status"]["containsSyntheticMedia"] = True
     size = path.stat().st_size
     with httpx.Client(timeout=600) as c:
         init = c.post(UPLOAD_URL, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8",

@@ -43,6 +43,8 @@ export default function GuidePage({params}: {params: Promise<{id: string}>}) {
         </div>
       </div>
       <ErrorBox error={act.error} />
+      {g.episode.mode === 'cinematic' && <div className="alert info">This is a cinematic episode (realistic actors).
+        Its steps are on <Link href={`/episodes/${id}/cinematic`}>the cinematic page</Link>.</div>}
       <Autopilot id={id} onChange={reload} />
       <div className="gd-layout">
         <ol className="gd-steps">

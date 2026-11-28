@@ -942,6 +942,9 @@ def approve_publish(eid: int, body: PublishApproveIn, db: Session = Depends(get_
     gate(ep, "approve_publish")
     if body.confirm != "PUBLISH":
         raise HTTPException(422, 'type PUBLISH to confirm')
+    from .cinematic import DISCLOSURE, disclosure_ok
+    if not disclosure_ok(db, ep):
+        raise HTTPException(409, f"tick the YouTube notice on the cinematic page first: {DISCLOSURE}")
     rec = publish_record(db, ep)
     if not rec.title.strip():
         raise HTTPException(422, "a title is required")

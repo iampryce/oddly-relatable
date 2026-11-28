@@ -223,8 +223,10 @@ class DescribeTest(Base):
 class StyleAndPreviewTest(Base):
     def test_presets_in_settings_and_stick_uses_studio_style(self):
         st = self.c.get("/api/cast/styles").json()["styles"]
-        self.assertEqual([s["id"] for s in st], ["stick", "flat2d", "3d", "anime", "clay"])
-        self.assertEqual([s["label"] for s in st], ["True stick man", "Flat 2D cartoon", "3D animated", "Anime", "Claymation"])
+        # the five cartoon presets and the sixth, cinematic-only preset (feat/cinematic-mode)
+        self.assertEqual([s["id"] for s in st], ["stick", "flat2d", "3d", "anime", "clay", "cinematic"])
+        self.assertEqual([s["label"] for s in st], ["True stick man", "Flat 2D cartoon", "3D animated", "Anime", "Claymation",
+                                                    "Cinematic realistic"])
         self.assertIn("TRUE STICK MAN", st[0]["style_prompt"], "the house style block from Settings > Studio style")
         # editable: a bad block or unknown style is refused, a good one is kept
         cur = self.c.get("/api/settings").json()["sections"]["cast"]["styles"]

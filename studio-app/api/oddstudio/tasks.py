@@ -759,7 +759,8 @@ def publish_youtube(ctx: Ctx) -> dict:
         t = db.get(Asset, rec.thumbnail_asset_id)
         thumb = storage().get_to_file(t.storage_key, folder / Path(t.storage_key).name)
     vid = upload_video(local, title=rec.title, description=rec.description, tags=rec.tags, category_id=rec.category_id,
-                       privacy=rec.privacy, made_for_kids=rec.made_for_kids, thumbnail=thumb, log=ctx.log)
+                       privacy=rec.privacy, made_for_kids=rec.made_for_kids, thumbnail=thumb, log=ctx.log,
+                       synthetic=(getattr(ep, "mode", None) or "cartoon") == "cinematic")
     rec.youtube_video_id, rec.youtube_url, rec.status, rec.error = vid, f"https://www.youtube.com/watch?v={vid}", "published", ""
     set_stage(ep, "published")
     event(db, ep.id, "publish", f"Published to YouTube ({rec.privacy}): {rec.youtube_url}")
@@ -910,3 +911,4 @@ from . import cast_from_video  # noqa: E402,F401  (guided flow: cast description
 from . import speaker_suggest  # noqa: E402,F401  (suggested speaker labels: the speaker_suggest job)
 from . import local_describe  # noqa: E402,F401  (the free describer on this server: cast_describe_local)
 from . import assembly, clip_qa  # noqa: E402,F401  (guided flow: the final cut and the clip quality check)
+from . import cinematic  # noqa: E402,F401  (cinematic mode: stills, GPU shots, voices and the final cut)

@@ -59,6 +59,14 @@ export default function EpisodePage({params}: {params: Promise<{id: string}>}) {
   }, [auto, plan.kind, plan.kind === 'free' ? plan.path : plan.why, act.busy]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error && !ep) return <ErrorBox error={error} />;
+  // a cinematic episode (realistic actors) has its own steps page; the cartoon flow below is unchanged
+  if (ep?.mode === 'cinematic') return (
+    <section className="card stack">
+      <p className="small" style={{margin: 0}}><Link href="/">← Episodes</Link></p>
+      <h1 style={{margin: 0}}>{ep.title}</h1>
+      <p className="muted" style={{margin: 0}}>Cinematic episode: realistic invented actors, real acting and dialogue.</p>
+      <p style={{margin: 0}}><Link className="btn primary" href={`/episodes/${ep.id}/cinematic`}>Open the cinematic steps</Link></p>
+    </section>);
   if (!ep || !ws) return <p className="muted">Loading…</p>;
   const lib = library || [];
   const chars = episodeCharacters(cast || null, au || null, lib);

@@ -237,7 +237,8 @@ def guide(db: Session, ep: Episode) -> dict:
     steps = {k: steps[k] for k in ORDER if k in steps}
     for k in steps:
         steps[k].setdefault("available", True)
-    return {"episode": {"id": ep.id, "title": ep.title, "source": ep.source}, "steps": steps,
+    return {"episode": {"id": ep.id, "title": ep.title, "source": ep.source, "mode": getattr(ep, "mode", None) or "cartoon"},
+            "steps": steps,
             "keys": {"gemini": bool(_secret("gemini_api_key", db)), "openai": bool(_secret("openai_api_key", db))}}
 
 

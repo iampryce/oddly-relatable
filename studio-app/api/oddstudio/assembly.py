@@ -383,13 +383,18 @@ def probe_frames(ffprobe: str, path: Path) -> int | None:
         return None
 
 
-def render_overlays(db: Session, ep: Episode, size: tuple[int, int], folder: Path, log) -> dict:
-    """{banner: Path | None, lines: [(start, end, Path)], warning: str}: the banner and line pictures from overlay.mjs."""
+def render_overlays(db: Session, ep: Episode, size: tuple[int, int], folder: Path, log, lines: list[dict] | None = None,
+                    mode: str | None = None, hook: str | None = None) -> dict:
+    """{banner: Path | None, lines: [(start, end, Path)], warning: str}: the banner and line pictures from overlay.mjs.
+    `lines` ([{start, end, text}]), `mode` and `hook` replace the episode's own (the cinematic captions)."""
     from . import acting
     from .config import REPO_ROOT, get_settings
     from . import engine
-    pr = presentation(db, ep)
-    lines = dialogue_lines(ep) if pr["mode"] != "none" else []
+    if lines is not None:
+        pr = {"mode": mode or "captions", "hook": hook or "", "band": False}
+    else:
+        pr = presentation(db, ep)
+        lines = dialogue_lines(ep) if pr["mode"] != "none" else []
     if not pr["hook"] and not lines:
         return {"banner": None, "lines": [], "warning": ""}
     s = get_settings()

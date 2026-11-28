@@ -26,9 +26,10 @@ export default function GuideCast({id, onChange}: {id: string; onChange: () => u
   return (
     <div className="stack">
       <ErrorBox error={act.error} />
-      <Describe v={v} id={id} act={act} />
-      {(v.descriptions || []).length > 0 && <Descriptions v={v} id={id} act={act} />}
-      <Styles v={v} id={id} act={act} />
+      {/* a cinematic episode is cast from its screenplay (no reference video) in the one realistic style */}
+      {v.mode !== 'cinematic' && <Describe v={v} id={id} act={act} />}
+      {v.mode !== 'cinematic' && (v.descriptions || []).length > 0 && <Descriptions v={v} id={id} act={act} />}
+      {v.mode !== 'cinematic' && <Styles v={v} id={id} act={act} />}
       {v.style && <div className="stack">
         <h3 style={{margin: '8px 0 0'}}>Masters in &ldquo;{v.styles.find((s: any) => s.id === v.style)?.label}&rdquo;</h3>
         {(v.characters || []).map((c: any) => <CharacterCard key={c.id} c={c} v={v} id={id} act={act} />)}

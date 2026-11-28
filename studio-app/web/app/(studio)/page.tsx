@@ -10,6 +10,8 @@ import {ErrorBox} from '@/components/ui';
 import {KEEP_VIDEO_TEXT, videoSeconds} from '@/components/VideoNotesOptions';
 import {round1, windowError, windowFrom} from '@/lib/trimWindow';
 import {listStatus, money} from '@/lib/dashboard';
+import NewCinematic from '@/components/NewCinematic';
+import {MODES, type Mode} from '@/lib/cinematic';
 
 const LIMIT = {short: 60, long: 450};          // seconds the episode uses (audio_first.py MAX_SECONDS)
 const SHORT_MAX = 180; // a Short runs at most 3 minutes (YouTube Shorts and Reels)
@@ -17,10 +19,17 @@ const SOURCE_LIMIT = {short: 1800, long: 450}; // a Short's recording may be lon
 
 export default function Episodes() {
   const {data: eps, error, reload} = useApi<any[]>('/episodes', 15000);
+  const [mode, setMode] = useState<Mode>('cartoon');
   return (
     <>
-      <div className="spread"><div><h1>Episodes</h1><p className="sub">Drop a video, press Generate, and decide where the studio asks you.</p></div></div>
-      <NewEpisode onCreated={reload} />
+      <div className="spread"><div><h1>Episodes</h1><p className="sub">Choose the kind of episode, then decide where the studio asks you.</p></div></div>
+      <section className="mode-cards" role="radiogroup" aria-label="Kind of episode">
+        {MODES.map(m => (
+          <button key={m.id} type="button" role="radio" aria-checked={mode === m.id}
+            className={`card mode-card${mode === m.id ? ' on' : ''}`} onClick={() => setMode(m.id)}>
+            <strong>{m.title}</strong><span className="small muted">{m.text}</span></button>))}
+      </section>
+      {mode === 'cartoon' ? <NewEpisode onCreated={reload} /> : <NewCinematic />}
       <ErrorBox error={error} />
       <section className="card ep-list" aria-label="Episodes">
         {!eps ? <p className="muted" style={{margin: 0}}>Loading…</p>
@@ -37,8 +46,8 @@ function EpisodeRow({ep}: {ep: any}) {
   const {data: ws} = useApi<any>(live ? `/episodes/${ep.id}/workspace` : null, 60000);
   const st = listStatus(ep, ws || undefined);
   return (
-    <Link href={`/episodes/${ep.id}`} className="ep-row">
-      <span className="ep-title">{ep.title}<span className="muted small"> · {ep.format === 'long' ? 'YouTube long' : 'Short'}</span></span>
+    <Link href={ep.mode === 'cinematic' ? `/episodes/${ep.id}/cinematic` : `/episodes/${ep.id}`} className="ep-row">
+      <span className="ep-title">{ep.title}<span className="muted small"> · {ep.mode === 'cinematic' ? 'Cinematic' : ep.format === 'long' ? 'YouTube long' : 'Short'}</span></span>
       <span className={`ep-status ${st.tone}`}><span aria-hidden>{st.icon}</span> {st.text}</span>
     </Link>);
 }
