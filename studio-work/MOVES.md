@@ -26,3 +26,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/kit-proof/out | studio-work/_archive/kit-proof-output/out | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
 | 2026-11-28 | studio-work/kit-proof/stills | studio-work/_archive/kit-proof-output/stills | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
 | 2026-11-28 | kit-proof | _shared/kits/kit-proof | dev engine: web/ is canonical; render scripts, timing, lipsync |
+| 2026-11-28 | ../cartoon-short-kit | _shared/kits/cartoon-short-kit | pristine original engine (Nov 2); was at the repo root |
