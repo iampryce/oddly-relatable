@@ -18,3 +18,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/stick-cast/talk-run | studio-work/_archive/stick-cast-experiments/talk-run | experiment |
 | 2026-11-28 | studio-work/stick-cast/pose-test | studio-work/_archive/stick-cast-experiments/pose-test | experiment |
 | 2026-11-28 | studio-work/stick-cast/s2v-test | studio-work/_archive/stick-cast-experiments/s2v-test | experiment |
+| 2026-11-28 | studio-work/stick-cast/gpu-qwen-test | studio-work/_archive/stick-cast-experiments/gpu-qwen-test | experiment |
