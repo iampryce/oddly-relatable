@@ -24,3 +24,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/kit-proof/frames-v2 | studio-work/_archive/kit-proof-output/frames-v2 | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
 | 2026-11-28 | studio-work/kit-proof/frames-lie | studio-work/_archive/kit-proof-output/frames-lie | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
 | 2026-11-28 | studio-work/kit-proof/out | studio-work/_archive/kit-proof-output/out | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
+| 2026-11-28 | studio-work/kit-proof/stills | studio-work/_archive/kit-proof-output/stills | rendered frames or output; Episode 15 / test renders, rebuildable with the render scripts |
