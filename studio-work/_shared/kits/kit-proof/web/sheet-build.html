@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1300"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#f6efe2';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+// draw one or two characters in a cell; list = [[who, opts, dx]] (dx shifts in design units)
+const cell=(x,y,w,h,list,box=[-60,-20,720,1040])=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);
+  list.forEach(([who,o,dx=0])=>{g.save();g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s+dx*s,y+(h-box[3]*s)/2-box[1]*s);T.stickFront(new T.Pen(g),who,o);g.restore();});
+  g.restore();g.strokeStyle='#d8cdb8';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const DEV='devN', MO='moN';
+const P=[
+ ['Perfectionist: measuring',[[DEV,{expr:'skeptical',look:[0.5,0.5],pitch:0.3,arms:{L:{hx:-250,hy:30},R:{hx:90,hy:40,prop:'tape',a:Math.PI,len:300}}}]]],
+ ['Perfectionist: marking with a pencil',[[DEV,{expr:'stern',look:[0.3,0.8],pitch:0.6,arms:{L:{hx:-120,hy:60},R:{hx:-40,hy:150,prop:'pencil',a:2.2}}}]]],
+ ['Builder: hammer up',[[MO,{expr:'smug',look:[0.4,0],arms:{L:{hx:-150,hy:60,prop:'plank',a:0.0,len:380},R:{hx:190,hy:-110,prop:'hammer',a:-1.0}}}]]],
+ ['Builder: hammer down',[[MO,{expr:'smug',look:[0.4,0.3],arms:{L:{hx:-150,hy:60,prop:'plank',a:0.0,len:380},R:{hx:120,hy:110,prop:'hammer',a:1.25}}}]]],
+ ['Builder: carries the plank',[[MO,{expr:'smug',look:[-0.3,0],arms:{L:{hx:-110,hy:-90,prop:'plank',a:0.12,len:520},R:{hx:110,hy:-80}}}]]],
+ ['Both: the scene',[[DEV,{expr:'skeptical',look:[0.8,0.3],arms:{L:{hx:-230,hy:20},R:{hx:80,hy:30,prop:'tape',a:Math.PI,len:270}}},-150],[MO,{expr:'smug',look:[-0.5,0.2],arms:{L:{hx:-100,hy:50},R:{hx:120,hy:100,prop:'hammer',a:1.2}}},170]],[-260,-20,1000,1040]],
+];
+P.forEach(([t,l,b],i)=>{const x=10+(i%3)*796,y=40+Math.floor(i/3)*640;label(t,x+4,y-8,22);cell(x,y,786,610,l,b);});
+window.ready=true;
+</script></body></html>

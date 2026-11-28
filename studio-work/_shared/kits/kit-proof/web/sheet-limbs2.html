@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1400"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#f6efe2';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const cell=(x,y,w,h,who,o,box=[-80,-20,760,1040])=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);T.stickFront(new T.Pen(g),who,o);g.restore();g.strokeStyle='#d8cdb8';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const V=[['A. now: thin line',{armStyle:'line',legStyle:'line'}],['B. tapered black, relaxed legs',{armStyle:'curve',legStyle:'curve',kneeOut:16}],['C. bold black, relaxed legs',{armStyle:'bold',legStyle:'bold',kneeOut:16}],['D. white tube + outline',{armStyle:'tube',legStyle:'tube',kneeOut:14}]];
+const poses=[
+ ['moN',{expr:'smug',look:[0.4,0],arms:{L:{hx:-50,hy:120},R:{hx:190,hy:-110,prop:'hammer',a:-1.0}}}],
+ ['devN',{expr:'skeptical',look:[0.5,0.5],arms:{L:{hx:-215,hy:30},R:{hx:90,hy:30,prop:'tape',a:Math.PI,len:340}}}],
+ ['moN',{expr:'smug',arms:{L:{hx:-70,hy:130},R:{hx:70,hy:130}}}],
+];
+V.forEach(([t,v],i)=>{const x=10+i*596;label(t,x+4,30,22);
+  poses.forEach(([w,o],k)=>cell(x+k*198,44,196,640,w,{...v,...o}));
+  cell(x,696,296,690,'moN',{...v,expr:'neutral'});cell(x+300,696,296,690,'devN',{...v,expr:'neutral',pose:'cross'});});
+window.ready=true;
+</script></body></html>

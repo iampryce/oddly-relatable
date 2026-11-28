@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1100"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const img=(src)=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=src;});
+const cell=(x,y,w,h,who,o,box=[-30,0,660,1030])=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);T.stickFront(new T.Pen(g),who,o);g.restore();g.strokeStyle='#e4e4e4';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const m=await img('ref/winifred-master.png');
+const H=1000, w=m.width*H/m.height;
+g.drawImage(m,10,60,w,H); label('Approved master (WaveSpeed art)',16,40);
+const EYE={browY:0.02,browAng:-0.1,browArc:0.5,browAsym:0,lid:0.0,lidAng:0,lidBot:0,eyeS:1.35,pupS:1.1,curve:0.35,skew:0.2,mw:0.2,jaw:0,teeth:0};
+const base={shadow:true,expr:EYE,look:[0.3,0.1],handStyle:'mitten'};
+const vs=[['Code, tuned to the master: big head, bold tapered limbs, mitten',{}],['Same with fingers',{handStyle:'fingers'}]];
+vs.forEach(([t,v],i)=>{const x=10+w+20+i*(2*330+20);label(t,x+4,40,22);
+  cell(x,60,330,H,'winM',{...base,...v});
+  cell(x+334,60,330,H,'winM',{...base,...v,arms:{L:{hx:-60,hy:120},R:{hx:190,hy:-100,prop:'hammer',a:-1.0}}});});
+window.ready=true;
+</script></body></html>

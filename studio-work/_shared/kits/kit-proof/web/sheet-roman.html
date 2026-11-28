@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1000"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#f3efe6';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const cell=(x,y,w,h,key,o)=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/600,h/1000);g.setTransform(s,0,0,s,x+(w-600*s)/2,y+(h-1000*s)/2);const p=new T.Pen(g);T.romanFront(p,key,o);g.restore();};
+const list=Object.keys(T.OUTFITS);
+list.forEach((k,i)=>{const x=10+i*296;label(k,x+6,30,22);cell(x,40,290,930,k,{expr:['neutral','stern','grin','nervous','smile','shock','whistle','relief'][i]||'neutral'});});
+window.ready=true;
+</script></body></html>

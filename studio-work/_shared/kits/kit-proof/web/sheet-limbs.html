@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1300"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const BOX=[0,-70,600,1090];
+const cell=(x,y,w,h,who,o,box=BOX)=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);const p=new T.Pen(g);T.stickFront(p,who,o);g.restore();g.strokeStyle='#ddd';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const opts=[['samLine','A. thin black line (now)'],['samThick','B. thicker black'],['samPipeArms','C. white pipe arms, black outline'],['samPipeAll','D. white pipe arms + legs']];
+const poses=[{pose:'hang',expr:'neutral'},{pose:'cross',expr:'smirk'},{pose:'recoil',expr:'shocked'},{pose:'read',expr:'reading',seated:true}];
+opts.forEach(([w,t],i)=>{const x=10+i*596;label(t,x+4,30,22);
+ poses.forEach((o,k)=>cell(x+(k%2)*296,44+Math.floor(k/2)*610,290,600,w,o));});
+window.ready=true;
+</script></body></html>

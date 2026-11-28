@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1250"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const img=(src)=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=src;});
+// cut the head out of a master: flood-fill the outer background to transparent, find the neck (where the width collapses), crop above it
+function extractHead(im){
+  const W=im.width,H=im.height,cv=document.createElement('canvas');cv.width=W;cv.height=H;const x=cv.getContext('2d');x.drawImage(im,0,0);
+  const d=x.getImageData(0,0,W,H),px=d.data,idx=(i,j)=>(j*W+i)*4,white=(k)=>px[k]>236&&px[k+1]>236&&px[k+2]>236;
+  const seen=new Uint8Array(W*H),st=[];const push=(i,j)=>{if(i<0||j<0||i>=W||j>=H)return;const q=j*W+i;if(seen[q])return;if(!white(q*4))return;seen[q]=1;st.push(q);};
+  for(let i=0;i<W;i++){push(i,0);push(i,H-1);}for(let j=0;j<H;j++){push(0,j);push(W-1,j);}
+  while(st.length){const q=st.pop(),i=q%W,j=(q/W)|0;px[q*4+3]=0;push(i+1,j);push(i-1,j);push(i,j+1);push(i,j-1);}
+  // also drop the grey contact shadow (low-saturation grey blob in the lowest 12%): handled by cropping above the neck
+  const rowW=new Array(H).fill(0);let top=-1;for(let j=0;j<H;j++){let n=0;for(let i=0;i<W;i++)if(px[idx(i,j)+3]>0&&!(px[idx(i,j)]>200&&px[idx(i,j)+1]>200&&px[idx(i,j)+2]>200&&false))n++;rowW[j]=n;if(top<0&&n>3)top=j;}
+  let maxW=0,maxJ=top;for(let j=top;j<H*0.6;j++)if(rowW[j]>maxW){maxW=rowW[j];maxJ=j;}
+  let neck=maxJ;for(let j=maxJ;j<H*0.7;j++){if(rowW[j]<maxW*0.22){neck=j;break;}}
+  const hh=neck-top+Math.round(maxW*0.02);let l=W,r=0;for(let j=top;j<neck;j++)for(let i=0;i<W;i++)if(px[idx(i,j)+3]>0){if(i<l)l=i;if(i>r)r=i;}
+  x.putImageData(d,0,0);const out=document.createElement('canvas');out.width=r-l+1;out.height=hh;out.getContext('2d').drawImage(cv,l,top,r-l+1,hh,0,0,r-l+1,hh);
+  return {head:out,neck,top,l,r};
+}
+const mort=await img('ref/mortimer-master.png'), win=await img('ref/winifred-master.png');
+const hm=extractHead(mort), hw=extractHead(win);
+T.HEADS.hybMort=hm.head; T.HEADS.hybWin=hw.head;
+const cell=(x,y,w,h,who,o,box=[-30,40,660,1000])=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);T.stickFront(new T.Pen(g),who,o);g.restore();g.strokeStyle='#e4e4e4';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const H=1000;
+[[mort,'hybMort','Mortimer',0],[win,'hybWin','Winifred',1]].forEach(([m,who,name,row])=>{
+  const w=m.width*H/m.height*0.62,y=40+row*0;
+  const x0=10+row*1200;
+  g.drawImage(m,x0,60,w*1.0,H*0.62*1.0); label(name+': approved master',x0+6,40,20);
+  const poses=[['hybrid: standing',{shadow:true}],['hybrid: hammer',{shadow:true,arms:{L:{hx:-60,hy:120},R:{hx:190,hy:-100,prop:'hammer',a:-1.0}}}],['hybrid: measuring',{shadow:true,arms:{L:{hx:-215,hy:30},R:{hx:90,hy:30,prop:'tape',a:Math.PI,len:340}}}]];
+  poses.forEach(([t,o],k)=>{cell(x0+(w)+k*290-0,60,284,H*0.62+380,who,o);});
+});
+label('Head = cut from the real master image. Body, limbs, hands, props = code.',10,1230,22);
+window.ready=true;
+</script></body></html>

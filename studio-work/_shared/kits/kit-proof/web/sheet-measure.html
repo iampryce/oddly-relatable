@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1100"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+import { analyseMaster } from './arthead2.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const img=(src)=>new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=src;});
+const masters=[['mortimer','ref/mortimer-master.png'],['winifred','ref/winifred-master.png']];
+let col=0;
+for(const [name,src] of masters){
+  const im=await img(src), a=analyseMaster(im); T.HEADS['m_'+name]=a.head; T.CAST['m_'+name]=a.preset;
+  console.log(name, JSON.stringify(a.m), JSON.stringify(a.preset.body));
+  const H=1000, x0=10+col*1190, sc=H/im.height;           // master drawn at left, code body at right and as an overlay
+  g.drawImage(im,x0,60,im.width*sc,H); label(name+': master',x0+6,40);
+  const cell=(x,y,w,h,alpha,o={})=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();g.globalAlpha=alpha;
+    // map design box so that head top (30) and soles (975) coincide with the master's top and sole rows in this cell
+    const s=(a.m.sole-a.m.top)*sc/(975-30);g.setTransform(s,0,0,s,x+w/2-300*s,60+a.m.top*sc-30*s);
+    T.stickFront(new T.Pen(g),'m_'+name,{shadow:false,...o});g.restore();};
+  const bx=x0+im.width*sc+10;
+  cell(bx,60,380,H,1.0); label('code body (measured)',bx+6,40);
+  // overlay: master faint + code body on top
+  const ox=bx+390;g.save();g.beginPath();g.rect(ox,60,380,H);g.clip();g.globalAlpha=0.45;g.drawImage(im,ox+190-(im.width*sc)/2,60,im.width*sc,H);g.restore();
+  cell(ox,60,380,H,0.75); label('overlay',ox+6,40);
+  col++;
+}
+window.ready=true;
+</script></body></html>
