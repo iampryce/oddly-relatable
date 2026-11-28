@@ -32,38 +32,31 @@ Updated 2026-11-28. Longer detail lives in the docs linked in section 5; this fi
 - `docs/RIVET-STYLE-GUIDE.md` and `studio-app/api/oddstudio/house_style.py` still describe the old look; update
   them to this style (not done yet).
 
-## 4. Current status
-**Merged:** New short wizard (#107, migration 0017), Rivet name (#106), `docs/studios.md` plan and this direction,
-and the `studio-work` restructure to the target tree (steps 1-5; log in `studio-work/MOVES.md`).
-CI and Deploy on main were green before the docs commits.
+## 4. Current status (updated 2026-11-28 evening)
+**Done and live:** `studio-work` restructure (log: `studio-work/MOVES.md`); `docs/studios.md`; server cleaned (disk 53%,
+46 GB free; maintenance keeps the live release plus 2 previous); 3D camera (#109) reverted as 42d31b0; studio switcher
+(dbd9e1c, Stick Man active, other two locked) pushed, CI green, Deploy succeeded, live release tree f93fce9c.
+`categories.py` (#108) is in main: dead code, no test, docstring names providers (`code-kit`, `gemini-tts`,
+`omni-flash`) missing from `capabilities.py`.
 
-**In progress:**
-- Cleanup: worktrees and merged branches are removed. `studio-work/_to_delete/` (621 MB) is staged and waits for the
-  owner's OK to empty. Uncommitted work was saved to `backup/asset-import-pr1`, `backup/cinematic-mode`,
-  `backup/3d-camera` and `backup/clean-dashboard`; leave `backup/*` alone.
+**Backups on the remote (never merge `backup/*`):** `backup/asset-import-pr1` (Import screen, provenance; migration 0016
+collides, renumber to 0018+, drop the pose part, land when the cast import needs it), `backup/cinematic-mode` (locked),
+`backup/3d-camera`, `backup/clean-dashboard`. Already in main, branches can be archived: episode-sets, edit-seats,
+clean-dashboard, plan-unconfirmed-persons. The Mac has no Python deps; API tests run only in CI.
 
-**Blocked / waiting on the owner:**
-- The new stickman reference image (flat cap, grey hair) is not on disk. Save it (for example `studio-work/refs/`);
-  then it goes to `_shared/cast/` with its source noted (WaveSpeed).
-- Approval of the cleanup list.
+**Blocked on the owner:** the new stickman reference images (`studio-work/refs/` does not exist yet); then copy to
+`_shared/cast/` with a README (WaveSpeed, owner-supplied, 2026-11-28, not approved as masters). Engine shootout needs
+the owner's go and shown costs (~$10 ceiling).
 
-**Saved work to land (renumber migrations first):** `.claude/worktrees/agent-a30969db7472ca6b1` holds the
-uncommitted asset provenance / Import screen / pose dimension work (migration `0016_asset_dimension_provenance`);
-`agent-a86ba0e5d041e5c90` holds the uncommitted cinematic mode (`0017_episode_mode`); `agent-a75e7540a9cbf6959` holds
-3D camera edits. Both migrations collide with main's `0016_episode_style` and `0017_episode_kind` and must be renumbered
-(0018 and up) before landing. `feat/spec-characters-prototype` also has staged, unpushed work.
+**Open decisions:** kit painted sets vs flat outlined sets for the new style; cut-out vs whole-frame generation; rebuild
+or replace kit characters; parent brand name; where kit rendering runs (server has no node/Chromium, none wanted).
 
-**Open decisions:** (a) do the kit's painted sets suit the new style; (b) cut-out route (clean masks for the white body
-and shadow) vs whole-frame generation; (c) rebuild or replace the kit characters to match; (d) parent brand name
-(Oddly Relatable vs Rivet AI Studio); also the engine shootout and the sensitive lines in Episode 15.
+**Next, in order:** (1) first test frame: a flat outlined code-drawn set plus the new stickman as a cut-out (free);
+(2) engine shootout after the owner's go (Path A builders action; Path B a 5 s spoken line); (3) YouTube research feeds
+1-2 (leads: Wan 2.2 Animate, SCAIL-2; treat as leads only); (4) later: land asset-import, variety guard, fix
+`categories.py`, update `docs/RIVET-STYLE-GUIDE.md` and `house_style.py`, Codex/OpenAI image-terms check.
 
-**Next three tasks, in order:**
-1. Owner approves or edits the cleanup list; first save the unsaved work in the three worktrees above.
-2. Save the new stickman reference to `_shared/cast/`; update `docs/RIVET-STYLE-GUIDE.md` and `house_style.py` to it.
-3. Decide sets vs the new style and cut-out vs whole-frame, then build the 30 s Explainer Short as gate 1.
-
-**Known risks:** server disk at 95% (cleanup pending); main deploys to production on every push; Codex image terms not
-yet verified; the Mac has no ffmpeg or numpy, so some local API tests fail (same on clean main).
+**Known risks:** main deploys to production on any `studio-app` change; Mac cannot run API tests locally.
 
 ## 5. Pointers
 - `docs/studios.md`: studios, gates, target folder tree, migration list, open decisions.
