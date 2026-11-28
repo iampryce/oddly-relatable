@@ -93,7 +93,7 @@ studio-work/
 | `studio-work/kit-proof/` | engine code to `_shared/kits/kit-proof/`; frames and out to `_archive/` | frame folders are about 1 GB and reproducible |
 | `cartoon-short-kit/` (repo root, untracked) | `_shared/kits/cartoon-short-kit/` | decide whether it is tracked in git |
 | `studio-work/poc-*`, `spike-*`, `phase0-*` | `_archive/` | early proofs, 2 to 9 MB each |
-| `studio-work/RIVET-STYLE-GUIDE.md` | `docs/` | after it is updated to the new style (section 7) |
+| `studio-work/RIVET-STYLE-GUIDE.md` | `docs/RIVET-STYLE-GUIDE.md` | DONE 2026-11-28 (content still the old style, see section 7) |
 | `~/Documents/oddly-relatable-{categories,ep5-banner,ep5-stills,moodboard,style-v2-test,spec-prototype}` | `_archive/` or delete | outside the repo; `-categories` is 566 MB; `-spec-prototype` is empty |
 
 The server holds `/srv/stickman/{releases 14 GB, backups 11 GB, repo 1.1 GB}` on a disk that is 95 percent full; that is
@@ -135,7 +135,7 @@ frames below are legacy as of 2026-11-28. They stay on disk until the owner dele
 
 ## 7. Files that must follow the new style (not edited yet)
 
-- `studio-work/RIVET-STYLE-GUIDE.md` (section 3 "Look": house characters from the old masters, "clean 3D-style worlds").
+- `docs/RIVET-STYLE-GUIDE.md` (section 3 "Look": house characters from the old masters, "clean 3D-style worlds").
 - `studio-app/api/oddstudio/house_style.py` (the style text sent to image generation, including "NOT a 3D render").
 
 Both still describe the old look. They need updating to the style in section 1 once the owner approves it; they were

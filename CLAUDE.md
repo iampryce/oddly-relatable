@@ -29,7 +29,7 @@ Updated 2026-11-28. Longer detail lives in the docs linked in section 5; this fi
 - The Episode 15 style, its nine masters and the storyboard frames are **legacy** (see the `_archive` plan in
   `docs/studios.md`). Do not use them for new work.
 - AI draws still images only; code does the motion, unless the engine shootout shows otherwise.
-- `studio-work/RIVET-STYLE-GUIDE.md` and `studio-app/api/oddstudio/house_style.py` still describe the old look; update
+- `docs/RIVET-STYLE-GUIDE.md` and `studio-app/api/oddstudio/house_style.py` still describe the old look; update
   them to this style (not done yet).
 
 ## 4. Current status
@@ -58,7 +58,7 @@ and shadow) vs whole-frame generation; (c) rebuild or replace the kit characters
 
 **Next three tasks, in order:**
 1. Owner approves or edits the cleanup list; first save the unsaved work in the three worktrees above.
-2. Save the new stickman reference to `_shared/cast/`; update `RIVET-STYLE-GUIDE.md` and `house_style.py` to it.
+2. Save the new stickman reference to `_shared/cast/`; update `docs/RIVET-STYLE-GUIDE.md` and `house_style.py` to it.
 3. Decide sets vs the new style and cut-out vs whole-frame, then build the 30 s Explainer Short as gate 1.
 
 **Known risks:** server disk at 95% (cleanup pending); main deploys to production on every push; Codex image terms not

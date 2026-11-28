@@ -29,3 +29,4 @@ and one commit per move.
 | 2026-11-28 | ../cartoon-short-kit | _shared/kits/cartoon-short-kit | pristine original engine (Nov 2); was at the repo root |
 | 2026-11-28 | kit-proof/web-build | stick-man/explainer-shorts/builders-race-test | self-contained scene (own engine copies, lib, ref); render with WEB=<this path> |
 | 2026-11-28 | kit-proof/web-lie | stick-man/explainer-shorts/lie-shrink-test | self-contained scene; silent preview, script and TTS not approved |
+| 2026-11-28 | studio-work/RIVET-STYLE-GUIDE.md | docs/RIVET-STYLE-GUIDE.md | content unchanged; still describes the old style |
