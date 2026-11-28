@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1500"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const BOX=[0,-70,600,1090], HB=[70,-10,460,500];
+const cell=(x,y,w,h,who,o,box=BOX)=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);const p=new T.Pen(g);T.stickFront(p,who,o);g.restore();g.strokeStyle='#ddd';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const cast=[['samN','1. Sam: side-swept hair, red tie'],['devN','2. Dev: spiky hair, glasses, blue tie'],['moN','3. Mo: orange beanie, round belly'],['kitN','4. Kit: purple bun, yellow tie, tall']];
+cast.forEach(([w,t],i)=>{const x=10+i*596;label(t,x+4,30,22);
+ cell(x,44,290,560,w,{pose:'hang',expr:'neutral'});
+ cell(x+296,44,290,560,w,{pose:'cross',expr:'smirk',facing:0.5,look:[0.6,0.1]});
+ const f=[['lying (smirk, looks away)',{expr:'smirk',look:[-0.8,0.2],facing:0.4}],['shocked',{expr:'shocked'}],['worried',{expr:'worried',look:[0.5,0]}],['talking',{expr:'neutral',mouth:'mid'}],['proud',{expr:'smug'}],['blink',{expr:'neutral',blink:1}]];
+ f.forEach(([l,o],k)=>{const cx=x+(k%2)*296,cy=616+Math.floor(k/2)*290;cell(cx,cy,290,284,w,o,HB);label(l,cx+6,cy+20,15);});
+ cell(x,1490,1,1,w,{});});
+window.ready=true;
+</script></body></html>

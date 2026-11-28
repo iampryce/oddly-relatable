@@ -28,3 +28,4 @@ and one commit per move.
 | 2026-11-28 | kit-proof | _shared/kits/kit-proof | dev engine: web/ is canonical; render scripts, timing, lipsync |
 | 2026-11-28 | ../cartoon-short-kit | _shared/kits/cartoon-short-kit | pristine original engine (Nov 2); was at the repo root |
 | 2026-11-28 | kit-proof/web-build | stick-man/explainer-shorts/builders-race-test | self-contained scene (own engine copies, lib, ref); render with WEB=<this path> |
+| 2026-11-28 | kit-proof/web-lie | stick-man/explainer-shorts/lie-shrink-test | self-contained scene; silent preview, script and TTS not approved |

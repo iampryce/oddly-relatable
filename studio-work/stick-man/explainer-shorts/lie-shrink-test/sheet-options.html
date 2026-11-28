@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c" width="2400" height="1400"></canvas>
+<script>window.addEventListener('error',e=>{window.err=String(e.message);console.log('ERR '+e.message)});</script>
+<script type="module">
+import * as T from './toon.js';
+const c=document.getElementById('c'),g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+const label=(t,x,y,sz=22)=>{g.save();g.setTransform(1,0,0,1,0,0);g.fillStyle='#333';g.font=`700 ${sz}px Helvetica,Arial`;g.fillText(t,x,y);g.restore();};
+const cell=(x,y,w,h,who,o,box=[0,0,600,1000])=>{g.save();g.beginPath();g.rect(x,y,w,h);g.clip();const s=Math.min(w/box[2],h/box[3]);g.setTransform(s,0,0,s,x+(w-box[2]*s)/2-box[0]*s,y+(h-box[3]*s)/2-box[1]*s);const p=new T.Pen(g);T.stickFront(p,who,o);g.restore();g.strokeStyle='#ddd';g.strokeRect(x+.5,y+.5,w-1,h-1);};
+const opts=[['A','teal cap'],['B','spiky hair + rosy cheeks'],['C','orange beanie'],['D','hair + round glasses'],['E','purple top bun'],['F','headband + short hair']];
+const HB=[70,0,460,480];
+opts.forEach(([k,t],i)=>{const x=10+i*396;label('Option '+k+': '+t,x+4,30,20);
+ cell(x,44,386,640,'opt'+k,{pose:'hang',expr:'neutral'});
+ cell(x,696,190,190,'opt'+k,{expr:'smirk'},HB);cell(x+196,696,190,190,'opt'+k,{expr:'shocked'},HB);
+ cell(x,892,190,190,'opt'+k,{expr:'indignant'},HB);cell(x+196,892,190,190,'opt'+k,{expr:'neutral',mouth:'wide'},HB);
+ cell(x,1088,190,190,'opt'+k,{expr:'skeptical',facing:0.75,look:[0.6,0]},HB);cell(x+196,1088,190,190,'opt'+k,{expr:'neutral',blink:1},HB);});
+window.ready=true;
+</script></body></html>
