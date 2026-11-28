@@ -60,26 +60,32 @@ below are met for Stick Man Studio.
 
 Nothing is self-approved: each gate is the owner's call.
 
-## 4. Proposed folder tree (not applied)
+## 4. Folder tree (applied 2026-11-28; the log is `studio-work/MOVES.md`)
 
 ```
 studio-work/
   stick-man/
-    explainer-shorts/<project>/
-    remake-audio/<project>/
-  cinematic/
-    bible-stories/<project>/
-    power-sagas/<project>/
-  kids-stories/<project>/
+    explainer-shorts/builders-race-test/, lie-shrink-test/   (self-contained kit scenes, old-style tests)
+    remake-audio/episode-15/audio/                            (source audio, for a Remake Audio test in the new style)
+  cinematic/{bible-stories,power-sagas}/                      (locked, empty)
+  kids-stories/                                               (locked, empty)
   _shared/
-    cast/      new-style masters and character specs (the new stickman reference goes here)
-    sets/      set plates and set definitions
-    kits/      cartoon-short-kit, kit-proof engine
-  _archive/    superseded work, kept until the owner deletes it
-    legacy-ep15-style/   Episode 15 masters, storyboard frames, stills, clips and cuts
+    cast/      (empty until the new stickman reference is saved)
+    sets/      (the Episode 15 painted sets; do they suit the new style is open)
+    kits/cartoon-short-kit/   (pristine engine)    kits/kit-proof/   (dev engine; web/ is canonical, render scripts)
+  _archive/
+    legacy-ep15-style/{masters, episode-15, stick-cast-ep15}
+    episode-14/  kit-proof-output/  stick-cast-experiments/  gemini-tts-test.wav
+  _to_delete/  (staged for deletion, waiting for the owner's OK; local only)
+  poc-*, spike-*, phase0-b1-example/   (tracked, cited by historical docs; deliberately NOT moved)
 ```
 
-### Migration list (do NOT run; the owner decides each line)
+Each top-level folder has a README. Most of `studio-work` is untracked, so only the kit code, the scenes, the READMEs
+and the move log are in git; `_archive/`, `_to_delete/` and rebuildable kit output are git-ignored. The kit is not
+wired into the app, Dockerfile or server (`Dockerfile.dockerignore` still excludes `studio-work`), by decision.
+`studio-work/studio` and `studio-work/studio-app` are working directories the code expects; do not move them.
+
+### Migration list (original plan; status in `studio-work/MOVES.md`)
 
 | Now | Proposed | Note |
 |---|---|---|

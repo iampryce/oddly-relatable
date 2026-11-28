@@ -33,20 +33,21 @@ Updated 2026-11-28. Longer detail lives in the docs linked in section 5; this fi
   them to this style (not done yet).
 
 ## 4. Current status
-**Merged:** New short wizard (#107, migration 0017), Rivet name (#106), `docs/studios.md` plan and this direction.
+**Merged:** New short wizard (#107, migration 0017), Rivet name (#106), `docs/studios.md` plan and this direction,
+and the `studio-work` restructure to the target tree (steps 1-5; log in `studio-work/MOVES.md`).
 CI and Deploy on main were green before the docs commits.
 
 **In progress:**
-- Cleanup listing (worktrees, duplicate kit copies, bulk renders, `~/Documents` duplicates). Step 1 is list-only and
-  waits for the owner's approval before anything is removed.
-- Hash scan of `~/Documents` for duplicates is done (`dups.json` in the session scratchpad); the report is not sent yet.
+- Cleanup: worktrees and merged branches are removed. `studio-work/_to_delete/` (621 MB) is staged and waits for the
+  owner's OK to empty. Uncommitted work was saved to `backup/asset-import-pr1`, `backup/cinematic-mode`,
+  `backup/3d-camera` and `backup/clean-dashboard`; leave `backup/*` alone.
 
 **Blocked / waiting on the owner:**
 - The new stickman reference image (flat cap, grey hair) is not on disk. Save it (for example `studio-work/refs/`);
   then it goes to `_shared/cast/` with its source noted (WaveSpeed).
 - Approval of the cleanup list.
 
-**Unsaved work found (do NOT delete these worktrees):** `.claude/worktrees/agent-a30969db7472ca6b1` holds the
+**Saved work to land (renumber migrations first):** `.claude/worktrees/agent-a30969db7472ca6b1` holds the
 uncommitted asset provenance / Import screen / pose dimension work (migration `0016_asset_dimension_provenance`);
 `agent-a86ba0e5d041e5c90` holds the uncommitted cinematic mode (`0017_episode_mode`); `agent-a75e7540a9cbf6959` holds
 3D camera edits. Both migrations collide with main's `0016_episode_style` and `0017_episode_kind` and must be renumbered
@@ -69,8 +70,10 @@ yet verified; the Mac has no ffmpeg or numpy, so some local API tests fail (same
 - `DECISIONS.md` (repo root, the decisions register; there is no `docs/DECISIONS.md`): decisions, including 2026-11-28.
 - `docs/character-and-set-kit.md`: identity layers, house-style rules, asset kit recipe.
 - `studio-app/docs/`: deployment, maintenance, sets, voice, audio-first, GPU.
-- Cast references: `_shared/cast/` (planned; the new reference goes here) and `studio-work/refs/` (to be created).
-- Kit code: `studio-work/kit-proof/` and `cartoon-short-kit/` (both untracked).
+- Cast references: `studio-work/_shared/cast/` (empty; the new reference goes here). Legacy masters: `studio-work/_archive/legacy-ep15-style/masters/`.
+- Kit code: `studio-work/_shared/kits/{kit-proof,cartoon-short-kit}/`; scenes in `studio-work/stick-man/explainer-shorts/`.
+  Render: `WEB=<scene dir> node render-gpu.mjs <outdir> "0-719"` from `kits/kit-proof`. Not wired into the app or Docker.
+- Style guide: `docs/RIVET-STYLE-GUIDE.md` (still the old style).
 
 ## 6. Handoff rule
 At the end of each session, update section 4 (Current status) and commit it, so the next session starts correctly.
