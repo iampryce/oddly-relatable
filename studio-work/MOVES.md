@@ -9,3 +9,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/episode-14 | studio-work/_archive/episode-14 | owner decides if legacy |
 | 2026-11-28 | studio-work/stick-cast/approved | studio-work/_archive/legacy-ep15-style/masters | Episode 15 masters; approved by name 2026-11-28 |
 | 2026-11-28 | studio-work/stick-cast/ep15-audio | studio-work/stick-man/remake-audio/episode-15/audio | audio kept for a Remake Audio test in the new style |
+| 2026-11-28 | studio-work/stick-cast/{ep15-* stills, clips, cuts, plans; QA images; assemble scripts; style; ref-acting; master prompt} | studio-work/_archive/legacy-ep15-style/stick-cast-ep15 | LEGACY style |
