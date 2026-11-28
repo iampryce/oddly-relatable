@@ -1,0 +1,39 @@
+<!doctype html><meta charset=utf-8><body style="margin:0;background:#fff"><canvas id=c width=1920 height=1080></canvas><script>
+// FREE test frame: a flat outlined code-drawn set + a placeholder stickman in the NEW style (white shaded head, blush,
+// thin black limbs, mitten hands/shoes, white blob torso, grey ground shadow, identity = flat cap + grey tufts).
+// The stickman here is drawn in code ONLY to judge set/character fit; the real one is the owner's WaveSpeed raster.
+const c=document.getElementById('c'),g=c.getContext('2d');const K='#1b1b1f',LW=7;
+g.lineJoin=g.lineCap='round';
+const R=(x,y,w,h,f,r=0)=>{g.beginPath();g.roundRect(x,y,w,h,r);g.fillStyle=f;g.fill();g.lineWidth=LW;g.strokeStyle=K;g.stroke()};
+// set: flat wall, floor, window, shelf, workbench, planks, tape on the wall
+g.fillStyle='#f4efe6';g.fillRect(0,0,1920,1080);
+g.fillStyle='#d9c7a8';g.fillRect(0,760,1920,320);g.beginPath();g.moveTo(0,760);g.lineTo(1920,760);g.lineWidth=LW;g.strokeStyle=K;g.stroke();
+R(1300,160,360,300,'#cfe8f5',10);g.beginPath();g.moveTo(1480,160);g.lineTo(1480,460);g.moveTo(1300,310);g.lineTo(1660,310);g.stroke();
+R(140,220,420,26,'#b9835a',6);R(180,150,70,70,'#e9b44c',8);R(300,170,90,50,'#7fb069',8);R(430,130,60,90,'#e07a5f',8);
+R(1050,620,640,40,'#b9835a',8);R(1090,660,40,140,'#9a6b45',6);R(1610,660,40,140,'#9a6b45',6);
+for(let i=0;i<3;i++)R(120,640+i*34,300,30,'#e6c28b',4);
+R(1120,590,120,30,'#e9b44c',6);
+// ground shadow
+g.fillStyle='rgba(80,80,90,.28)';g.beginPath();g.ellipse(820,800,170,26,0,0,7);g.fill();
+// legs + shoes
+const L=(x1,y1,x2,y2)=>{g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.lineWidth=11;g.strokeStyle=K;g.stroke()};
+L(790,640,775,785);L(850,640,870,785);
+for(const sx of[760,880]){g.beginPath();g.ellipse(sx,792,38,20,0,0,7);g.fillStyle=K;g.fill()}
+// arms (left raised with hammer, right on hip) + mitten hands
+L(745,520,690,470);L(690,470,700,400);L(895,520,950,580);L(950,580,905,625);
+for(const[hx,hy]of[[700,392],[900,630]]){g.beginPath();g.arc(hx,hy,24,0,7);g.fillStyle=K;g.fill()}
+R(690,330,24,70,'#9a6b45',4);R(655,305,100,44,'#8d99ae',8);
+// white blob torso
+g.beginPath();g.ellipse(820,560,100,125,0,0,7);g.fillStyle='#fff';g.fill();g.lineWidth=LW;g.strokeStyle=K;g.stroke();
+// head: large white, soft grey shading
+const hx=820,hy=330;let gr=g.createRadialGradient(hx-40,hy-50,20,hx,hy,150);gr.addColorStop(0,'#fff');gr.addColorStop(.7,'#fafafa');gr.addColorStop(1,'#d5d8de');
+g.beginPath();g.ellipse(hx,hy,150,140,0,0,7);g.fillStyle=gr;g.fill();g.lineWidth=LW;g.strokeStyle=K;g.stroke();
+// tufts + flat cap
+g.lineWidth=6;for(const[a,b]of[[-150,-10],[-160,25],[150,-10],[160,25]]){g.beginPath();g.moveTo(hx+a*.93,hy+b);g.quadraticCurveTo(hx+a*1.15,hy+b-20,hx+a*1.1,hy+b+18);g.strokeStyle='#9aa0a8';g.stroke()}
+g.beginPath();g.moveTo(hx-135,hy-70);g.quadraticCurveTo(hx,hy-190,hx+135,hy-70);g.lineTo(hx+135,hy-55);g.lineTo(hx-135,hy-55);g.closePath();g.fillStyle='#8a5a3b';g.fill();g.lineWidth=LW;g.strokeStyle=K;g.stroke();
+g.beginPath();g.ellipse(hx+130,hy-52,70,14,0,0,7);g.fillStyle='#8a5a3b';g.fill();g.stroke();
+// eyes (big), blush, smile
+for(const ex of[hx-55,hx+55]){g.beginPath();g.ellipse(ex,hy-5,38,44,0,0,7);g.fillStyle='#fff';g.fill();g.lineWidth=5;g.strokeStyle=K;g.stroke();g.beginPath();g.arc(ex+8,hy,15,0,7);g.fillStyle=K;g.fill()}
+g.fillStyle='rgba(244,143,177,.65)';for(const bx of[hx-95,hx+95]){g.beginPath();g.ellipse(bx,hy+50,24,15,0,0,7);g.fill()}
+g.beginPath();g.arc(hx,hy+55,34,.2,Math.PI-.2);g.lineWidth=6;g.strokeStyle=K;g.stroke();
+window.ready=true;</script>
