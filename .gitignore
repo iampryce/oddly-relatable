@@ -50,3 +50,15 @@ studio-app/web/.next/
 studio-app/web/*.tsbuildinfo
 __pycache__/
 studio-app/api/*.db
+
+# studio-work restructure (2026-11-28): bulk archive and staging are local only; kit render output is rebuildable
+studio-work/_archive/*
+!studio-work/_archive/README.md
+studio-work/_to_delete/
+studio-work/_shared/kits/*/frames*/
+studio-work/_shared/kits/*/out/
+studio-work/_shared/kits/*/stills/
+studio-work/_shared/kits/*/work/
+studio-work/_shared/kits/*/vendor-src/
+studio-work/_shared/kits/*/node_modules/
+
