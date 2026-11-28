@@ -15,3 +15,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/stick-cast/sets | studio-work/_shared/sets | painted sets; whether they suit the new style is an open decision |
 | 2026-11-28 | studio-work/stick-cast/build | studio-work/_archive/stick-cast-experiments/build | experiment |
 | 2026-11-28 | studio-work/stick-cast/build-final | studio-work/_archive/stick-cast-experiments/build-final | experiment |
+| 2026-11-28 | studio-work/stick-cast/talk-run | studio-work/_archive/stick-cast-experiments/talk-run | experiment |
