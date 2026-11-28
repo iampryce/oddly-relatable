@@ -1,12 +1,8 @@
 {
   "key": "uncle-mortimer",
   "name": "Uncle Mortimer",
-  "note": "Native 3D character spec (3D camera, Gate 1 v2). Every number was measured once from the approved neutral pose (asset 89, 610x1425, figure 1400 px tall); the 3D character is built from these numbers only. Positions are px of that picture (x right, y down); outlines (hair, hands, torso) are traced along the centre of the art's ink line; the hair outline is the visible edge, closed under the head by the hidden points. Face numbers are fractions of the head radius (x to the viewer's right in the front view, y down).",
+  "note": "Native 3D character spec (3D camera, Gate 1). Measured once from the approved neutral pose (asset 89) and its acting rig; the 3D character is built from these numbers only, never from the picture. Lengths are px of that picture (figure 1400 px tall); face numbers are fractions of the head radius, x to the viewer's right in the front view, y down; hair tufts are [x, y, z, radius].",
   "px_per_unit": 1000,
-  "measured": {
-    "note": "the approved art, outside edge to outside edge of the ink, px",
-    "figure_height": 1400, "line": 10, "head_width": 463, "vest_width": 238, "shoulder_span": 244, "arm": 15, "leg": 14.5
-  },
   "colours": {
     "ink": [14, 14, 14],
     "skin": [254, 231, 204],
@@ -17,28 +13,22 @@
     "shirt": [247, 247, 247],
     "shoes": [136, 85, 47]
   },
-  "centre_x": 304.5,
-  "line": 10,
-  "head": {"cx": 304.5, "cy": 332, "r": 226.5, "depth": 0.94, "ears": {"x": 1.064, "y": 0.057, "r": 0.2}},
+  "line": 17,
+  "head": {"r": 220, "neck_to_centre": 222, "depth": 0.94, "ears": {"x": 1.0, "y": 0.06, "r": 0.19}},
   "hair": {
-    "depth": [-0.95, -0.06],
-    "bevel": 0.12,
-    "outline": [[65, 300], [37, 290], [30, 272], [40, 257], [52, 256], [35, 245], [32, 232], [45, 222], [60, 218], [40, 212],
-                [37, 197], [47, 177], [70, 160], [102, 150], [115, 120], [150, 80], [200, 45], [250, 25], [310, 16], [360, 17],
-                [400, 27], [425, 50], [435, 85], [435, 97], [450, 94], [490, 100], [520, 125], [540, 165], [542, 210],
-                [537, 260], [530, 295], [430, 360], [304, 380], [180, 360]]
+    "style": "swept-back",
+    "mass": {"c": [0.08, -0.32, -0.56], "r": [1.05, 1.1, 0.95]},
+    "tufts": [[-0.97, -0.5, -0.05, 0.2], [-1.05, -0.22, -0.08, 0.19], [-1.04, 0.05, -0.12, 0.16]]
   },
   "face": {
-    "eyes": {"x": 0.364, "y": 0.0, "rx": 0.34, "ry": 0.4, "line": 0.044, "pupil_rx": 0.07, "pupil_ry": 0.11, "pupil_in": 0.146, "pupil_dy": 0.04},
-    "brows": {"outer": [-0.605, -0.48], "peak": [-0.33, -0.63], "inner": [-0.15, -0.57], "line": 0.08},
-    "mouth": {"y": 0.675, "w": 0.366, "line": 0.044, "bend": 0},
-    "nose": null,
-    "plate_radius": 1.6
+    "eyes": {"x": 0.37, "y": 0.0, "rx": 0.33, "ry": 0.4, "line": 0.045, "pupil_r": 0.114, "pupil_in": 0.14, "pupil_dy": 0.04},
+    "brows": {"x": 0.39, "y": -0.58, "w": 0.46, "arch": 0.09, "line": 0.075, "tilt": 0},
+    "mouth": {"y": 0.7, "w": 0.42, "line": 0.04, "bend": 0},
+    "nose": null
   },
   "torso": {
-    "depth_ratio": 0.62,
-    "profile": [[0, 922], [60, 918], [108, 910], [113, 880], [114, 850], [111.5, 800], [109, 750], [104, 700], [97, 640],
-                [95, 600], [85, 575], [55, 555], [0, 548]]
+    "top": 552, "bottom": 975, "width": 243, "depth_ratio": 0.62,
+    "profile": [[0, 0], [0.82, 0.01], [0.97, 0.07], [1.0, 0.2], [0.98, 0.7], [0.94, 0.82], [0.8, 0.93], [0.56, 0.99], [0, 1.0]]
   },
   "clothing": {
     "kind": "cardigan",
@@ -47,15 +37,10 @@
     "buttons": {"x": 8, "ys": [735, 785, 835, 885], "r": 10},
     "pockets": {"x": 85, "y": 838, "w": 50, "h": 18}
   },
-  "shoulders": {"x": 114.25, "y": 632},
-  "hips": {"x": 64, "y": 922},
-  "arm": {"length": 265, "thickness": 15, "wrist": [132, 890]},
-  "leg": {"length": 400, "thickness": 14.5},
-  "hand": {
-    "outline": [[124, 890], [115, 892], [105, 900], [98, 910], [96, 927], [97, 943], [103, 953], [113, 962], [123, 967],
-                [133, 967], [140, 960], [141, 955], [135, 947], [133, 938], [133, 920], [142, 920], [143, 930], [148, 938],
-                [153, 941], [162, 938], [165, 930], [162, 915], [157, 905], [150, 898], [142, 892], [139, 890]],
-    "thickness": 22
-  },
-  "shoe": {"w": 150, "h": 92, "length": 190, "drop": 90}
+  "shoulders": {"x": 114, "below_top": 79},
+  "hips": {"x": 62, "y": 969},
+  "arm": 303,
+  "leg": 353,
+  "shoe": {"w": 150, "h": 93, "drop": 90},
+  "hand": {"r": 30}
 }
