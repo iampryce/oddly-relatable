@@ -7,7 +7,7 @@
 | **AP-50** | **This confirmation establishes ownership and architectural direction. It is NOT blanket approval to execute every infrastructure change.** Each separate implementation gate still needs the owner's approval. Acknowledging it required no install, deployment, SSH change, firewall change or code change. |
 # Decisions Register — Stickman Comedy Studio
 
-**Last updated:** 2026-11-11 · Statuses: **APPROVED** (owner has decided) · **PROPOSED** (recommendation awaiting approval) · **OPEN** (needs owner input).
+**Last updated:** 2026-11-28 · Statuses: **APPROVED** (owner has decided) · **PROPOSED** (recommendation awaiting approval) · **OPEN** (needs owner input).
 Rule: nothing PROPOSED is treated as decided. The owner has final approval; ChatGPT is the creative and architectural decision partner.
 
 ## A. Approved decisions
@@ -221,6 +221,18 @@ Nothing below is approved. The owner asked for an architecture assessment; **no 
 | **G18** | How the repository itself is backed up (it has no `.git`) | Decide separately from Garage | **OPEN** |
 
 Key facts behind these: the renderer **rejects URLs** and needs a real local `output/`; nothing in the repository uses S3 or Garage; Garage (official docs, v2.5.0 examples) has **no object versioning, no object lock, no bucket policies**, partial lifecycle, SSE-C only; bucket quotas, a no-create-bucket key flag and a separate delete permission are **unconfirmed**.
+
+### Owner decisions, 2026-11-28 (workflow, studios, style)
+
+| # | Decision | Status |
+|---|---|---|
+| D-0 | **Workflow:** work on `main` only, small commits, push straight to main, no branches or PRs; `pull --rebase` and local tests before each push; no app-code push while a Deploy run is in progress; never force-push or rewrite history; no AI author lines; no paid call without the owner's go and a cost shown first; nothing deleted without approval (move to `_to_delete/` first). | APPROVED |
+| D-1 | **Three studios in one dashboard** with a studio switcher and a shared core: Stick Man Studio, Cinematic Studio, Kids Stories Studio. Only Stick Man Studio is active. Detail in `docs/studios.md`. | APPROVED |
+| D-2 | **Unlock gates** for the other two studios: (1) one finished 30 s Explainer Short approved; (2) one finished Remake Audio short approved; (3) animation engine chosen with real costs known; (4) licences checked and a variety guard in place. | APPROVED |
+| D-3 | **Stick Man Studio has two paths:** Explainer Shorts (narrated, action acting) and Remake Audio (talking, lip-sync). Both use code-drawn sets and locked character masters. Goal: solve acting, lip-sync and character drift before any other studio starts. | APPROVED |
+| D-4 | **New stickman style** (WaveSpeed-generated): large white head with soft grey shading, big eyes, pink blush, expressive face, thin black limbs, rounded black mitten hands and shoes, white blob torso, soft grey ground shadow, identity carried by hat and hair. **Supersedes the character look** in the 2026-11-11 locked identity above; the Episode 15 style, masters and storyboard frames are **legacy** (archive plan in `docs/studios.md`; nothing moved yet). | APPROVED |
+| D-5 | AI draws still images only; code does the motion, unless the engine shootout shows otherwise. | APPROVED |
+| D-6 | **Still open:** do the kit's painted sets suit the new style; cut-out route vs whole-frame generation; rebuild or replace the kit characters; parent brand name (Oddly Relatable vs Rivet AI Studio); the engine shootout; the sensitive lines in Episode 15. `RIVET-STYLE-GUIDE.md` and `house_style.py` still describe the old look and are not yet updated. | OPEN |
 
 ## B. Open and proposed: visual identity (blocking the Bible)## B. Open and proposed: visual identity (blocking the Bible)## B. Open and proposed: visual identity (blocking the Bible)
 
