@@ -12,3 +12,4 @@ and one commit per move.
 | 2026-11-28 | studio-work/stick-cast/{ep15-* stills, clips, cuts, plans; QA images; assemble scripts; style; ref-acting; master prompt} | studio-work/_archive/legacy-ep15-style/stick-cast-ep15 | LEGACY style |
 | 2026-11-28 | studio-work/stick-cast/react | studio-work/_archive/stick-cast-experiments/react | GPU-generated experiment, 2.8 GB |
 | 2026-11-28 | studio-work/stick-cast/acting-test | studio-work/_archive/stick-cast-experiments/acting-test | experiment, 0.8 GB |
+| 2026-11-28 | studio-work/stick-cast/sets | studio-work/_shared/sets | painted sets; whether they suit the new style is an open decision |
