@@ -76,6 +76,10 @@ def character(c: Character, assets: list[CharacterAsset], rig_checks: dict | Non
             "rig_check_job": {"id": rig_job.id, "status": rig_job.status} if rig_job is not None else None,
             "assets": [{"id": a.id, "kind": a.kind, "expression": a.expression, "status": a.status, "width": a.width, "height": a.height,
                         "style_version": a.style_version or "v1",
+                        # the pose dimension (None = the default: standing, front, front view, full) and provenance
+                        "posture": a.posture, "body_turn": a.body_turn, "view": a.view, "framing": a.framing,
+                        "parent_asset_id": a.parent_asset_id, "imported": a.provenance is not None, "sha256": a.sha256,
+                        "provenance": _provenance_summary(a),
                         "rig_check": (rig_checks or {}).get(str(a.id)) if a.kind == "pose" and a.status in ("approved", "review") else None,
                         "url": storage().url(a.storage_key), "created_at": ts(a.created_at)} for a in assets if a.status != "binned"]}
 
@@ -88,3 +92,8 @@ def publish(p: PublishRecord | None) -> dict | None:
             "approved_by": p.approved_by, "approved_at": ts(p.approved_at), "approved_revision": p.approved_revision,
             "approved_video_asset_id": p.approved_video_asset_id, "youtube_video_id": p.youtube_video_id,
             "youtube_url": p.youtube_url, "error": p.error}
+
+
+def _provenance_summary(a: CharacterAsset) -> dict | None:
+    from .asset_import import summary
+    return summary(a)

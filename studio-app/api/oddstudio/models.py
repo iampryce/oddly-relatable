@@ -163,7 +163,37 @@ class CharacterAsset(Base):
     figure_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="review")  # review | approved | rejected
     style_version: Mapped[str] = mapped_column(String(4), default="v1")   # house style the pose was drawn in (v1 | v2)
+    # The pose dimension (migration 0016, asset_import.py). NULL = the default the studio has always drawn: standing,
+    # body facing front, seen from the front, full figure. Kinds added with it (plain strings): mask (a figure-only
+    # alpha cut-out of its parent pose, polygon spec in provenance), expression-sheet, back-view.
+    posture: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)     # standing | seated
+    body_turn: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)   # front | left | right
+    view: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)        # front | back
+    framing: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)     # full | chest_up | bust
+    # where an imported image came from (manifest: prompt, references with sha256, generator, original path); NULL = made
+    # by the studio itself
+    provenance: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    # the asset this one belongs to (a mask to its pose, a crop to its sheet); a plain id, no foreign key
+    parent_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+DIMENSION_VALUES = {"posture": ("standing", "seated"), "body_turn": ("front", "left", "right"), "view": ("front", "back"),
+                    "framing": ("full", "chest_up", "bust")}
+DIMENSION_DEFAULT = {"posture": "standing", "body_turn": "front", "view": "front", "framing": "full"}
+
+
+def standard_pose():
+    """SQL filter: a pose in the default dimension (standing, front, front view, full figure; NULL counts as the
+    default, so every row from before migration 0016 matches). The studio's existing pipelines (expressions, the rig,
+    the renderers, the style anchors) use only these; a seated or turned pose never stands in for a standing one."""
+    from sqlalchemy import and_, or_
+    col = CharacterAsset
+    return and_(*[or_(getattr(col, k).is_(None), getattr(col, k) == v) for k, v in DIMENSION_DEFAULT.items()])
+
+
+def is_standard(a: "CharacterAsset") -> bool:
+    return all(getattr(a, k, None) in (None, v) for k, v in DIMENSION_DEFAULT.items())
 
 
 class StoryboardScene(Base):

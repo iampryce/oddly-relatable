@@ -223,8 +223,10 @@ def restore(db: Session, item: BinItem, user: str) -> None:
         a = db.get(CharacterAsset, int(item.ref))
         if a is not None:
             want = (item.extra or {}).get("status") or "review"
-            taken = db.query(CharacterAsset).filter_by(character_id=a.character_id, kind="pose", expression=a.expression,
-                                                       status="approved").first()
+            from .routes_characters import same_dimension
+            taken = next((o for o in db.query(CharacterAsset).filter_by(character_id=a.character_id, kind="pose",
+                                                                        expression=a.expression, status="approved")
+                          if same_dimension(o, a)), None)
             a.status = "review" if want == "approved" and taken else want   # never two approved poses for one expression
             db.flush()
             refresh_art(db, db.get(Character, a.character_id))

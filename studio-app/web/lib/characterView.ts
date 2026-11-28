@@ -1,8 +1,16 @@
 // Characters page view helpers (owner request 2026-11-21): collapsed cards, grouping, search, hidden extra poses.
+
+// A studio pose in the default dimension (standing, front; every pose from before the pose dimension). Imported assets
+// and seated or turned poses are shown in the Imported panel and decided there, one by one.
+export function isStandardPose(a: any): boolean {
+  return a.kind === 'pose' && !a.imported && [['posture', 'standing'], ['body_turn', 'front'], ['view', 'front'], ['framing', 'full']]
+    .every(([k, v]) => a[k] == null || a[k] === v);
+}
+
 // The body pose's rig check (the pose the acting rig builds the body from), for the collapsed card.
 export function rigStatus(c: any): {label: string; tone: string} {
   if (c.locked) return {label: 'rig: repository art', tone: ''};
-  const approved = c.assets.filter((a: any) => a.kind === 'pose' && a.status === 'approved');
+  const approved = c.assets.filter((a: any) => isStandardPose(a) && a.status === 'approved');
   if (!approved.length) return {label: 'rig: no approved pose', tone: 'warn'};
   if (c.rig_check_job) return {label: `rig: check ${c.rig_check_job.status}`, tone: 'warn'};
   const body = approved.find((a: any) => a.rig_check?.role === 'body');
@@ -14,15 +22,15 @@ export function rigStatus(c: any): {label: string; tone: string} {
 // already has an approved pose (e.g. body pose candidates). Superseded, rejected and rig-failed poses stay hidden
 // until "show all poses".
 export function visiblePoses(assets: any[], all: boolean): any[] {
-  const poses = assets.filter((a: any) => a.kind === 'pose');
+  const poses = assets.filter(isStandardPose);
   if (all) return poses;
   return poses.filter((p: any) => p.status === 'approved' || p.status === 'review');
 }
 
 // A pose awaiting review for an expression that already has an approved pose: approving it replaces that pose.
 export function isCandidate(p: any, assets: any[]): boolean {
-  return p.kind === 'pose' && p.status === 'review' &&
-    assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && a.expression === p.expression);
+  return isStandardPose(p) && p.status === 'review' &&
+    assets.some((a: any) => isStandardPose(a) && a.status === 'approved' && a.expression === p.expression);
 }
 
 // What a pose card says about its rig check. Approved poses: the result, or the job when one is queued or running,
@@ -48,7 +56,7 @@ export function poseRigText(p: any, job: {id: number; status: string} | null): {
 // The "Run rig check" button: some approved pose has no result and no check is queued or running.
 export function needsRigCheck(c: any): boolean {
   if (c.locked || c.rig_check_job) return false;
-  return c.assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && !a.rig_check);
+  return c.assets.some((a: any) => isStandardPose(a) && a.status === 'approved' && !a.rig_check);
 }
 
 // A job the page started and follows: queued, running (with progress), then the result or the error.

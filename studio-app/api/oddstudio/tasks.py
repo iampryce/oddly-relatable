@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from . import engine, house_style, writer
 from .config import REPO_ROOT, get_settings
-from .models import Asset, Character, CharacterAsset, Episode, Event, Idea, Job, PublishRecord, ScriptVersion, StoryboardScene, now
+from .models import Asset, Character, CharacterAsset, Episode, Event, Idea, Job, PublishRecord, ScriptVersion, StoryboardScene, now, standard_pose
 from .casting import register_new_characters, writer_characters
 from .providers import ProviderNotConfigured, audio_seconds, image_generate, speak, text_provider
 from .queue import enqueue
@@ -282,7 +282,7 @@ def prepare_characters(ctx: Ctx) -> dict[str, Character]:
         if c.locked or c.art_status != "approved":
             out[c.key] = c
             continue
-        poses = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").all()
+        poses = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").filter(standard_pose()).all()
         folder = ctx.folder("characters", c.key)
         entries = []
         for p in poses:
@@ -377,15 +377,15 @@ def style_reference(ctx: Ctx, version: str = "v1") -> Path | None:
     if version == "v2":
         q = (db.query(CharacterAsset).join(Character, Character.id == CharacterAsset.character_id)
              .filter(CharacterAsset.kind == "pose", CharacterAsset.status == "approved", CharacterAsset.style_version == "v2",
-                     CharacterAsset.expression == "neutral")
+                     CharacterAsset.expression == "neutral", standard_pose())
              .order_by(Character.locked.desc(), CharacterAsset.id))
         a = q.first()
         return storage().get_to_file(a.storage_key, ctx.folder("characters", "_style-v2") / Path(a.storage_key).name) if a else None
     lead = db.query(Character).filter_by(locked=True).order_by(Character.id).first()
     if lead is None:
         return None
-    a = (db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved", expression="neutral").first()
-         or db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved").first())
+    a = (db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved", expression="neutral").filter(standard_pose()).first()
+         or db.query(CharacterAsset).filter_by(character_id=lead.id, kind="pose", status="approved").filter(standard_pose()).first())
     if a is None:
         return None
     return storage().get_to_file(a.storage_key, ctx.folder("characters", "_style") / Path(a.storage_key).name)
@@ -419,7 +419,7 @@ def _reference_for(ctx: Ctx, c: Character, version: str | None = None) -> Path |
     """Consistency anchor: an approved neutral pose, else any approved pose, else the owner's reference image. With a
     style version, only poses drawn in that style anchor (a v1 pose must not pull a v2 drawing back to the old look)."""
     db = ctx.db
-    poses = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose")
+    poses = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose").filter(standard_pose())
     if version:
         poses = poses.filter(CharacterAsset.style_version == version)
     a = (poses.filter_by(status="approved", expression="neutral").first()
@@ -468,7 +468,7 @@ def character_sheet(ctx: Ctx) -> dict:
         statuses = ["review"] if restyle else ["review", "approved"]   # a restyle redraws approved expressions too
         existing = db.query(CharacterAsset).filter(CharacterAsset.character_id == c.id, CharacterAsset.kind == "pose",
                                                    CharacterAsset.expression == exp, CharacterAsset.status.in_(statuses),
-                                                   CharacterAsset.style_version == version).first()
+                                                   CharacterAsset.style_version == version, standard_pose()).first()
         if existing:
             f = storage().get_to_file(existing.storage_key, ctx.folder("characters", c.key, "sheet") / Path(existing.storage_key).name)
         else:

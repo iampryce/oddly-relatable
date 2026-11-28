@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from . import serialize as S
 from .auth import current_user
 from .db import get_db
-from .models import Character, CharacterAsset, Event, Job
+from .models import Character, CharacterAsset, Event, Job, standard_pose
 from .queue import enqueue
 from .storage import storage
 
@@ -41,7 +41,7 @@ VIEW = {
 def neutral_pose(db: Session, c: Character) -> CharacterAsset | None:
     """The approved front pose (the reference for every angle)."""
     return (db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved", expression="neutral")
-            .order_by(CharacterAsset.id.desc()).first())
+            .filter(standard_pose()).order_by(CharacterAsset.id.desc()).first())
 
 
 def approved_angles(db: Session, c: Character) -> dict[str, CharacterAsset]:

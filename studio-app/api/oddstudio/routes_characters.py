@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from . import serialize as S
 from .auth import current_user
 from .db import get_db
-from .models import Character, CharacterAsset, Event
+from .models import DIMENSION_VALUES, Character, CharacterAsset, Event, is_standard, standard_pose
 from .queue import enqueue
 from .settings_store import get_section
 from .storage import storage
@@ -207,8 +207,10 @@ class DecisionIn(BaseModel):
 
 
 def refresh_art(db: Session, c: Character) -> None:
-    """A character's usable expressions are exactly its approved poses; art is approved once any pose is."""
-    approved = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").all()
+    """A character's usable expressions are exactly its approved poses; art is approved once any pose is. Only poses in
+    the default dimension (standing, front; every pose from before migration 0016) count: an approved seated or turned
+    pose is kept for the scenes that ask for it and never stands in for an expression."""
+    approved = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").filter(standard_pose()).all()
     c.expressions = {x.expression: f"p{x.id}" for x in approved}
     if approved:
         if c.default_expression not in c.expressions:
@@ -220,11 +222,18 @@ def refresh_art(db: Session, c: Character) -> None:
         c.art_status, c.registry_path = ("review" if reviewing else "none"), None
 
 
+def same_dimension(a: CharacterAsset, b: CharacterAsset) -> bool:
+    """Two assets in the same pose dimension (NULL = the default: standing, front, front view, full figure)."""
+    from .models import DIMENSION_DEFAULT
+    return all((getattr(a, k) or DIMENSION_DEFAULT[k]) == (getattr(b, k) or DIMENSION_DEFAULT[k]) for k in DIMENSION_VALUES)
+
+
 def decide(db: Session, c: Character, a: CharacterAsset, approve: bool) -> None:
     if approve:
-        # One approved pose per expression: approving a new one retires the previous one.
-        for other in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", expression=a.expression, status="approved"):
-            if other.id != a.id:
+        # One approved asset per kind, expression and pose dimension (and parent, for a mask): approving a new one
+        # retires the previous one. For the studio's own poses (default dimension) this is "one per expression".
+        for other in db.query(CharacterAsset).filter_by(character_id=c.id, kind=a.kind, expression=a.expression, status="approved"):
+            if other.id != a.id and same_dimension(other, a) and (a.kind == "pose" or other.parent_asset_id == a.parent_asset_id):
                 other.status = "rejected"
         a.status = "approved"
     else:
@@ -233,18 +242,24 @@ def decide(db: Session, c: Character, a: CharacterAsset, approve: bool) -> None:
 
 @router.post("/character-assets/{aid}/decision")
 def decide_pose(aid: int, body: DecisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
+    from .asset_import import IMPORTED_KINDS
     a = db.get(CharacterAsset, aid)
-    if a is None or a.kind != "pose":
+    # a studio pose, or an imported asset of any import kind (mask, expression sheet, back view) decided one by one
+    if a is None or not (a.kind == "pose" or (a.provenance is not None and a.kind in IMPORTED_KINDS)):
         raise HTTPException(404, "pose not found")
     c = get_char(db, a.character_id)
     if c.locked:
         raise HTTPException(409, "locked character")
+    if body.decision == "approve" and a.kind == "pose" and is_standard(a) and a.feet is None:
+        raise HTTPException(409, "this pose has no feet anchor (not a cut-out): set its pose dimension or re-import a cut-out")
     decide(db, c, a, body.decision == "approve")
     db.flush()
     refresh_art(db, c)
-    db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: pose '{a.expression}' {a.status} by {user}"))
+    what = "pose" if a.kind == "pose" else a.kind
+    db.add(Event(episode_id=c.episode_id, kind="character", message=f"{c.name}: {what} '{a.expression}' {a.status} by {user}"
+                 + (" (imported)" if a.provenance is not None else "")))
     db.commit()
-    if a.status == "approved":
+    if a.status == "approved" and a.kind == "pose" and is_standard(a):
         queue_rig_check(db, c)
     return out(db, c)
 
@@ -334,11 +349,13 @@ def restyle(cid: int, body: RestyleIn, db: Session = Depends(get_db)):
 
 @router.post("/characters/{cid}/sheet/decision")
 def decide_sheet(cid: int, body: DecisionIn, db: Session = Depends(get_db), user: str = Depends(current_user)):
-    """Approve (or reject) every pose of the sheet that is awaiting review, in one decision."""
+    """Approve (or reject) every pose of the sheet that is awaiting review, in one decision. Imported assets are not
+    part of a sheet: each is decided on its own card."""
     c = get_char(db, cid)
     if c.locked:
         raise HTTPException(409, "locked character")
-    pending = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review").all()
+    pending = [a for a in db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="review")
+               if a.provenance is None]
     if not pending:
         raise HTTPException(409, "no poses are awaiting review")
     from .models import Setting

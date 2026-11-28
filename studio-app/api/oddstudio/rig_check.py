@@ -114,14 +114,14 @@ from .tasks import Ctx, task  # noqa: E402
 @task
 def rig_check(ctx: Ctx) -> dict:
     from . import engine
-    from .models import Character, CharacterAsset
+    from .models import Character, CharacterAsset, standard_pose
     from .storage import storage
     db, job = ctx.db, ctx.job
     c = db.get(Character, job.character_id)
     if c is None or c.locked or c.art_status != "approved":
         return {"checked": 0}
     pid = body_pose_id(c)
-    assets = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").all()
+    assets = db.query(CharacterAsset).filter_by(character_id=c.id, kind="pose", status="approved").filter(standard_pose()).all()
     folder = ctx.folder("rig-checks", c.key)
     poses = []
     for a in assets:

@@ -96,5 +96,52 @@ class MigrationsTest(unittest.TestCase):
                 os.environ["DATABASE_URL"] = old
             config.reset_settings()
 
+    def test_0016_is_additive_and_the_previous_release_keeps_working(self):
+        """0016 only adds six nullable columns to character_assets: a pose the previous release wrote is untouched and
+        reads back with a NULL dimension (the default: standing, front), the previous release's insert (which names none
+        of the new columns) still works, and it downgrades cleanly."""
+        from alembic import command
+        from sqlalchemy import create_engine, inspect
+        from oddstudio import config
+        tmp = Path(tempfile.mkdtemp(prefix="oddstudio-mig16-"))
+        old = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = f"sqlite:///{(tmp / 'm.db').as_posix()}"
+        config.reset_settings()
+        new_cols = {"posture", "body_turn", "view", "framing", "provenance", "parent_asset_id"}
+        # the previous release's insert, exactly the columns it knows (SQLite does not enforce the character's foreign key)
+        insert = ("insert into character_assets (character_id, kind, expression, storage_key, sha256, width, height, status, "
+                  "style_version, created_at) values (1, 'pose', 'neutral', 'characters/x/{n}.png', '', 10, 10, 'approved', "
+                  "'v1', '2026-11-24 00:00:00')")
+        try:
+            cfg = alembic_config()
+            command.upgrade(cfg, "0015")
+            eng = create_engine(os.environ["DATABASE_URL"])
+            before = {c["name"] for c in inspect(eng).get_columns("character_assets")}
+            with eng.begin() as conn:
+                conn.exec_driver_sql(insert.format(n=1))
+            command.upgrade(cfg, "0016")
+            cols = {c["name"]: c for c in inspect(eng).get_columns("character_assets")}
+            self.assertEqual(set(cols) - before, new_cols, "only the six new columns are added")
+            self.assertTrue(before <= set(cols), "no column removed or renamed")
+            self.assertTrue(all(cols[k]["nullable"] for k in new_cols), "all nullable")
+            with eng.begin() as conn:
+                conn.exec_driver_sql(insert.format(n=2))
+                rows = conn.exec_driver_sql("select posture, body_turn, view, framing, provenance, parent_asset_id, status "
+                                            "from character_assets order by id").all()
+            self.assertEqual([tuple(r) for r in rows], [(None,) * 6 + ("approved",)] * 2,
+                             "the old row and the old insert read back with the default dimension (NULL)")
+            command.downgrade(cfg, "0015")
+            self.assertEqual({c["name"] for c in inspect(eng).get_columns("character_assets")}, before)
+            with eng.connect() as conn:
+                self.assertEqual(conn.exec_driver_sql("select count(*) from character_assets").scalar(), 2)
+            eng.dispose()
+        finally:
+            if old is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = old
+            config.reset_settings()
+
+
 if __name__ == "__main__":
     unittest.main()

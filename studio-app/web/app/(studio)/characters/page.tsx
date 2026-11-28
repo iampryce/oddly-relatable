@@ -4,8 +4,9 @@ import {api} from '@/lib/api';
 import {BulkDelete, DeleteButton} from '@/components/BinButtons';
 import {useAction, useApi} from '@/lib/hooks';
 import HeadAngles from '@/components/HeadAngles';
+import {ImportPanel, ImportedAssets} from '@/components/AssetImport';
 import {Empty, ErrorBox} from '@/components/ui';
-import {groupCharacters, imageCost, isCandidate, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
+import {groupCharacters, imageCost, isCandidate, isStandardPose, jobFinished, jobText, needsRigCheck, poseRigText, removable, rigStatus, visiblePoses} from '@/lib/characterView';
 
 const BLANK = {key: '', name: '', description: '', visual_description: '', bubble_style: 'neutral', scope: 'recurring', default_expression: 'neutral', voice: '', voice_style: '', voice_speed: null, skin_tone: ''};
 const SUGGESTED = 'neutral, happy, laughing, shocked, angry, worried, smug, scared';
@@ -67,7 +68,7 @@ function CharacterForm({initial, onDone}: {initial: any; onDone: () => void}) {
 }
 
 function thumbOf(c: any): string | null {
-  const poses = c.assets.filter((a: any) => a.kind === 'pose');
+  const poses = c.assets.filter(isStandardPose);
   const p = poses.find((a: any) => a.status === 'approved' && a.expression === 'neutral') || poses.find((a: any) => a.status === 'approved')
     || poses.find((a: any) => a.status === 'review');
   return p ? p.url : null;
@@ -88,7 +89,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
     api(`/characters/${c.id}/sheet-plan`).then(p => { setPlan(p); setExprs(p.expressions.join(', ')); }).catch(() => {});
   }, [open, c.id, c.locked, c.art_status, plan]);
   const exprList = exprs.split(',').map(x => x.trim()).filter(Boolean);
-  const hasNeutral = c.assets.some((a: any) => a.kind === 'pose' && a.status === 'approved' && a.expression === 'neutral');
+  const hasNeutral = c.assets.some((a: any) => isStandardPose(a) && a.status === 'approved' && a.expression === 'neutral');
   const genSheet = () => {
     if (!window.confirm(`Generate ${c.name}'s sheet: ${imageCost(exprList.length)}?`)) return;
     act.run('gen', () => api(`/characters/${c.id}/sheet`, {body: {expressions: exprList}}));
@@ -106,7 +107,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
     act.run('cands', async () => setFollow((await api(`/characters/${c.id}/body-candidates`, {body: {n: cands, max_usd: cap}})).job));
   };
   const runRigCheck = () => act.run('rig', async () => setFollow((await api(`/characters/${c.id}/rig-check`, {method: 'POST'})).job));
-  const everyPose = c.assets.filter((a: any) => a.kind === 'pose');
+  const everyPose = c.assets.filter(isStandardPose);
   const poses = visiblePoses(c.assets, allPoses);
   const refs = c.assets.filter((a: any) => a.kind === 'reference');
   const sheet = c.assets.find((a: any) => a.kind === 'sheet');
@@ -173,6 +174,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
             <button className="btn sm good" onClick={() => act.run('a', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'approve'}}))}>{p.expression === 'neutral' && hasNeutral ? 'Replace the approved neutral' : 'Approve'}</button>
             <button className="btn sm danger" onClick={() => act.run('r', () => api(`/character-assets/${p.id}/decision`, {body: {decision: 'reject'}}))}>Reject</button></div>}
         </div>))}</div>}
+      <ImportedAssets c={c} reload={reload} />
       {c.art_status === 'approved' && <HeadAngles characterId={c.id} locked={c.locked} />}
       {!c.locked && needsRigCheck(c) && <div className="row small" style={{gap: 6}}><span className="muted">Some approved poses have not been rig-checked.</span>
         <button className="btn sm" disabled={!!act.busy} onClick={runRigCheck}>Run rig check</button><span className="muted">free; never changes an approval</span></div>}
@@ -180,6 +182,7 @@ function CharacterCard({c, reload, used, selectable, selected, onSelect}: {c: an
         Show all poses ({everyPose.length - visiblePoses(c.assets, false).length} superseded, rejected or extra hidden)</label> : null}
       {!c.locked && (
         <div className="stack">
+          <ImportPanel target="character" characterId={c.id} onDone={reload} />
           <div className="row">{refs.map((r: any) => <a key={r.id} href={r.url} target="_blank" rel="noreferrer" className="small">reference</a>)}
             <label className="btn sm" style={{display: 'inline-block', margin: 0}}>Upload visual reference<input type="file" accept="image/png,image/jpeg" hidden onChange={e => upload(e.target.files?.[0])} /></label></div>
           <div><label htmlFor={`exprs-${c.id}`}>Expression sheet (comma separated; neutral is drawn first and anchors the rest; one image each, started only by you)</label>
